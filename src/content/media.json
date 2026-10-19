@@ -1,0 +1,395 @@
+{
+  "generated": "2026-10-19",
+  "palette": "grayscale files for rest state; *-color twins (kind video-color / poster-color) for hover/focus bloom",
+  "fonts": [
+    {
+      "name": "Inter",
+      "licence": "SIL Open Font License 1.1",
+      "source_url": "https://github.com/rsms/inter/blob/master/LICENSE.txt",
+      "npm": "@fontsource-variable/inter 5.3.0 (OFL-1.1)"
+    }
+  ],
+  "icons": [
+    {
+      "name": "Phosphor Icons",
+      "licence": "MIT",
+      "source_url": "https://github.com/phosphor-icons/react/blob/master/LICENSE",
+      "npm": "@phosphor-icons/react 2.1.10 (MIT)"
+    }
+  ],
+  "skipped": [
+    {
+      "source_url": "https://arcade-gpu-tank-demo-beta.vercel.app",
+      "reason": "WebGPU-only (Gfx3Manager). No WebGPU adapter in the remote browser, and the local software adapter loses its device, so it renders blank. Not recorded."
+    }
+  ],
+  "media": [
+    {
+      "file": "media/water-sim.mp4",
+      "kind": "video",
+      "source_url": "https://hybrid-water-sim.vercel.app",
+      "credit": "Hybrid Water Sim by Shifat Masud (live demo screen recording)",
+      "licence": "Shifat Masud's own work; recorded from his public demo for his own portfolio",
+      "notes": "Chosen over water-scene as the better-looking water demo. Controls panel closed and fixed UI hidden. Gentle cursor sweep. Rendered frame by frame on a remote GPU browser with a stepped clock (exact 30fps, no dropped frames). 960x540, 6s, grayscale H.264, faststart, no audio."
+    },
+    {
+      "file": "media/water-sim.webp",
+      "kind": "poster",
+      "source_url": "https://hybrid-water-sim.vercel.app",
+      "credit": "Hybrid Water Sim by Shifat Masud",
+      "licence": "Shifat Masud's own work",
+      "notes": "Poster frame from media/water-sim.mp4, grayscale, 960x540"
+    },
+    {
+      "file": "media/water-tank.mp4",
+      "kind": "video",
+      "source_url": "https://water-scene.vercel.app",
+      "credit": "Water Scene (glass tank) by Shifat Masud (live demo screen recording)",
+      "licence": "Shifat Masud's own work; recorded from his public demo for his own portfolio",
+      "notes": "Extra: the glass tank / bubble scene from water-scene. Dock UI hidden, cropped to the tank. Same stepped-clock capture. 960x540, 6s."
+    },
+    {
+      "file": "media/water-tank.webp",
+      "kind": "poster",
+      "source_url": "https://water-scene.vercel.app",
+      "credit": "Water Scene (glass tank) by Shifat Masud",
+      "licence": "Shifat Masud's own work",
+      "notes": "Poster frame from media/water-tank.mp4, grayscale, 960x540"
+    },
+    {
+      "file": "media/jelly-drag.mp4",
+      "kind": "video",
+      "source_url": "https://jelly-drag.vercel.app",
+      "credit": "Jelly Drag by Shifat Masud (live demo screen recording)",
+      "licence": "Shifat Masud's own work; recorded from his public demo for his own portfolio",
+      "notes": "Three horizontal drags through the carousel. Real-time capture on a remote GPU browser (about 50fps), resampled to 30fps. The carousel photos are the ones inside his demo. 960x540, 6s."
+    },
+    {
+      "file": "media/jelly-drag.webp",
+      "kind": "poster",
+      "source_url": "https://jelly-drag.vercel.app",
+      "credit": "Jelly Drag by Shifat Masud",
+      "licence": "Shifat Masud's own work",
+      "notes": "Poster frame from media/jelly-drag.mp4, grayscale, 960x540"
+    },
+    {
+      "file": "media/fluid-matter.mp4",
+      "kind": "video",
+      "source_url": "https://fluid-matter-physics.vercel.app",
+      "credit": "Fluid Matter Physics by Shifat Masud (live demo screen recording)",
+      "licence": "Shifat Masud's own work; recorded from his public demo for his own portfolio",
+      "notes": "Shapes flung upward from the pile. Real-time remote GPU capture. Cropped to the lower 960x540, where the action is. The demo is visually sparse (shapes rest on the floor), so this is the weakest clip."
+    },
+    {
+      "file": "media/fluid-matter.webp",
+      "kind": "poster",
+      "source_url": "https://fluid-matter-physics.vercel.app",
+      "credit": "Fluid Matter Physics by Shifat Masud",
+      "licence": "Shifat Masud's own work",
+      "notes": "Poster frame from media/fluid-matter.mp4, grayscale, 960x540"
+    },
+    {
+      "file": "media/geo-slash.mp4",
+      "kind": "video",
+      "source_url": "https://geo-slash.vercel.app",
+      "credit": "Geo-Slash by Shifat Masud (live demo screen recording)",
+      "licence": "Shifat Masud's own work; recorded from his public demo for his own portfolio",
+      "notes": "Fast slash sweeps across the shapes. Stepped-clock capture. No camera prompt appeared. The demo UI (top-left dots, bottom toolbar) is left in. 960x540, 6s."
+    },
+    {
+      "file": "media/geo-slash.webp",
+      "kind": "poster",
+      "source_url": "https://geo-slash.vercel.app",
+      "credit": "Geo-Slash by Shifat Masud",
+      "licence": "Shifat Masud's own work",
+      "notes": "Poster frame from media/geo-slash.mp4, grayscale, 960x540"
+    },
+    {
+      "file": "media/audio-viz.mp4",
+      "kind": "video",
+      "source_url": "https://ncs-style-audio-viz.vercel.app",
+      "credit": "NCS-style Audio Viz by Shifat Masud (live demo screen recording)",
+      "licence": "Shifat Masud's own work; recorded from his public demo for his own portfolio",
+      "notes": "A synthetic beat was uploaded (made locally, no third-party music) and played. The panel is closed. Stepped-clock capture with live audio, so the bloom is very bright. Cropped to 960x540 around the particle sphere. 6s."
+    },
+    {
+      "file": "media/audio-viz.webp",
+      "kind": "poster",
+      "source_url": "https://ncs-style-audio-viz.vercel.app",
+      "credit": "NCS-style Audio Viz by Shifat Masud",
+      "licence": "Shifat Masud's own work",
+      "notes": "Poster frame from media/audio-viz.mp4, grayscale, 960x540"
+    },
+    {
+      "file": "media/shade-ds.mp4",
+      "kind": "video",
+      "source_url": "https://shade-ds.vercel.app",
+      "credit": "Shade DS by Shifat Masud (live demo screen recording)",
+      "licence": "Shifat Masud's own work; recorded from his public demo for his own portfolio",
+      "notes": "Hover, then three clicks on \"Do Magic\" (confetti). Local headless capture at 60fps (light page). Centre-cropped to 960x540. 6s."
+    },
+    {
+      "file": "media/shade-ds.webp",
+      "kind": "poster",
+      "source_url": "https://shade-ds.vercel.app",
+      "credit": "Shade DS by Shifat Masud",
+      "licence": "Shifat Masud's own work",
+      "notes": "Poster frame from media/shade-ds.mp4, grayscale, 960x540"
+    },
+    {
+      "file": "media/tex-01.webp",
+      "kind": "texture",
+      "source_url": "https://www.artic.edu/artworks/36848",
+      "image_url": "https://www.artic.edu/iiif/2/2eb727fe-0e5f-24fc-d07e-463e8cce57d0/full/3000,/0/default.jpg",
+      "credit": "Gustave Le Gray, \"The Great Wave, S\u00e8te\", 1857. Art Institute of Chicago.",
+      "licence": "CC0 1.0 (Art Institute of Chicago Open Access; work is public domain)",
+      "notes": "Albumen print of a breaking wave and heavy sky. Strongest image in the set. Grayscale, autocontrast."
+    },
+    {
+      "file": "media/tex-02.webp",
+      "kind": "texture",
+      "source_url": "https://www.artic.edu/artworks/126479",
+      "image_url": "https://www.artic.edu/iiif/2/20964c63-4ac9-c086-326f-3da495cc77a6/full/3000,/0/default.jpg",
+      "credit": "Gustave Le Gray, \"Brig on the Water\", 1856. Art Institute of Chicago.",
+      "licence": "CC0 1.0 (Art Institute of Chicago Open Access; work is public domain)",
+      "notes": "Silver light on dark sea, a liquid-metal / mercury feel. Mount edge cropped."
+    },
+    {
+      "file": "media/tex-03.webp",
+      "kind": "texture",
+      "source_url": "https://www.artic.edu/artworks/126486",
+      "image_url": "https://www.artic.edu/iiif/2/f901a0c3-bca4-46fb-6c4d-4d91dbd8a29e/full/3000,/0/default.jpg",
+      "credit": "Gustave Le Gray, \"Seascape, Normandy\", 1856/57. Art Institute of Chicago.",
+      "licence": "CC0 1.0 (Art Institute of Chicago Open Access; work is public domain)",
+      "notes": "Soft silver sea with sun glints. Low contrast, good as a quiet background. Mount edge cropped."
+    },
+    {
+      "file": "media/tex-04.webp",
+      "kind": "texture",
+      "source_url": "https://www.artic.edu/artworks/11311",
+      "image_url": "https://www.artic.edu/iiif/2/5feaa782-f8c4-3c4d-6094-ebe15d6d0ca2/full/3000,/0/default.jpg",
+      "credit": "Louis Auguste Lep\u00e8re, \"Breaking Waves, September Tide\", 1901. Art Institute of Chicago.",
+      "licence": "CC0 1.0 (Art Institute of Chicago Open Access; work is public domain)",
+      "notes": "Woodcut of breaking surf, graphic and high contrast. Paper margin cropped."
+    },
+    {
+      "file": "media/tex-05.webp",
+      "kind": "texture",
+      "source_url": "https://www.artic.edu/artworks/77333",
+      "image_url": "https://www.artic.edu/iiif/2/05cd1ba7-67d1-96c5-0e78-2eb4114b65e7/full/3000,/0/default.jpg",
+      "credit": "Katsushika Hokusai \u845b\u98fe \u5317\u658e, \"Under the Wave off Kanagawa (Kanagawa oki nami ura), also known as The Great Wave, from th\", 1830/33. Art Institute of Chicago.",
+      "licence": "CC0 1.0 (Art Institute of Chicago Open Access; work is public domain)",
+      "notes": "Hokusai, the Great Wave. Reads well in grayscale. Iconic, so maybe overused; use sparingly."
+    },
+    {
+      "file": "media/tex-06.webp",
+      "kind": "texture",
+      "source_url": "https://archive.org/details/studyofsplashes00wortrich/page/n62/mode/1up",
+      "image_url": "https://archive.org/download/studyofsplashes00wortrich/page/n62.jpg",
+      "credit": "A. M. Worthington, \"A Study of Splashes\" (London: Longmans, Green & Co., 1908), photographic plate. Scan: Internet Archive (University of California Libraries).",
+      "licence": "Public domain (published 1908; author d. 1916). Internet Archive marks it NOT_IN_COPYRIGHT.",
+      "notes": "Water drop rebound over ring ripples (early high-speed photo). Cropped from the plate, slight blur to soften the halftone. Native 1052x932: the scan has no more resolution."
+    },
+    {
+      "file": "media/tex-07.webp",
+      "kind": "texture",
+      "source_url": "https://archive.org/details/studyofsplashes00wortrich/page/n60/mode/1up",
+      "image_url": "https://archive.org/download/studyofsplashes00wortrich/page/n60.jpg",
+      "credit": "A. M. Worthington, \"A Study of Splashes\" (London: Longmans, Green & Co., 1908), photographic plate. Scan: Internet Archive (University of California Libraries).",
+      "licence": "Public domain (published 1908; author d. 1916). Internet Archive marks it NOT_IN_COPYRIGHT.",
+      "notes": "Concentric ripple rings from a splash. Cropped from the plate, slight halftone blur. Native 1316x740."
+    },
+    {
+      "file": "media/tex-08.webp",
+      "kind": "texture",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Haeckel_Discomedusae_88.jpg",
+      "image_url": "https://upload.wikimedia.org/wikipedia/commons/7/76/Haeckel_Discomedusae_88.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "credit": "Ernst Haeckel, \"Discomedusae\" plate 88, Kunstformen der Natur (1904). Scan via Wikimedia Commons.",
+      "licence": "Public domain (Ernst Haeckel, Kunstformen der Natur, 1904; author d. 1919). Wikimedia Commons: PD.",
+      "notes": "Jellyfish on a dark ground, the deep-sea mood. Portrait 879x1250 (kept at 1250px so the line detail survives the 250KB cap)."
+    },
+    {
+      "file": "media/tex-09.webp",
+      "kind": "texture",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Haeckel_Discomedusae_28.jpg",
+      "image_url": "https://upload.wikimedia.org/wikipedia/commons/a/a8/Haeckel_Discomedusae_28.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "credit": "Ernst Haeckel, \"Discomedusae\" plate 28, Kunstformen der Natur (1904). Scan via Wikimedia Commons.",
+      "licence": "Public domain (Ernst Haeckel, Kunstformen der Natur, 1904; author d. 1919). Wikimedia Commons: PD.",
+      "notes": "Medusa with long tentacles, deep sea. Portrait 875x1250."
+    },
+    {
+      "file": "media/tex-01-depth.webp",
+      "kind": "depth",
+      "source_url": "media/tex-01.webp",
+      "credit": "Depth map derived from media/tex-01.webp",
+      "licence": "Derived from the source image (same terms)",
+      "notes": "Monocular depth estimate (Depth Anything v2), normalised 0.5\u201399.5 percentile, near = white, far = black, same pixel size as the source."
+    },
+    {
+      "file": "media/tex-02-depth.webp",
+      "kind": "depth",
+      "source_url": "media/tex-02.webp",
+      "credit": "Depth map derived from media/tex-02.webp",
+      "licence": "Derived from the source image (same terms)",
+      "notes": "Monocular depth estimate (Depth Anything v2), normalised 0.5\u201399.5 percentile, near = white, far = black, same pixel size as the source."
+    },
+    {
+      "file": "media/tex-06-depth.webp",
+      "kind": "depth",
+      "source_url": "media/tex-06.webp",
+      "credit": "Depth map derived from media/tex-06.webp",
+      "licence": "Derived from the source image (same terms)",
+      "notes": "Monocular depth estimate (Depth Anything v2), normalised 0.5\u201399.5 percentile, near = white, far = black, same pixel size as the source."
+    },
+    {
+      "file": "media/water-sim-depth.webp",
+      "kind": "depth",
+      "source_url": "media/water-sim.webp",
+      "credit": "Depth map derived from media/water-sim.webp",
+      "licence": "Derived from the source image (same terms)",
+      "notes": "Monocular depth estimate (Depth Anything v2), normalised 0.5\u201399.5 percentile, near = white, far = black, same pixel size as the source."
+    },
+    {
+      "file": "media/jelly-drag-depth.webp",
+      "kind": "depth",
+      "source_url": "media/jelly-drag.webp",
+      "credit": "Depth map derived from media/jelly-drag.webp",
+      "licence": "Derived from the source image (same terms)",
+      "notes": "Monocular depth estimate (Depth Anything v2), normalised 0.5\u201399.5 percentile, near = white, far = black, same pixel size as the source. Weak: the curved carousel gives odd depth."
+    },
+    {
+      "file": "media/geo-slash-depth.webp",
+      "kind": "depth",
+      "source_url": "media/geo-slash.webp",
+      "credit": "Depth map derived from media/geo-slash.webp",
+      "licence": "Derived from the source image (same terms)",
+      "notes": "Monocular depth estimate (Depth Anything v2), normalised 0.5\u201399.5 percentile, near = white, far = black, same pixel size as the source."
+    },
+    {
+      "source_url": "https://hybrid-water-sim.vercel.app",
+      "credit": "Hybrid Water Sim by Shifat Masud (live demo screen recording)",
+      "licence": "Shifat Masud's own work; recorded from his public demo for his own portfolio",
+      "file": "media/water-sim-color.mp4",
+      "kind": "video-color",
+      "grayscale_twin": "media/water-sim.mp4",
+      "notes": "Full-colour twin of the grayscale reel: same raw capture and trim, 960x540, 30fps, 6s, H.264 yuv420p, faststart, no audio."
+    },
+    {
+      "source_url": "https://hybrid-water-sim.vercel.app",
+      "credit": "Hybrid Water Sim by Shifat Masud",
+      "licence": "Shifat Masud's own work",
+      "file": "media/water-sim-color.webp",
+      "kind": "poster-color",
+      "grayscale_twin": "media/water-sim.webp",
+      "notes": "Colour poster from media/water-sim-color.mp4 at the same frame as the grayscale poster, 960x540."
+    },
+    {
+      "source_url": "https://water-scene.vercel.app",
+      "credit": "Water Scene (glass tank) by Shifat Masud (live demo screen recording)",
+      "licence": "Shifat Masud's own work; recorded from his public demo for his own portfolio",
+      "file": "media/water-tank-color.mp4",
+      "kind": "video-color",
+      "grayscale_twin": "media/water-tank.mp4",
+      "notes": "Full-colour twin of the grayscale reel: same raw capture and trim, 960x540, 30fps, 6s, H.264 yuv420p, faststart, no audio."
+    },
+    {
+      "source_url": "https://water-scene.vercel.app",
+      "credit": "Water Scene (glass tank) by Shifat Masud",
+      "licence": "Shifat Masud's own work",
+      "file": "media/water-tank-color.webp",
+      "kind": "poster-color",
+      "grayscale_twin": "media/water-tank.webp",
+      "notes": "Colour poster from media/water-tank-color.mp4 at the same frame as the grayscale poster, 960x540."
+    },
+    {
+      "source_url": "https://jelly-drag.vercel.app",
+      "credit": "Jelly Drag by Shifat Masud (live demo screen recording)",
+      "licence": "Shifat Masud's own work; recorded from his public demo for his own portfolio",
+      "file": "media/jelly-drag-color.mp4",
+      "kind": "video-color",
+      "grayscale_twin": "media/jelly-drag.mp4",
+      "notes": "Full-colour twin of the grayscale reel: same raw capture and trim, 960x540, 30fps, 6s, H.264 yuv420p, faststart, no audio."
+    },
+    {
+      "source_url": "https://jelly-drag.vercel.app",
+      "credit": "Jelly Drag by Shifat Masud",
+      "licence": "Shifat Masud's own work",
+      "file": "media/jelly-drag-color.webp",
+      "kind": "poster-color",
+      "grayscale_twin": "media/jelly-drag.webp",
+      "notes": "Colour poster from media/jelly-drag-color.mp4 at the same frame as the grayscale poster, 960x540."
+    },
+    {
+      "source_url": "https://fluid-matter-physics.vercel.app",
+      "credit": "Fluid Matter Physics by Shifat Masud (live demo screen recording)",
+      "licence": "Shifat Masud's own work; recorded from his public demo for his own portfolio",
+      "file": "media/fluid-matter-color.mp4",
+      "kind": "video-color",
+      "grayscale_twin": "media/fluid-matter.mp4",
+      "notes": "Full-colour twin of the grayscale reel: same raw capture and trim, 960x540, 30fps, 6s, H.264 yuv420p, faststart, no audio."
+    },
+    {
+      "source_url": "https://fluid-matter-physics.vercel.app",
+      "credit": "Fluid Matter Physics by Shifat Masud",
+      "licence": "Shifat Masud's own work",
+      "file": "media/fluid-matter-color.webp",
+      "kind": "poster-color",
+      "grayscale_twin": "media/fluid-matter.webp",
+      "notes": "Colour poster from media/fluid-matter-color.mp4 at the same frame as the grayscale poster, 960x540."
+    },
+    {
+      "source_url": "https://geo-slash.vercel.app",
+      "credit": "Geo-Slash by Shifat Masud (live demo screen recording)",
+      "licence": "Shifat Masud's own work; recorded from his public demo for his own portfolio",
+      "file": "media/geo-slash-color.mp4",
+      "kind": "video-color",
+      "grayscale_twin": "media/geo-slash.mp4",
+      "notes": "Full-colour twin of the grayscale reel: same raw capture and trim, 960x540, 30fps, 6s, H.264 yuv420p, faststart, no audio. The demo is nearly monochrome (only the red dots and small accents carry colour)."
+    },
+    {
+      "source_url": "https://geo-slash.vercel.app",
+      "credit": "Geo-Slash by Shifat Masud",
+      "licence": "Shifat Masud's own work",
+      "file": "media/geo-slash-color.webp",
+      "kind": "poster-color",
+      "grayscale_twin": "media/geo-slash.webp",
+      "notes": "Colour poster from media/geo-slash-color.mp4 at the same frame as the grayscale poster, 960x540."
+    },
+    {
+      "source_url": "https://ncs-style-audio-viz.vercel.app",
+      "credit": "NCS-style Audio Viz by Shifat Masud (live demo screen recording)",
+      "licence": "Shifat Masud's own work; recorded from his public demo for his own portfolio",
+      "file": "media/audio-viz-color.mp4",
+      "kind": "video-color",
+      "grayscale_twin": "media/audio-viz.mp4",
+      "notes": "Full-colour twin of the grayscale reel: same raw capture and trim, 960x540, 30fps, 6s, H.264 yuv420p, faststart, no audio. The demo itself renders white-on-black, so this is visually identical to the grayscale version."
+    },
+    {
+      "source_url": "https://ncs-style-audio-viz.vercel.app",
+      "credit": "NCS-style Audio Viz by Shifat Masud",
+      "licence": "Shifat Masud's own work",
+      "file": "media/audio-viz-color.webp",
+      "kind": "poster-color",
+      "grayscale_twin": "media/audio-viz.webp",
+      "notes": "Colour poster from media/audio-viz-color.mp4 at the same frame as the grayscale poster, 960x540. The demo itself renders white-on-black, so this is visually identical to the grayscale version."
+    },
+    {
+      "source_url": "https://shade-ds.vercel.app",
+      "credit": "Shade DS by Shifat Masud (live demo screen recording)",
+      "licence": "Shifat Masud's own work; recorded from his public demo for his own portfolio",
+      "file": "media/shade-ds-color.mp4",
+      "kind": "video-color",
+      "grayscale_twin": "media/shade-ds.mp4",
+      "notes": "Full-colour twin of the grayscale reel: same raw capture and trim, 960x540, 30fps, 6s, H.264 yuv420p, faststart, no audio."
+    },
+    {
+      "source_url": "https://shade-ds.vercel.app",
+      "credit": "Shade DS by Shifat Masud",
+      "licence": "Shifat Masud's own work",
+      "file": "media/shade-ds-color.webp",
+      "kind": "poster-color",
+      "grayscale_twin": "media/shade-ds.webp",
+      "notes": "Colour poster from media/shade-ds-color.mp4 at the same frame as the grayscale poster, 960x540."
+    }
+  ]
+}

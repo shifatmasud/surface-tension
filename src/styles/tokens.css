@@ -1,0 +1,35 @@
+/* Chapter 10 — tokens first; breakpoints override tokens, not components. */
+:root {
+  --c-black: #0a0a0b;
+  --c-ink: #121315;
+  --c-white: #fafafa;
+  --c-paper: #f7f7f8;
+  --c-silver-1: #d4d6da;
+  --c-silver-2: #a9adb3;
+  --c-silver-3: #5f646b; /* AA on paper for small text */
+  --c-graphite: #2a2c30;
+  --c-fg: var(--c-ink);
+  --c-bg: var(--c-paper);
+  --font: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --grid-cols: 12;
+  --grid-gap: clamp(12px, 1.4vw, 24px);
+  --pad-x: max(5vw, 24px);
+  --pad-y: clamp(18px, 2.4vw, 34px);
+  --grid-space: calc((100vw - var(--pad-x) * 2 - (var(--grid-cols) - 1) * var(--grid-gap)) / var(--grid-cols));
+  /* Swiss spacing: an 8 px baseline and a modular scale on it */
+  --u: 8px;
+  --s1: 8px; --s2: 16px; --s3: 24px; --s4: 40px; --s5: 64px; --s6: 104px; --s7: 168px;
+  --radius: 999px;
+  --ease: cubic-bezier(0.22, 0.9, 0.24, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.18, 1);
+  --vh: 1vh;
+  /* Three sizes only, Inter Regular 400 only: giant display vs tiny labels, no timid middle. */
+  --fs-display: clamp(96px, 14vw, 240px);
+  --fs-body: clamp(17px, 1.25vw, 20px);
+  --fs-small: 12.5px;
+}
+@media (max-width: 1000px) { :root { --grid-cols: 8; } }
+@media (max-width: 812px) { :root { --grid-cols: 6; --pad-x: 20px; --fs-display: clamp(64px, 19vw, 120px); --fs-body: 17px; } }
+@media (max-width: 380px) { :root { --pad-x: 16px; } }
+@media (min-aspect-ratio: 21/9) { :root { --pad-x: 9vw; } }
+html[data-bg='dark'] { --c-fg: var(--c-white); --c-bg: #050506; }
