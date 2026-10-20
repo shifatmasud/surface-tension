@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { preload } from '../../../services/preload'
 import { ufx, type UfxItem } from '../../ufx/ufx'
 import { props, shared } from '../../../state/props'
 import { settings } from '../../../services/settings'
@@ -148,6 +149,8 @@ export const labGL = {
           // video: only the focused card plays
           this.ensureMedia(card, p)
           if (card.video) {
+            // PRELOAD: reels stay unrequested until the lab is near (no five video streams competing with the boot)
+            if (card.video.preload === 'none') card.video.preload = 'metadata'
             const want = card.focus > 0.55 && !(window as any).__labPause // QA: __labPause holds every card on its poster
             if (want && card.video.paused) card.video.play().catch(() => {})
             else if (!want && !card.video.paused) card.video.pause()
@@ -174,15 +177,18 @@ export const labGL = {
       }
       this.cards.push(card)
       // posters are small: fetch them all up front so no card ever shows before its picture (ultrawide shows 4+)
+      // PRELOAD (Shifat 10:51Z): the lab is the section after the hero, so its posters are part of the counter
       this.ensureMedia(card, p)
     })
   },
   ensureMedia(card: Card, p: (typeof PROJECTS)[number]) {
     if (card.poster) return
-    card.poster = loader.load(p.poster, (t) => { t.colorSpace = THREE.SRGBColorSpace; if (!card.video || card.video.paused) { card.mat.uniforms.u_map.value = t; card.mat.uniforms.u_mapSize.value.set((t.image as any).width, (t.image as any).height) } })
+    preload.expect()
+    const done = () => preload.arrived()
+    card.poster = loader.load(p.poster, (t) => { done(); t.colorSpace = THREE.SRGBColorSpace; if (!card.video || card.video.paused) { card.mat.uniforms.u_map.value = t; card.mat.uniforms.u_mapSize.value.set((t.image as any).width, (t.image as any).height) } }, undefined, done)
     if (p.depth) loader.load(p.depth, (t) => { card.mat.uniforms.u_depth.value = t; card.mat.uniforms.u_hasDepth.value = 1 })
     const v = document.createElement('video')
-    v.src = p.media; v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'metadata'; v.crossOrigin = 'anonymous'
+    v.src = p.media; v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'none'; v.crossOrigin = 'anonymous'
     v.setAttribute('aria-hidden', 'true')
     card.video = v
     card.vtex = new THREE.VideoTexture(v); card.vtex.colorSpace = THREE.SRGBColorSpace

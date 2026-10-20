@@ -1,4 +1,5 @@
 import { loader, taskManager } from '../services/loader'
+import { preload } from '../services/preload'
 import { scroll } from '../services/scroll'
 import { input } from '../services/input'
 import { settings } from '../services/settings'
@@ -53,10 +54,14 @@ export const boot = {
     })
     loader.start()
   },
+  /** PRELOAD: real progress of the hero + the next section only (Shifat 10:51Z): the boot JS (byte-weighted, includes
+   *  the hero scene chunk), the brand font, the hero's GPU warm-up and the lab's card posters. Every other section is
+   *  mounted as it enters the ±1 window around the current one (gl/Scene.tsx LaterStages). */
   progress() {
-    const files = loader.progress
+    const js = preload.files(), font = loader.progress
     const gpu = engine.ready ? taskManager.progress : 0
-    return settings.USE_GL ? files * 0.75 + gpu * 0.25 : files
+    const next = preload.next(engine.ready)
+    return settings.USE_GL ? js * 0.5 + font * 0.05 + gpu * 0.3 + next * 0.15 : js * 0.9 + font * 0.1
   },
   async drop() {
     this.phase = 'start'

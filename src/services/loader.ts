@@ -93,6 +93,11 @@ class TaskManager {
   private queue: (() => void)[] = []
   total = 0; done = 0
   add(fn: () => void) { this.queue.push(fn); this.total++ }
+  /** PRELOAD: an async GPU task (parallel shader compile): it starts in its frame slot and counts as done when it resolves */
+  addAsync(fn: () => Promise<unknown>) {
+    this.total++
+    this.queue.push(() => { this.done-- ; let p: Promise<unknown>; try { p = fn() } catch (e) { p = Promise.resolve(); console.warn(e) } p.catch((e) => console.warn(e)).finally(() => { this.done++ }) })
+  }
   update() {
     const t0 = performance.now()
     // run tasks until ~6ms of the frame is used — keeps the intro animation smooth

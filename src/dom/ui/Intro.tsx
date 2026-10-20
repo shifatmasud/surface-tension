@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import { setOdometer } from './Odometer'
 import { boot } from '../../app/boot'
 import { mix } from '../../core/math'
+import { preload } from '../../services/preload'
 import { logo3d } from '../../preloader/hook' // logo3d hook (helper 99499b45): drives the inline 3D logo
 
 /** S0 — "Drop". A real progress counter (files + shader warm-up), then one droplet opens the page. */
@@ -12,8 +13,10 @@ export function Intro() {
   const reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
   const count = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    let raf = 0, eased = 0, t0 = performance.now(), last = t0, nearT = 0
-    const minDur = 1600
+    // PRELOAD: continue from the number the static shell counter already reached (never count backwards); a repeat
+    // visit keeps the counter short (its files come from cache; the brand moment stays, the wait does not)
+    let raf = 0, eased = preload.shown(), t0 = performance.now(), last = t0, nearT = 0
+    const minDur = preload.repeat ? 350 : 1200
     const loop = (now: number) => {
       // real elapsed time (not a per-frame cap): during shader warm-up a frame can take seconds, and a capped dt
       // turned the last 3 % of the counter into ~15 more multi-second frames (60 s+ intros at 2560 px)
@@ -24,7 +27,7 @@ export function Intro() {
       let real = boot.progress()
       if (real >= 0.97) { if (!nearT) nearT = now } else nearT = 0
       if (now - t0 > 12000 || (nearT && now - nearT > 3000)) real = 1
-      const cap = Math.min(1, (now - t0) / minDur)
+      const cap = Math.max(preload.shown(), Math.min(1, (now - t0) / minDur))
       const target = Math.min(real, cap)
       eased = mix(eased, target, 1 - Math.exp(-7 * dt))
       if (target >= 1 && (eased > 0.995 || now - t0 > 12000)) eased = 1

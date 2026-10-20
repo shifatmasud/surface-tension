@@ -135,6 +135,15 @@ Tick an item only when it runs on the live site and was checked visually.
 
 - [x] Sections never turn black or freeze at boundaries: the block you scroll into renders live (both directions), stills refreshed every frame; cursor trail is one global always-live layer (Shifat 09:38Z) — live 09:51Z index-BasG7Y3D.js, real-GPU strips 1440/390
 - [ ] Logo lockup = mark + "Shifat" only, no dot after name (m:4ba63a11)
-- [ ] Best preloading strategy: better UX without sacrificing performance; before/after numbers (m:4ba63a11)
+- [x] Best preloading strategy: better UX without sacrificing performance; before/after numbers (m:4ba63a11) — see 11:00Z entry below
 - [ ] Virtual scroll like lusion.co for smooth scroll, desktop + phone (m:bc0a9be7)
 - [x] Logo lockup = flat mark + "Shifat" only, no dot after the name (nav, footer, OG) (Shifat 10:06Z) — live 10:11Z index-B05FrcGC.js, frames 1440/390
+- [ ] STRUCTURE v3 (m:0e147193): blue refractive CUBE (exact diamond material) replaces diamond, hero in all 3 scenes; S2 Shade DS holographic HUD around cube; S3 tablet inside cube -> camera into cube -> into tablet -> starry sky + crewmate; CTA crewmate sole hero; footer plain white no 3D
+- [ ] S3: inside the tablet is the world (stars + crewmate); the crewmate shatters the tablet glass OUTWARD, breaking out into the CTA (m:91c25160)
+- [ ] Scenes heavily optimized for fast mobile speed; now lags (m:78fa7225); per-scene before/after numbers
+- [ ] Text in one fixed position across all sections/scenes; content changes only by masked slide-up out / slide-in (m:904e9e4d)
+- [ ] Perf rules (m:cea944c7): same object count every tier (lower only tex res/geometry/samples); antialias:false, no MSAA; post SMAA only; follow r3f-3d-optimization skill
+- [ ] TARGET (Shifat 10:23Z m:496ce354): Highest quality, AAA but optimized for fast speed on phone. Time is irrelevant (even 1 year). Never trade quality for speed of delivery; no shortcuts, no placeholders shipped as final.
+
+- [x] Best preloading strategy (Shifat 10:06Z + 10:51Z ±1 rule): counter = real progress of hero + next section only (byte-weighted boot JS from the first frame, font, hero GPU warm-up via parallel shader compile, lab posters); Scene chunk joins the first parallel batch; systems/dive/journey code-split, mounted + shader-warmed in a sliding window of current ±1 block, unmounted after 8 s outside it; lab reels unrequested until the lab; repeat visits: short counter + service-worker cache (0 network bytes) — live 11:00Z index-EKdEKvCF.js (hash checked), before/after numbers sent to root
+- [x] Trail3 fidelity fixes (rest value 128, lusion paint sizing, resize resample, scroll sign, touch listeners) shipped with the preloading release — live 11:00Z index-EKdEKvCF.js

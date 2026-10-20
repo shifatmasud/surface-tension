@@ -29,7 +29,7 @@ export class ScreenPaintDistortionEffect extends Effect {
         vec2 stepUv = vel * u_amount / 4.0 * u_screenPaintTexelSize * u_multiplier;
         vec2 p = uv + bn.xy * stepUv;                                 // jittered first tap kills banding
         vec4 acc = vec4(0.0);
-        for (int i = 0; i < 9; i++) { vec4 s = texture2D(inputBuffer, p); acc += vec4(spd_encode(s.rgb), s.a); p += stepUv; }
+        for (int i = 0; i < 9; i++) { vec4 s = texture2D(inputBuffer, p); acc += vec4(min(spd_encode(s.rgb), 1.0), s.a); p += stepUv; }  // each tap as the reference's 8-bit buffer holds it
         acc /= 9.0;
         if (u_debug > 0.5) acc = vec4(vec3(0.5 + 0.35 * weight), 1.0);
         // wake fringe: strongest where weight is low, gone above 0.4
@@ -67,6 +67,12 @@ export class ScreenPaintDistortionEffect extends Effect {
     })
   }
   u(name: string) { return this.uniforms.get(name)! }
+  /** The paint keeps the reference's own resolution (ScreenPaint.resize), independent of the render DPR, so the
+   * velocity step follows the paint texture's size every frame rather than the composer size. */
+  update() {
+    const s = shared.u_paintTextureSize.value
+    this.u('u_screenPaintTexelSize').value.set(1 / Math.max(1, s.x), 1 / Math.max(1, s.y))
+  }
 }
 
 /**

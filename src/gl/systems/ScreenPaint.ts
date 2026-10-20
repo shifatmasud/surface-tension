@@ -63,6 +63,29 @@ function blurInPlace(radius: number, src: THREE.WebGLRenderTarget, scratch: THRE
   fboHelper.render(blur9, src)
 }
 
+// Exact clear. WebGLRenderer.setClearColor premultiplies the clear colour by its alpha, so a (0.5, 0.5, 0, 0) clear
+// lands as (0, 0, 0, 0): the velocity channels start at -0.5 and decay towards rest only until the 8-bit step stalls them
+// at 108/255, which leaves a permanent -0.076 velocity everywhere (a 1.9-texel diagonal push on the whole field, the
+// trail slid down-left instead of curling in place, and a constant smear direction in the distortion). The reference
+// clears with raw gl.clearColor, so rest is 128/255. A tiny fill pass writes the exact value.
+const FILL = new THREE.ShaderMaterial({
+  vertexShader: FS_VERT,
+  fragmentShader: `precision highp float; varying vec2 v_uv; void main(){ gl_FragColor = vec4(0.5, 0.5, 0.0, 0.0); }`,
+  depthTest: false, depthWrite: false, blending: THREE.NoBlending,
+})
+
+/** The reference sizes the paint from its own render size: CSS viewport × min(1.5, devicePixelRatio), capped at
+ * 2560×1440 px (MAX_PIXEL_COUNT), then >>2 / >>3. Our renderer's DPR is adaptive (tier caps, perf scaling), and the
+ * paint's behaviour is resolution-dependent (push and curl are in texels, the brush velocity in paint px), so the paint
+ * keeps the reference's own size, independent of the render DPR, and a DPR change never resets it. */
+function referenceRenderSize(vw: number, vh: number) {
+  const dpr = Math.min(1.5, window.devicePixelRatio || 1) || 1
+  let w = vw * dpr, h = vh * dpr
+  const MAX = 2560 * 1440
+  if (w * h > MAX) { const a = w / h; h = Math.sqrt(MAX / a); w = Math.ceil(h * a); h = Math.ceil(h) }
+  return [Math.ceil(w), Math.ceil(h)]
+}
+
 const PAINT_FRAG = /* glsl */ `
 precision highp float;
 uniform sampler2D u_prevPaintTexture;
@@ -157,25 +180,57 @@ export class ScreenPaint {
         u_dissipations: { value: new THREE.Vector3() },
         u_scrollOffset: { value: new THREE.Vector2() },
       },
-      depthTest: false, depthWrite: false,
+      depthTest: false, depthWrite: false, blending: THREE.NoBlending,
     }))
     shared.u_currPaintTexture.value = this.curr.texture
+    this.listenTouch()
   }
 
-  resize(w: number, h: number) {
-    // render size → 1/4 paint, 1/8 feedback (integer shifts like the original's >>2 / >>3)
-    const pw = Math.max(1, w >> 2), ph = Math.max(1, h >> 2)
-    const lw = Math.max(1, w >> 3), lh = Math.max(1, h >> 3)
-    this.prev.setSize(pw, ph); this.curr.setSize(pw, ph)
-    this.low.setSize(lw, lh); this.lowBlur.setSize(lw, lh)
+  // Touch, as the reference reads it (touchstart/touchmove/touchend on the document). Pointer events stop at
+  // pointercancel the moment the page starts a native scroll, which would freeze the brush where the finger first
+  // moved; touch events keep reporting the finger through the scroll, so the trail follows it like on the original.
+  private touchDown = false
+  private touchXY = new THREE.Vector2()
+  private touchMoved = false
+  private listenTouch() {
+    const o = { passive: true } as AddEventListenerOptions
+    const at = (e: TouchEvent) => e.changedTouches[0] || e.touches[0]
+    document.addEventListener('touchstart', (e) => { const t = at(e); if (!t) return; this.touchDown = true; this.touchXY.set(t.clientX, t.clientY); this.touchMoved = true }, o)
+    document.addEventListener('touchmove', (e) => { const t = at(e); if (!t) return; this.touchDown = true; this.touchXY.set(t.clientX, t.clientY); this.touchMoved = true }, o)
+    const up = () => { this.touchDown = false }
+    document.addEventListener('touchend', up, o); document.addEventListener('touchcancel', up, o)
+  }
+  private touchWasDown = false
+  private touchPx = new THREE.Vector2(-1, -1)
+  private touchPrevPx = new THREE.Vector2(-1, -1)
+  private hasTouched = false
+  private touchMode = false
+  private pxNow = new THREE.Vector2()
+  private pxPrev = new THREE.Vector2()
+
+  resize(_renderW?: number, _renderH?: number) {
+    const [rw, rh] = referenceRenderSize(props.width, props.height)
+    const pw = Math.max(1, rw >> 2), ph = Math.max(1, rh >> 2)
+    const lw = Math.max(1, rw >> 3), lh = Math.max(1, rh >> 3)
+    this.maxRadius = Math.max(40, props.width / 20)
+    if (pw === this.curr.width && ph === this.curr.height) return
+    const had = this.curr.width > 1
+    // new targets, the old field resampled into them: a resize (phone URL bar, rotation, window drag) never wipes the trail
+    const make = (w: number, h: number) => { const t = fboHelper.createRenderTarget(1, 1); t.setSize(w, h); return t }
+    const prev = make(pw, ph), curr = make(pw, ph), low = make(lw, lh), lowBlur = make(lw, lh)
+    for (const t of [prev, curr, low, lowBlur]) fboHelper.render(FILL, t)
+    if (had) { const sx = pw / this.curr.width, sy = ph / this.curr.height; this.to.x *= sx; this.to.y *= sy; this.from.x *= sx; this.from.y *= sy; this.to.z *= sy; this.from.z *= sy }
+    if (had) { fboHelper.copy(this.curr.texture, curr); fboHelper.copy(this.curr.texture, prev); fboHelper.copy(this.curr.texture, low) }
+    for (const t of [this.prev, this.curr, this.low, this.lowBlur]) t.dispose()
+    this.prev = prev; this.curr = curr; this.low = low; this.lowBlur = lowBlur
     this.material.uniforms.u_paintTexelSize.value.set(1 / pw, 1 / ph)
     shared.u_paintTextureSize.value.set(pw, ph)
-    this.maxRadius = Math.max(40, props.width / 20)
-    this.clear()
+    shared.u_currPaintTexture.value = this.curr.texture
+    if (!had) this.material.uniforms.u_vel.value.set(0, 0)
   }
 
   clear() {
-    for (const t of [this.prev, this.curr, this.low, this.lowBlur]) fboHelper.clearColor(0.5, 0.5, 0, 0, t)
+    for (const t of [this.prev, this.curr, this.low, this.lowBlur]) fboHelper.render(FILL, t)
     this.material.uniforms.u_vel.value.set(0, 0)
   }
 
@@ -193,19 +248,36 @@ export class ScreenPaint {
     const offY = scrollView * ratio        // added to the -1..1 pointer as the reference does (one viewport = 1.0)
     u.u_scrollOffset.value.set(0, scrollView * ratio)
 
-    // 2) radius from speed: px moved this frame (plus the scroll streak, ×3 for the radius test)
-    this.v2.copy(input.mousePixelXY); this.v2.y -= props.scrollDelta * ratio * 3
-    const moved = this.v2.distanceTo(input.prevMousePixelXY)
-    let radius = fit(moved, 0, this.radiusDistanceRange, this.minRadius, this.maxRadius)
-    // 3) when it refuses to paint
-    const touchRule = (this.needsMouseDown || browser.isMobile || input.isTouch) && (!input.isDown || !input.wasDown)
-    if (Math.abs(props.scrollDelta) === 0 && (!input.hadMoved || !this.drawEnabled || touchRule)) radius = 0
-    if (!input.everMoved || !this.drawEnabled) radius = 0
+    // pointer source: the mouse (input service), or the finger (own touch listeners) once a touch has been seen
+    if (this.touchMoved) { this.touchMode = true; this.hasTouched = true }
+    else if (input.hadMoved && !input.isTouch) this.touchMode = false
+    const px = this.pxNow, prevPx = this.pxPrev
+    let isDown: boolean, wasDown: boolean, moved: boolean, ever: boolean
+    if (this.touchMode) {
+      this.touchPrevPx.copy(this.touchPx.x < 0 ? this.touchXY : this.touchPx)
+      this.touchPx.copy(this.touchXY)
+      px.copy(this.touchPx); prevPx.copy(this.touchPrevPx)
+      isDown = this.touchDown; wasDown = this.touchWasDown; moved = this.touchMoved; ever = true
+    } else {
+      px.copy(input.mousePixelXY); prevPx.copy(input.prevMousePixelXY)
+      isDown = input.isDown; wasDown = input.wasDown; moved = input.hadMoved; ever = input.everMoved
+    }
+    this.touchMoved = false; this.touchWasDown = this.touchDown
+
+    // 2) radius from speed: px moved this frame, the scroll added to the pointer ×3 viewports (the reference adds
+    // scrollViewDelta × viewportHeight × 3 to the y-down pixel position), so a scroll paints even with a still pointer
+    this.v2.copy(px); this.v2.y += props.scrollDelta * ratio * 3
+    let radius = fit(this.v2.distanceTo(prevPx), 0, this.radiusDistanceRange, this.minRadius, this.maxRadius)
+    // 3) when it refuses to paint: still and not scrolling; on touch / needsMouseDown only while held two frames
+    const touchRule = (this.needsMouseDown || browser.isMobile || this.touchMode) && (!isDown || !wasDown)
+    if (Math.abs(props.scrollDelta) === 0 && (!moved || !this.drawEnabled || touchRule)) radius = 0
+    if (!ever || !this.drawEnabled) radius = 0
     radius = (radius / props.height) * ph // CSS px → paint px
 
-    // 4) the brush is a segment: from = last to
+    // 4) the brush is a segment: from = last to (pointer in -1..1, y up, plus the scroll in viewport units)
     this.from.copy(this.to)
-    const mx = input.mouseXY.x, my = input.mouseXY.y + offY
+    const mx = ever ? (px.x / props.width) * 2 - 1 : 0
+    const my = (ever ? 1 - (px.y / props.height) * 2 : 0) + offY
     this.to.set(((mx + 1) * pw) / 2, ((my + 1) * ph) / 2, radius, 1)
     if (!this.started) { this.from.copy(this.to); this.started = true }
 

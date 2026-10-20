@@ -37,9 +37,24 @@ const deferBoot = (): Plugin => ({
       const pre = [...html.matchAll(/\s*<link rel="modulepreload" crossorigin href="([^"]+)">/g)]
       html = html.replace(entry[0], '')
       for (const m of pre) html = html.replace(m[0], '')
-      const loader = `<script>(function(){var d=document,E=${JSON.stringify(entry[1])},P=${JSON.stringify(pre.map((m) => m[1]))},done=0;` +
-        `function go(){if(done)return;done=1;var h=d.head;P.forEach(function(u){var l=d.createElement('link');l.rel='modulepreload';l.crossOrigin='';l.href=u;h.appendChild(l)});` +
-        `var s=d.createElement('script');s.type='module';s.crossOrigin='';s.src=E;h.appendChild(s)}` +
+      // PRELOAD: the hero scene chunk (a dynamic import) is fetched in the same parallel batch as the vendors instead
+      // of after React mounts (one round trip saved), and every boot chunk is weighed by its size so the counter
+      // shows real byte progress from the first frame (the shell counter, before React exists)
+      const P = pre.map((m) => m[1])
+      const bundle = ctx.bundle as Record<string, any>
+      const sceneChunk = Object.values(bundle).find((c: any) => c.type === 'chunk' && (c.name === 'Scene' || /^assets\/Scene-[\w-]+\.js$/.test(c.fileName) || (c.facadeModuleId && /[\\/]gl[\\/]Scene\.tsx$/.test(c.facadeModuleId))))
+      const S: string[] = [] // GL-only boot chunks: skipped on the static (no-gl) page
+      if (sceneChunk) for (const f of [...(sceneChunk.imports || []), sceneChunk.fileName]) { const u = './' + f; if (!P.includes(u) && u !== entry[1]) S.push(u) }
+      const size = (u: string) => { const c = bundle[u.replace(/^\.\//, '')]; return c ? (c.code ? c.code.length : (c.source?.length || 1)) : 1 }
+      const B: Record<string, number> = {}; for (const u of [entry[1], ...P, ...S]) B[u] = size(u)
+      const loader = `<script>(function(){var d=document,E=${JSON.stringify(entry[1])},P=${JSON.stringify(P)},S=${JSON.stringify(S)},B=${JSON.stringify(B)},done=0,got={},T=0,M={},k;` +
+        `if(d.documentElement.classList.contains('no-gl'))S.forEach(function(u){delete B[u]});else P=P.concat(S);` +
+        `for(k in B){T+=B[k];M[new URL(k,location.href).href]=k}` +
+        `var W=window.__stboot={t0:performance.now(),shown:0,files:function(){var s=0;for(var k in got)s+=B[k];return T?s/T:1}};` +
+        `try{new PerformanceObserver(function(l){l.getEntries().forEach(function(e){var k=M[e.name];if(k)got[k]=1})}).observe({type:'resource',buffered:true})}catch(e){}` +
+        `var cur=0;function tick(){var el=d.querySelector('.shell-intro .intro__count');if(!el)return;var t=W.files()*60;cur+=(t-cur)*0.12;var v=Math.floor(cur);if(v/100>W.shown){W.shown=v/100;el.textContent=('00'+v).slice(-3)}requestAnimationFrame(tick)}` +
+        `function go(){if(done)return;done=1;var h=d.head;P.forEach(function(u){var l=d.createElement('link');l.rel='modulepreload';l.crossOrigin='';l.fetchPriority='high';l.href=u;h.appendChild(l)});` +
+        `var s=d.createElement('script');s.type='module';s.crossOrigin='';s.fetchPriority='high';s.src=E;h.appendChild(s);requestAnimationFrame(tick)}` +
         `requestAnimationFrame(function(){setTimeout(go,0)});setTimeout(go,2500)})()</script>`
       return html.replace(/(\s*<\/body>)/, `\n    ${loader}$1`)
     },

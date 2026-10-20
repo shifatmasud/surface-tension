@@ -10,5 +10,7 @@ export const engine = {
   ripple: null as RippleSim | null,
   chain: null as PostChain | null,
   ready: false,
+  /** PRELOAD: the hero's programs are linked; the frame loop runs from here */
+  warm: false,
 }
 ;(window as any).__engine = engine

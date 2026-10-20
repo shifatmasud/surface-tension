@@ -8,6 +8,7 @@ import { sections } from './sections'
 import { clip } from '../gl/systems/clip'
 import { audio } from '../services/audio'
 import { settings } from '../services/settings'
+import { engine } from '../gl/engine'
 
 /**
  * The one clock (handbook ch.2 / ch.11.3). GSAP's ticker owns requestAnimationFrame; every system is
@@ -31,7 +32,9 @@ export function startClock() {
     sections.update(dt)
     clip.update()
     audio.update(dt)
-    if (settings.USE_GL) advance(props.time)
+    // PRELOAD: from the moment the GL canvas exists until the hero's shaders are linked (parallel compile), the
+    // frame loop holds, so no frame blocks on a shader link and the counter keeps moving
+    if (settings.USE_GL && (!engine.canvas || engine.warm)) advance(props.time)
     input.postUpdate()
     // rolling FPS probe for QA (window.__fps)
     fpsSamples.push(deltaMs); if (fpsSamples.length > 120) fpsSamples.shift()
