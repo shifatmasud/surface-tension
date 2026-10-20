@@ -110,3 +110,14 @@ Tick an item only when it runs on the live site and was checked visually.
 - [ ] Sticky footer revealed as the CTA scrolls up
 - [ ] Diamond guide limited to Scene 1 (supersedes 'every section')
 - [x] Outgoing section never scales or dims on transition out: holds 100% scale + full brightness, drifts up slower (parallax) while the next card slides over (Shifat 08:37Z) — live 08:46Z index-BjTvolbQ.js, real-GPU frames 1440/390 at card travel .40/.75
+
+## Hero per scene (Shifat 08:54Z m:842d8a9d)
+- [ ] Scene 1 (hero + projects): the DIAMOND is the hero; project cards slide over the diamond underwater
+- [ ] Shade DS: the system figure is the hero
+- [ ] Crewmate scene: the crewmate is the hero
+- [ ] Fluffier, better grass & trees in the crewmate scene
+## Also 08:51–08:52Z
+- [ ] Preloader black, exits like a curtain (m:520317ca)
+- [ ] Scroll up & down both smooth; every section stays (m:ea07bf4d)
+- [ ] Underwater caustics = glowing additive light (m:edf8656c) — module by 8c2362cf, hooked by builder
+- [x] Preloader black (#000, white odometer counter) and exits like a curtain: slides up (expo in-out, ~1.05 s) over the already-rendered hero; no white flash (inline black bg until lifted); reduced motion = quick fade (Shifat 08:51Z) — live 09:0xZ index-iIuS-AU-.js, real-GPU frame strips 1440/390
