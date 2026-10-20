@@ -3,530 +3,233 @@ import { fboHelper, FS_VERT } from '../core/fbo'
 import { input } from '../../services/input'
 import { props, shared } from '../../state/props'
 import { browser, settings } from '../../services/settings'
-import { trailField, type TrailImpulseKind } from './ScreenPaintField'
-import { trailSound } from './ScreenPaintSound'
-import { pool } from './pool'
+import { fit } from '../../core/math'
 
 /**
- * ScreenPaint — the cursor trail as a real (small) fluid. Written fresh for this codebase.
- *
- * A stable-fluids solver on a coarse grid of square texels (velocity, curl, divergence, pressure) carries an
- * ink field at a finer resolution. The pointer is a capsule brush swept from last frame's point to this
- * frame's: its radius, force and ink all come from pointer SPEED (CSS px / s, smoothed), so a slow drift draws
- * a thin silver thread and a fast flick throws a wide splash. Vorticity confinement keeps the wake curling,
- * and everything settles on its own (per-second dissipation, so 60 Hz and 120 Hz look the same).
- * Clicks / taps fire a radial burst (outward velocity ring + ink ring), and a flick that stops hard blooms.
- *
- * Outputs
- *   trailField.uniforms.u_trailDye / u_trailVelocity    half-float fields (see ScreenPaintField.ts)
- *   shared.u_currPaintTexture                           RGBA8 pack kept for the type shader: xy velocity
- *                                                       biased at 0.5, z ink, w head — the old contract
- * The post pass (ScreenPaintDistortion) turns the ink into a lens over the finished frame.
- *
- * Cost (per sim step, all tiny targets): advect ×2, curl, vorticity, divergence, pressure fade, Jacobi ×N,
- * gradient, pack. High tier: 112-texel-tall grid, N = 18, ink at 1/3 render. Phone tier: 64-tall grid,
- * N = 12, ink at 1/4 render. Steps are capped at 50 Hz substeps (≤ 3 per frame).
- * ?notrail turns it off; prefers-reduced-motion turns it off.
+ * ScreenPaint — the cursor fluid trail (handbook ch.14), implemented to behaviour parity and written
+ * fresh for this codebase. The pointer becomes an 8-bit velocity+weight texture that keeps moving and
+ * fading by itself:
+ *   R,G  velocity x/y biased around 0.5 (rest = 0.5)       fade ×0.975 / frame
+ *   B    weight 1 — the long tail                          fade ×0.95  / frame
+ *   A    weight 2 — the short bright head                  fade ×0.8   / frame
+ * Four RGBA8 targets: prev/curr at 1/4 render size (ping-pong), low/lowBlur at 1/8 (blurred push field).
+ * Per frame: swap → paint (reads prev + last frame's blurred low) → copy curr→low → blur(8,1) low in place.
  */
 
-const PRE = /* glsl */ `
+// Gradient noise with an analytic derivative (value, d/dx, d/dy). The lattice hash is the 2-out
+// fractional-sine-free hash so the swirl field matches the reference field texel for texel.
+const PAINT_NOISE = /* glsl */ `
+vec2 pn_hash(vec2 p){
+  vec3 q = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+  q += dot(q, q.yzx + 33.33);
+  return fract((q.xx + q.yz) * q.zy) * 2.0 - 1.0;
+}
+vec3 noised(in vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  vec2 u  = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);        // quintic fade
+  vec2 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);              // its derivative
+  vec2 ga = pn_hash(i), gb = pn_hash(i + vec2(1.0, 0.0)), gc = pn_hash(i + vec2(0.0, 1.0)), gd = pn_hash(i + vec2(1.0, 1.0));
+  float va = dot(ga, f), vb = dot(gb, f - vec2(1.0, 0.0)), vc = dot(gc, f - vec2(0.0, 1.0)), vd = dot(gd, f - vec2(1.0, 1.0));
+  float v = va + u.x * (vb - va) + u.y * (vc - va) + u.x * u.y * (va - vb - vc + vd);
+  vec2 d = ga + u.x * (gb - ga) + u.y * (gc - ga) + u.x * u.y * (ga - gb - gc + gd)
+         + du * (u.yx * (va - vb - vc + vd) + vec2(vb, vc) - va);
+  return vec3(v, d);
+}`
+
+// The feedback blur: separable 9-tap (weights .1633 / .1531 / .12245 / .0918 / .051), the tap step is
+// radius * 0.25 texels, so blur(8) reaches 8 texels each side at 1/8 res. H into the scratch target,
+// V back into the source, so the low copy is blurred in place.
+const BLUR9_FRAG = /* glsl */ `
 precision highp float;
+uniform sampler2D u_texture; uniform vec2 u_delta; varying vec2 v_uv;
+void main(){
+  vec4 c = texture2D(u_texture, v_uv) * 0.1633;
+  vec2 d = u_delta;
+  c += (texture2D(u_texture, v_uv - d) + texture2D(u_texture, v_uv + d)) * 0.1531;  d += u_delta;
+  c += (texture2D(u_texture, v_uv - d) + texture2D(u_texture, v_uv + d)) * 0.12245; d += u_delta;
+  c += (texture2D(u_texture, v_uv - d) + texture2D(u_texture, v_uv + d)) * 0.0918;  d += u_delta;
+  c += (texture2D(u_texture, v_uv - d) + texture2D(u_texture, v_uv + d)) * 0.051;
+  gl_FragColor = c;
+}`
+const blur9 = new THREE.ShaderMaterial({
+  uniforms: { u_texture: { value: null }, u_delta: { value: new THREE.Vector2() } },
+  vertexShader: FS_VERT, fragmentShader: BLUR9_FRAG, depthTest: false, depthWrite: false,
+})
+function blurInPlace(radius: number, src: THREE.WebGLRenderTarget, scratch: THREE.WebGLRenderTarget) {
+  const u = blur9.uniforms, k = 0.25
+  u.u_texture.value = src.texture; u.u_delta.value.set((radius / src.width) * k, 0)
+  fboHelper.render(blur9, scratch)
+  u.u_texture.value = scratch.texture; u.u_delta.value.set(0, (radius / src.height) * k)
+  fboHelper.render(blur9, src)
+}
+
+const PAINT_FRAG = /* glsl */ `
+precision highp float;
+uniform sampler2D u_prevPaintTexture;
+uniform sampler2D u_lowPaintTexture;
+uniform vec2 u_paintTexelSize;
+uniform vec4 u_drawFrom;   // x, y (paint px), radius (paint px), weight
+uniform vec4 u_drawTo;
+uniform vec2 u_vel;        // smoothed brush velocity (paint px per frame-ish)
+uniform float u_pushStrength;
+uniform float u_curlScale;
+uniform float u_curlStrength;
+uniform vec3 u_dissipations; // velocity, weight1, weight2
+uniform vec2 u_scrollOffset;
 varying vec2 v_uv;
-`
+#ifdef USE_NOISE
+${PAINT_NOISE}
+#endif
 
-// semi-Lagrangian advection + the brush, one pass per field
-const ADVECT_FRAG = /* glsl */ `${PRE}
-uniform sampler2D u_velocity;
-uniform sampler2D u_source;
-uniform vec2 u_simTexel;      // velocity is stored in sim texels / s
-uniform float u_dt;
-uniform vec4 u_dissipation;   // per-channel per-second decay rates
-uniform vec2 u_scroll;        // page moved this frame (uv): the fluid rides with the content
-uniform float u_aspect;
-uniform vec4 u_segA;          // brush capsule: xy = point (aspect space), z = radius (viewport heights), w = amount
-uniform vec4 u_segB;
-uniform vec2 u_force;         // brush velocity in sim texels / s
-uniform vec4 u_burst[4];      // xy point (aspect space), z radius, w strength (0 = none)
-uniform vec4 u_burstDir[4];   // xy forward kick for flicks
-uniform float u_hue;          // speed colour 0..1 injected with the ink
-uniform float u_mode;         // 0 = velocity field, 1 = ink field
-uniform float u_headGain;
-
+// capsule distance: (distance to segment, position along it 0..1)
 vec2 capsule(vec2 p, vec2 a, vec2 b){
   vec2 ap = p - a, ab = b - a;
-  float t = clamp(dot(ap, ab) / max(dot(ab, ab), 1e-8), 0.0, 1.0);
+  float t = clamp(dot(ap, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
   return vec2(length(ap - ab * t), t);
 }
 
 void main(){
-  vec2 vel = texture2D(u_velocity, v_uv - u_scroll).xy;
-  vec2 coord = v_uv - u_scroll - u_dt * vel * u_simTexel;
-  // nothing flows in from beyond the screen edge (clamp-to-edge would smear the border texel inward)
-  vec2 inside = step(vec2(0.0), coord) * step(coord, vec2(1.0));
-  vec4 src = texture2D(u_source, coord) * inside.x * inside.y;
-  vec4 decay = exp(-u_dissipation * u_dt);
-  vec4 o = src * decay;
+  vec2 seg = capsule(gl_FragCoord.xy, u_drawFrom.xy, u_drawTo.xy);
+  vec2 rw = mix(u_drawFrom.zw, u_drawTo.zw, seg.y);              // radius & weight tapered along the stroke
+  float brush = 1.0 - smoothstep(-0.01, rw.x, seg.x);            // radius 0 → nothing painted
 
-  vec2 p = vec2(v_uv.x * u_aspect, v_uv.y);
-  vec2 cap = capsule(p, u_segA.xy, u_segB.xy);
-  float r = mix(u_segA.z, u_segB.z, cap.y);
-  float amt = mix(u_segA.w, u_segB.w, cap.y);
-  float fall = r > 0.0 ? exp(-(cap.x * cap.x) / (r * r)) : 0.0;     // soft gaussian brush: no hard rim
+  // the push: read the blurred 1/8 copy, flip its velocity → sample upstream (semi-Lagrangian, one step)
+  vec4 low = texture2D(u_lowPaintTexture, v_uv - u_scrollOffset);
+  vec2 upstream = (0.5 - low.xy) * u_pushStrength;
 
-  if (u_mode < 0.5) {
-    // velocity: pull toward the brush velocity inside a WIDER soft brush (bounded, rate independent). A wide,
-    // smooth shear profile rolls up into a few large elegant curls instead of a chain of grid-sized eddies.
-    float rv = max(r * 2.2, u_simTexel.y * 4.0);
-    float fallV = r > 0.0 ? exp(-(cap.x * cap.x) / (rv * rv)) : 0.0;
-    o.xy = mix(o.xy, u_force, clamp(fallV * 0.6, 0.0, 1.0));
-    for (int i = 0; i < 4; i++) {
-      vec4 b = u_burst[i];
-      if (b.w <= 0.0) continue;
-      vec2 d = p - b.xy; float l = length(d); float q = l / b.z;
-      // an outward ring impulse (zero at the centre so it opens a hole and throws a rim) + a forward kick
-      o.xy += (d / max(l, 1e-5)) * b.w * q * exp(-q * q) * (1.5 / u_simTexel.y);   // peak ≈ 0.65 viewport heights / s
-      o.xy += u_burstDir[i].xy * b.w * exp(-q * q * 1.5);
-    }
-  } else {
-    // ink: R density (saturating add), G bright head, B speed-colour carried with the ink, A burst ring
-    float ink = amt * fall;
-    o.r = o.r + ink * max(0.0, 1.0 - o.r);
-    o.g = max(o.g, ink * u_headGain);
-    o.b = o.b + ink * max(0.0, 1.0 - o.r * 0.5) * u_hue;
-    for (int i = 0; i < 4; i++) {
-      vec4 b = u_burst[i];
-      if (b.w <= 0.0) continue;
-      float q = length(p - b.xy) / b.z;
-      float ring = exp(-pow((q - 0.75) * 3.2, 2.0)) * b.w;   // a ring of ink that the outward flow carries open
-      float core = exp(-q * q * 4.0) * b.w * 0.35;
-      o.r = o.r + (ring + core) * max(0.0, 1.0 - o.r);
-      o.g = max(o.g, ring * 0.9);
-      o.b = o.b + ring * 0.8;
-      o.a = max(o.a, ring);
-    }
-    // thin leftovers clear out instead of lingering as a faint film (constant floor on top of the decay)
-    float floorK = u_dt * 0.06;
-    o.r = max(0.0, o.r - floorK);
-    o.b = min(o.b, o.r * 1.2);
-    o.a = max(0.0, o.a - floorK);
-  }
-  gl_FragColor = o;
+#ifdef USE_NOISE
+  // gradient-noise derivative bends the advection so the wake curls; coords warped by the flow itself
+  vec3 n0 = noised(gl_FragCoord.xy * u_curlScale * (1.0 - low.xy));
+  vec2 n1 = noised(gl_FragCoord.xy * u_curlScale * (2.0 - low.xy * (0.5 + n0.x) + n0.yz * 0.1)).yz;
+  upstream += n1 * (low.z + low.w) * u_curlStrength;
+#endif
+
+  vec4 data = texture2D(u_prevPaintTexture, v_uv - u_scrollOffset + upstream * u_paintTexelSize);
+  data.xy -= 0.5;                                                // signed velocity
+
+  // all three fades in one line: adding (k-1)*v is multiplying by k
+  vec4 change = (u_dissipations.xxyz - 1.0) * data;
+  change += vec4(u_vel * brush, rw.yy * brush);                  // inject inside the brush
+  // 8-bit floor: every weight step is at least ~1/255 so the trail always reaches exactly 0 or 1
+  change.zw = sign(change.zw) * max(vec2(0.004), abs(change.zw));
+  data += change;
+
+  data.xy += 0.5;
+  gl_FragColor = clamp(data, 0.0, 1.0);
 }`
-
-const CURL_FRAG = /* glsl */ `${PRE}
-uniform sampler2D u_velocity; uniform vec2 u_texel;
-void main(){
-  float L = texture2D(u_velocity, v_uv - vec2(u_texel.x, 0.0)).y;
-  float R = texture2D(u_velocity, v_uv + vec2(u_texel.x, 0.0)).y;
-  float T = texture2D(u_velocity, v_uv + vec2(0.0, u_texel.y)).x;
-  float B = texture2D(u_velocity, v_uv - vec2(0.0, u_texel.y)).x;
-  gl_FragColor = vec4(0.5 * ((R - L) - (T - B)), 0.0, 0.0, 1.0);
-}`
-
-const VORTICITY_FRAG = /* glsl */ `${PRE}
-uniform sampler2D u_velocity; uniform sampler2D u_curl; uniform vec2 u_texel; uniform float u_strength; uniform float u_dt;
-void main(){
-  float L = texture2D(u_curl, v_uv - vec2(u_texel.x, 0.0)).x;
-  float R = texture2D(u_curl, v_uv + vec2(u_texel.x, 0.0)).x;
-  float T = texture2D(u_curl, v_uv + vec2(0.0, u_texel.y)).x;
-  float B = texture2D(u_curl, v_uv - vec2(0.0, u_texel.y)).x;
-  float C = texture2D(u_curl, v_uv).x;
-  vec2 f = 0.5 * vec2(abs(T) - abs(B), abs(R) - abs(L));
-  f /= length(f) + 1e-4;
-  f *= u_strength * C;
-  f.y = -f.y;
-  vec2 v = texture2D(u_velocity, v_uv).xy + f * u_dt;
-  gl_FragColor = vec4(clamp(v, -4000.0, 4000.0), 0.0, 1.0);
-}`
-
-const DIVERGENCE_FRAG = /* glsl */ `${PRE}
-uniform sampler2D u_velocity; uniform vec2 u_texel;
-void main(){
-  vec2 C = texture2D(u_velocity, v_uv).xy;
-  float L = texture2D(u_velocity, v_uv - vec2(u_texel.x, 0.0)).x;
-  float R = texture2D(u_velocity, v_uv + vec2(u_texel.x, 0.0)).x;
-  float T = texture2D(u_velocity, v_uv + vec2(0.0, u_texel.y)).y;
-  float B = texture2D(u_velocity, v_uv - vec2(0.0, u_texel.y)).y;
-  // walls at the screen edge: mirror the normal component
-  if (v_uv.x - u_texel.x < 0.0) L = -C.x;
-  if (v_uv.x + u_texel.x > 1.0) R = -C.x;
-  if (v_uv.y + u_texel.y > 1.0) T = -C.y;
-  if (v_uv.y - u_texel.y < 0.0) B = -C.y;
-  gl_FragColor = vec4(0.5 * (R - L + T - B), 0.0, 0.0, 1.0);
-}`
-
-const SCALE_FRAG = /* glsl */ `${PRE}
-uniform sampler2D u_source; uniform float u_k;
-void main(){ gl_FragColor = vec4(texture2D(u_source, v_uv).x * u_k, 0.0, 0.0, 1.0); }`
-
-const PRESSURE_FRAG = /* glsl */ `${PRE}
-uniform sampler2D u_pressure; uniform sampler2D u_divergence; uniform vec2 u_texel;
-void main(){
-  float L = texture2D(u_pressure, v_uv - vec2(u_texel.x, 0.0)).x;
-  float R = texture2D(u_pressure, v_uv + vec2(u_texel.x, 0.0)).x;
-  float T = texture2D(u_pressure, v_uv + vec2(0.0, u_texel.y)).x;
-  float B = texture2D(u_pressure, v_uv - vec2(0.0, u_texel.y)).x;
-  float div = texture2D(u_divergence, v_uv).x;
-  gl_FragColor = vec4((L + R + B + T - div) * 0.25, 0.0, 0.0, 1.0);
-}`
-
-const GRADIENT_FRAG = /* glsl */ `${PRE}
-uniform sampler2D u_pressure; uniform sampler2D u_velocity; uniform vec2 u_texel;
-void main(){
-  float L = texture2D(u_pressure, v_uv - vec2(u_texel.x, 0.0)).x;
-  float R = texture2D(u_pressure, v_uv + vec2(u_texel.x, 0.0)).x;
-  float T = texture2D(u_pressure, v_uv + vec2(0.0, u_texel.y)).x;
-  float B = texture2D(u_pressure, v_uv - vec2(0.0, u_texel.y)).x;
-  vec2 v = texture2D(u_velocity, v_uv).xy - vec2(R - L, T - B);
-  gl_FragColor = vec4(v, 0.0, 1.0);
-}`
-
-// the old 8-bit contract for the type shader (ufx): xy velocity biased at 0.5, z ink, w head
-const PACK_FRAG = /* glsl */ `${PRE}
-uniform sampler2D u_velocity; uniform sampler2D u_dye; uniform vec2 u_simTexel;
-void main(){
-  vec2 v = texture2D(u_velocity, v_uv).xy * u_simTexel;   // uv / s
-  vec4 d = texture2D(u_dye, v_uv);
-  gl_FragColor = vec4(clamp(0.5 + v * 0.12, 0.0, 1.0), clamp(d.r, 0.0, 1.0), clamp(d.g, 0.0, 1.0));
-}`
-
-type DoubleRT = { read: THREE.WebGLRenderTarget; write: THREE.WebGLRenderTarget; swap: () => void }
-function double(): DoubleRT {
-  const o = {
-    read: fboHelper.createRenderTarget(1, 1, { float: true }),
-    write: fboHelper.createRenderTarget(1, 1, { float: true }),
-    swap() { const t = o.read; o.read = o.write; o.write = t },
-  }
-  return o
-}
-const mat = (frag: string, uniforms: Record<string, THREE.IUniform>) => fboHelper.track(new THREE.ShaderMaterial({
-  vertexShader: FS_VERT, fragmentShader: frag, uniforms, depthTest: false, depthWrite: false,
-}))
-
-const ZERO4 = new THREE.Vector4()
-const smoothstep = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
 
 export class ScreenPaint {
-  // fields
-  private velocity = double()
-  private dye = double()
-  private pressure = double()
-  private curl = fboHelper.createRenderTarget(1, 1, { float: true })
-  private divergence = fboHelper.createRenderTarget(1, 1, { float: true })
-  private pack = fboHelper.createRenderTarget(1, 1)
-  private simTexel = new THREE.Vector2(1, 1)
-  private dyeTexel = new THREE.Vector2(1, 1)
-  private aspect = 1
-
-  // passes
-  private advect: THREE.ShaderMaterial
-  private curlMat: THREE.ShaderMaterial
-  private vortMat: THREE.ShaderMaterial
-  private divMat: THREE.ShaderMaterial
-  private scaleMat: THREE.ShaderMaterial
-  private presMat: THREE.ShaderMaterial
-  private gradMat: THREE.ShaderMaterial
-  private packMat: THREE.ShaderMaterial
-
-  // live tuning (window.__trail)
-  /** brush radius (viewport heights) at a slow drift and at a full flick */
-  radiusSlow = 0.0045
-  radiusFast = 0.045
-  /** CSS px / s that count as slow / fast */
-  speedSlow = 90
-  speedFast = 2600
-  /** ink laid at a slow drift / fast flick */
-  inkSlow = 0.42
-  inkFast = 1.0
-  /** brush velocity gain (pointer speed → fluid speed) */
-  force = 0.4
-  curlStrength = settings.TIER === 'low' ? 14 : 16
-  pressureIterations = settings.TIER === 'low' ? 12 : settings.TIER === 'mid' ? 14 : 18
-  /** per-second decay rates */
-  velocityDecay = 1.25
-  inkDecay = 1.05
-  headDecay = 5.5
-  hueDecay = 1.05
-  ringDecay = 2.2
-  /** scrolling adds only a little ink (the page moving under a still cursor) */
-  scrollInk = 0.35
-  drawEnabled = !browser.reducedMotion && !/[?&]notrail/.test(location.search)
+  private prev = fboHelper.createRenderTarget(1, 1)
+  private curr = fboHelper.createRenderTarget(1, 1)
+  private low = fboHelper.createRenderTarget(1, 1)
+  private lowBlur = fboHelper.createRenderTarget(1, 1)
+  private from = new THREE.Vector4()
+  private to = new THREE.Vector4()
+  private v2 = new THREE.Vector2()
+  material: THREE.ShaderMaterial
+  // live tuning (ch.14 S.10 values)
+  pushStrength = 25
+  velocityDissipation = 0.975
+  weight1Dissipation = 0.95
+  weight2Dissipation = 0.8
+  useNoise = true
+  curlScale = 0.02
+  curlStrength = 3
+  accelerationDissipation = 0.8
+  minRadius = 0
+  maxRadius = 40
+  radiusDistanceRange = 100
+  drawEnabled = true
   needsMouseDown = false
-
-  // pointer state
-  private segA = new THREE.Vector4()
-  private segB = new THREE.Vector4()
-  private force2 = new THREE.Vector2()
-  private speed = 0
-  private peak = 0
-  private peakAge = 0
-  private lastDir = new THREE.Vector2(1, 0)
   private started = false
-  private bursts: { x: number; y: number; r: number; s: number; dx: number; dy: number }[] = []
-  private pendingDown: { x: number; y: number }[] = []
-  private hue = 0
-  private activity = 0
 
   constructor() {
-    const T = () => new THREE.Vector2(1, 1)
-    this.advect = mat(ADVECT_FRAG, {
-      u_velocity: { value: null }, u_source: { value: null }, u_simTexel: { value: this.simTexel }, u_dt: { value: 1 / 60 },
-      u_dissipation: { value: new THREE.Vector4() }, u_scroll: { value: new THREE.Vector2() }, u_aspect: { value: 1 },
-      u_segA: { value: this.segA }, u_segB: { value: this.segB }, u_force: { value: this.force2 },
-      u_burst: { value: [0, 1, 2, 3].map(() => new THREE.Vector4()) }, u_burstDir: { value: [0, 1, 2, 3].map(() => new THREE.Vector4()) },
-      u_hue: { value: 0 }, u_mode: { value: 0 }, u_headGain: { value: 1 },
-    })
-    this.curlMat = mat(CURL_FRAG, { u_velocity: { value: null }, u_texel: { value: T() } })
-    this.vortMat = mat(VORTICITY_FRAG, { u_velocity: { value: null }, u_curl: { value: null }, u_texel: { value: T() }, u_strength: { value: 0 }, u_dt: { value: 0 } })
-    this.divMat = mat(DIVERGENCE_FRAG, { u_velocity: { value: null }, u_texel: { value: T() } })
-    this.scaleMat = mat(SCALE_FRAG, { u_source: { value: null }, u_k: { value: 0.8 } })
-    this.presMat = mat(PRESSURE_FRAG, { u_pressure: { value: null }, u_divergence: { value: null }, u_texel: { value: T() } })
-    this.gradMat = mat(GRADIENT_FRAG, { u_pressure: { value: null }, u_velocity: { value: null }, u_texel: { value: T() } })
-    this.packMat = mat(PACK_FRAG, { u_velocity: { value: null }, u_dye: { value: null }, u_simTexel: { value: this.simTexel } })
-    shared.u_currPaintTexture.value = this.pack.texture
-    input.onDown.push((e) => { this.pendingDown.push({ x: e.clientX, y: e.clientY }) })
-    ;(window as any).__trail = this
+    this.material = fboHelper.track(new THREE.ShaderMaterial({
+      vertexShader: FS_VERT,
+      fragmentShader: PAINT_FRAG,
+      defines: { USE_NOISE: '' },
+      uniforms: {
+        u_prevPaintTexture: { value: null }, u_lowPaintTexture: { value: null },
+        u_paintTexelSize: { value: new THREE.Vector2() },
+        u_drawFrom: { value: this.from }, u_drawTo: { value: this.to },
+        u_vel: { value: new THREE.Vector2() },
+        u_pushStrength: { value: 25 }, u_curlScale: { value: 0.02 }, u_curlStrength: { value: 3 },
+        u_dissipations: { value: new THREE.Vector3() },
+        u_scrollOffset: { value: new THREE.Vector2() },
+      },
+      depthTest: false, depthWrite: false,
+    }))
+    shared.u_currPaintTexture.value = this.curr.texture
   }
 
   resize(w: number, h: number) {
-    // square sim texels (so the pressure solve is isotropic); ink a few times finer
-    const aspect = Math.max(0.2, w / Math.max(1, h))
-    this.aspect = aspect
-    const simH = settings.TIER === 'low' ? 64 : settings.TIER === 'mid' ? 96 : 112
-    const sh = Math.min(simH, Math.max(16, h >> 2)), sw = Math.max(16, Math.round(sh * aspect))
-    const div = settings.TIER === 'high' ? 3 : 4
-    const maxDye = settings.TIER === 'low' ? 320 : 760
-    let dh = Math.max(32, Math.round(h / div)), dw = Math.max(32, Math.round(dh * aspect))
-    const k = Math.min(1, maxDye / Math.max(dw, dh)); dw = Math.round(dw * k); dh = Math.round(dh * k)
-    for (const t of [this.velocity.read, this.velocity.write, this.pressure.read, this.pressure.write, this.curl, this.divergence]) t.setSize(sw, sh)
-    for (const t of [this.dye.read, this.dye.write, this.pack]) t.setSize(dw, dh)
-    this.simTexel.set(1 / sw, 1 / sh)
-    this.dyeTexel.set(1 / dw, 1 / dh)
-    for (const m of [this.curlMat, this.vortMat, this.divMat, this.presMat, this.gradMat]) m.uniforms.u_texel.value.set(1 / sw, 1 / sh)
-    trailField.uniforms.u_trailSimTexel.value.copy(this.simTexel)
-    trailField.uniforms.u_trailDyeTexel.value.copy(this.dyeTexel)
-    shared.u_paintTextureSize.value.set(dw, dh)
+    // render size → 1/4 paint, 1/8 feedback (integer shifts like the original's >>2 / >>3)
+    const pw = Math.max(1, w >> 2), ph = Math.max(1, h >> 2)
+    const lw = Math.max(1, w >> 3), lh = Math.max(1, h >> 3)
+    this.prev.setSize(pw, ph); this.curr.setSize(pw, ph)
+    this.low.setSize(lw, lh); this.lowBlur.setSize(lw, lh)
+    this.material.uniforms.u_paintTexelSize.value.set(1 / pw, 1 / ph)
+    shared.u_paintTextureSize.value.set(pw, ph)
+    this.maxRadius = Math.max(40, props.width / 20)
     this.clear()
   }
 
   clear() {
-    for (const t of [this.velocity.read, this.velocity.write, this.dye.read, this.dye.write, this.pressure.read, this.pressure.write, this.curl, this.divergence])
-      fboHelper.clearColor(0, 0, 0, 0, t)
-    fboHelper.clearColor(0.5, 0.5, 0, 0, this.pack)
-    this.publish()
+    for (const t of [this.prev, this.curr, this.low, this.lowBlur]) fboHelper.clearColor(0.5, 0.5, 0, 0, t)
+    this.material.uniforms.u_vel.value.set(0, 0)
   }
 
-  private publish() {
-    trailField.uniforms.u_trailDye.value = this.dye.read.texture
-    trailField.uniforms.u_trailVelocity.value = this.velocity.read.texture
-    shared.u_currPaintTexture.value = this.pack.texture
-  }
+  update(dt: number) {
+    const u = this.material.uniforms
+    const pw = this.curr.width, ph = this.curr.height
+    // 1) ping-pong first; shared uniform now points at the target about to be written
+    const t = this.prev; this.prev = this.curr; this.curr = t
+    u.u_prevPaintTexture.value = this.prev.texture
+    shared.u_currPaintTexture.value = this.curr.texture
 
-  private emit(kind: TrailImpulseKind, x: number, y: number, vx: number, vy: number, radius: number, strength: number) {
-    trailField.emit({ kind, x, y, vx, vy, speed: this.speed, radius, strength, stage: props.stage })
-  }
-
-  /** a radial splash at CSS px (x, y), strength 0..1; dir = forward kick in viewport heights / s */
-  burst(px: number, py: number, strength = 1, dirX = 0, dirY = 0) {
-    if (!this.drawEnabled || this.bursts.length >= 4) return
-    const H = Math.max(1, props.height)
-    const x = (px / H), y = 1 - py / H
-    const r = (props.useMobileLayout ? 0.058 : 0.06) * (0.6 + 0.6 * strength)
-    this.bursts.push({ x, y, r, s: strength, dx: dirX, dy: dirY })
-  }
-
-  /**
-   * QA / demo drive: window.__trailDrive = { path: [[x, y], …] (CSS px), speed: px/s, steps?: sim steps per frame,
-   * clicks?: [index, …], hold?: s of settling after the path } plays a scripted stroke in SIM time (so a slow remote browser shows the true look).
-   */
-  private drive: { path: number[][]; speed: number; steps: number; clicks: number[]; t: number; len: number[]; total: number; hold: number; done: boolean } | null = null
-  private dCur = new THREE.Vector2()
-  private dPrev = new THREE.Vector2()
-  private pollDrive() {
-    const w = (window as any).__trailDrive
-    if (!w) return
-    ;(window as any).__trailDrive = null
-    const len = [0]
-    for (let i = 1; i < w.path.length; i++) len.push(len[i - 1] + Math.hypot(w.path[i][0] - w.path[i - 1][0], w.path[i][1] - w.path[i - 1][1]))
-    if (w.clear) { this.clear(); this.speed = 0; this.peak = 0 }
-    this.drive = { path: w.path, speed: w.speed || 1200, steps: w.steps || 6, clicks: w.clicks || [], t: 0, len, total: len[len.length - 1], hold: w.hold ?? 0, done: false }
-    this.dCur.set(w.path[0][0], w.path[0][1]); this.dPrev.copy(this.dCur)
-    this.segB.set(this.dCur.x / Math.max(1, props.height), 1 - this.dCur.y / Math.max(1, props.height), 0, 0); this.started = true
-  }
-  private drivePoint(d: number, out: THREE.Vector2) {
-    const D = this.drive!
-    let i = 1
-    while (i < D.len.length - 1 && D.len[i] < d) i++
-    const a = D.path[i - 1], b = D.path[i], seg = Math.max(1e-6, D.len[i] - D.len[i - 1])
-    const t = Math.min(1, Math.max(0, (d - D.len[i - 1]) / seg))
-    out.set(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
-    return i
-  }
-
-  private frozen = false
-  update(rawDt: number) {
-    this.pollDrive()
-    if (this.frozen && !this.drive) { if (!(window as any).__trailFreeze) this.frozen = false; else return }
-    if (this.drive) {
-      const D = this.drive, h = 1 / 60
-      for (let s = 0; s < D.steps; s++) {
-        const before = D.t * D.speed
-        D.t += h
-        const dist = Math.min(D.total, D.t * D.speed)
-        this.dPrev.copy(this.dCur)
-        const iBefore = this.drivePoint(before, new THREE.Vector2())
-        const i = this.drivePoint(dist, this.dCur)
-        for (let ci = D.clicks.length - 1; ci >= 0; ci--) {
-          const c = D.clicks[ci]
-          if (dist >= D.len[c] - 1e-6) { this.pendingDown.push({ x: D.path[c][0], y: D.path[c][1] }); D.clicks.splice(ci, 1) }
-        }
-        void before; void iBefore; void i
-        const moving = dist < D.total
-        this.frame(h, this.dCur, this.dPrev, moving, false, 0)
-        if (!moving && D.t * D.speed >= D.total + D.hold * D.speed) { D.done = true; break }
-      }
-      if (D.done) { this.drive = null; (window as any).__trailDriveDone = true; if ((window as any).__trailFreeze) this.frozen = true }
-      return
-    }
-    const touchRule = (this.needsMouseDown || browser.isMobile || input.isTouch) && (!input.isDown || !input.wasDown)
-    // a jump (anchor link, programmatic scroll, resize) is a teleport, not a stroke: start clean
-    if (Math.abs(props.scrollDelta) > props.height * 0.35) {
-      this.clear(); this.speed = 0; this.peak = 0
-      this.segB.set(input.mousePixelXY.x / Math.max(1, props.height), 1 - input.mousePixelXY.y / Math.max(1, props.height), 0, 0)
-      this.frame(rawDt, input.mousePixelXY, input.mousePixelXY, false, true, 0)
-      return
-    }
-    this.frame(rawDt, input.mousePixelXY, input.prevMousePixelXY, input.hadMoved, touchRule, props.scrollDelta)
-  }
-
-  private frame(rawDt: number, cur: THREE.Vector2, prev: THREE.Vector2, hadMoved: boolean, touchRule: boolean, scrollDelta: number) {
-    const dt = Math.min(Math.max(rawDt, 1 / 240), 1 / 15)
-    const W = Math.max(1, props.width), H = Math.max(1, props.height)
+    // 6) scroll is part of the input (vertical page): shift the pointer and the advection lookup
     const ratio = props.look.paintOffsetRatio
-    const scrollUv = scrollDelta / H * ratio
+    const scrollView = props.height > 0 ? props.scrollDelta / props.height : 0 // viewport fractions
+    const offY = scrollView * ratio        // added to the -1..1 pointer as the reference does (one viewport = 1.0)
+    u.u_scrollOffset.value.set(0, scrollView * ratio)
 
-    // —— the pointer: speed-driven capsule brush ————————————————————————————————————————
-    const can = this.drawEnabled && (input.everMoved || !!this.drive) && !props.overlayOpen
-    // relative motion of pointer vs content: a still cursor over a scrolling page still stirs (a little)
-    const dxp = cur.x - prev.x, dyp = (cur.y - prev.y) + scrollDelta * ratio * this.scrollInk
-    const inst = Math.hypot(dxp, dyp) / dt                                     // CSS px / s this frame
-    const k = 1 - Math.exp(-dt * (inst > this.speed ? 30 : 9))                 // rise fast, fall gently
-    this.speed += (inst - this.speed) * k
-    if (!hadMoved && Math.abs(scrollDelta) < 0.01) this.speed *= Math.exp(-dt * 10)
-    const sN = smoothstep(this.speedSlow, this.speedFast, this.speed)
-    const moving = (hadMoved || Math.abs(scrollDelta) > 0.01) && !touchRule
-    let radius = moving && can ? this.radiusSlow + (this.radiusFast - this.radiusSlow) * Math.pow(sN, 1.25) : 0
-    if (props.useMobileLayout) radius *= 0.95          // small screen: keep the thread fine
-    const ink = this.inkSlow + (this.inkFast - this.inkSlow) * sN
+    // 2) radius from speed: px moved this frame (plus the scroll streak, ×3 for the radius test)
+    this.v2.copy(input.mousePixelXY); this.v2.y -= props.scrollDelta * ratio * 3
+    const moved = this.v2.distanceTo(input.prevMousePixelXY)
+    let radius = fit(moved, 0, this.radiusDistanceRange, this.minRadius, this.maxRadius)
+    // 3) when it refuses to paint
+    const touchRule = (this.needsMouseDown || browser.isMobile || input.isTouch) && (!input.isDown || !input.wasDown)
+    if (Math.abs(props.scrollDelta) === 0 && (!input.hadMoved || !this.drawEnabled || touchRule)) radius = 0
+    if (!input.everMoved || !this.drawEnabled) radius = 0
+    radius = (radius / props.height) * ph // CSS px → paint px
 
-    // brush segment in aspect space (x in viewport heights)
-    const bx = cur.x / H, by = 1 - cur.y / H
-    if (!this.started && (input.everMoved || this.drive)) { this.segB.set(bx, by, 0, 0); this.started = true }
-    this.segA.copy(this.segB); this.segA.y += scrollUv     // last point rides with the page
-    if (!input.wasDown && input.isDown && input.isTouch) this.segA.set(bx, by, 0, 0)   // a new finger never draws a line from the old one
-    this.segB.set(bx, by, radius, radius > 0 ? ink : 0)
+    // 4) the brush is a segment: from = last to
+    this.from.copy(this.to)
+    const mx = input.mouseXY.x, my = input.mouseXY.y + offY
+    this.to.set(((mx + 1) * pw) / 2, ((my + 1) * ph) / 2, radius, 1)
+    if (!this.started) { this.from.copy(this.to); this.started = true }
 
-    // brush velocity: pointer velocity (viewport heights / s) → sim texels / s
-    if (inst > 1) this.lastDir.set(dxp, -dyp).normalize()
-    const vH = this.speed / H                                    // viewport heights / s
-    const toSim = 1 / this.simTexel.y                            // 1 viewport height = simH texels
-    this.force2.set(this.lastDir.x * vH * toSim * this.force, this.lastDir.y * vH * toSim * this.force)
+    // 5) leaky-integrated brush velocity
+    this.v2.set(this.to.x - this.from.x, this.to.y - this.from.y).multiplyScalar(dt * 0.8)
+    u.u_vel.value.multiplyScalar(this.accelerationDissipation).add(this.v2)
 
-    // flick bloom: a hard stop after a fast throw
-    this.peakAge += dt
-    if (this.speed > this.peak) { this.peak = this.speed; this.peakAge = 0 }
-    this.peak *= Math.exp(-dt * 2.5)
-    if (can && !touchRule && this.peak > 1700 && this.speed < this.peak * 0.32 && this.peakAge < 0.3) {
-      const st = Math.min(1, (this.peak - 1500) / 2600)
-      this.burst(cur.x, cur.y, 0.45 + 0.4 * st, this.lastDir.x * 0.7 * st, this.lastDir.y * 0.7 * st)
-      this.emit('flick', bx / this.aspect, by, this.lastDir.x * vH, this.lastDir.y * vH, 0.05, st)
-      trailSound.flick(st)
-      // the lake answers a flick with a real drop
-      if ((props.stage === 'hero' || props.stage === 'contact') && pool.pointer.active && props.waterPointerActive) pool.drop(pool.pointer.x, pool.pointer.z, 0.05 + 0.08 * st, 0.02 + 0.025 * st)
-      this.peak = 0
+    // live tuning → uniforms
+    u.u_pushStrength.value = this.pushStrength
+    u.u_curlScale.value = this.curlScale
+    u.u_curlStrength.value = this.curlStrength
+    const f = settings.PAINT_DT_SCALED ? dt * 60 : 1 // parity: per-frame constants (see checklist note)
+    u.u_dissipations.value.set(Math.pow(this.velocityDissipation, f), Math.pow(this.weight1Dissipation, f), Math.pow(this.weight2Dissipation, f))
+    if (this.useNoise !== ('USE_NOISE' in this.material.defines)) {
+      if (this.useNoise) this.material.defines.USE_NOISE = ''; else delete this.material.defines.USE_NOISE
+      this.material.needsUpdate = true
     }
-    // click / tap splash (boot.ts already drops into the lake on a press over the water)
-    for (const d of this.pendingDown.splice(0)) {
-      if (!can && !(this.drawEnabled && !props.overlayOpen)) continue
-      this.burst(d.x, d.y, 1)
-      this.emit('burst', d.x / W, 1 - d.y / H, 0, 0, 0.06, 1)
-      trailSound.splash()
-    }
-    if (radius > 0) this.emit('stroke', bx / this.aspect, by, this.lastDir.x * vH, this.lastDir.y * vH, radius, sN)
 
-    // speed colour: slow = cool pearl (0), fast = warm vivid (1); eased so a flick tints its own ink
-    this.hue += (sN - this.hue) * (1 - Math.exp(-dt * 12))
-
-    // —— the solver ——————————————————————————————————————————————————————————————————————
-    const steps = Math.min(3, Math.max(1, Math.ceil(dt / (1 / 50))))
-    const h = dt / steps
-    for (let i = 0; i < steps; i++) this.step(h, i === 0 ? scrollUv : 0, i === 0)
-
-    // pack for the type shader + publish
-    this.packMat.uniforms.u_velocity.value = this.velocity.read.texture
-    this.packMat.uniforms.u_dye.value = this.dye.read.texture
-    fboHelper.render(this.packMat, this.pack)
-    this.publish()
-
-    // cheap activity estimate (no GPU readback): ink laid recently, decaying like the ink
-    this.activity = Math.max(this.activity * Math.exp(-dt * this.inkDecay), radius > 0 ? Math.min(1, ink * (0.3 + sN)) : 0, this.bursts.length ? 1 : 0)
-    trailField.activity = this.activity
-    trailSound.update(dt, this.speed, sN, radius > 0)
-    this.bursts.length = 0
+    // 7) three GPU calls
+    u.u_lowPaintTexture.value = this.low.texture
+    fboHelper.render(this.material, this.curr)
+    fboHelper.copy(this.curr.texture, this.low)
+    blurInPlace(8, this.low, this.lowBlur)
   }
-
-  private step(dt: number, scrollUv: number, inject: boolean) {
-    const a = this.advect.uniforms
-    // brush + bursts only on the first substep (the capsule already spans the whole frame's motion)
-    a.u_segA.value = inject ? this.segA : ZERO4
-    a.u_segB.value = inject ? this.segB : ZERO4
-    for (let i = 0; i < 4; i++) {
-      const b = inject ? this.bursts[i] : undefined
-      ;(a.u_burst.value[i] as THREE.Vector4).set(b ? b.x : 0, b ? b.y : 0, b ? b.r : 1, b ? b.s : 0)
-      ;(a.u_burstDir.value[i] as THREE.Vector4).set(b ? b.dx / this.simTexel.y : 0, b ? b.dy / this.simTexel.y : 0, 0, 0)
-    }
-    a.u_dt.value = dt
-    a.u_aspect.value = this.aspect
-    a.u_scroll.value.set(0, scrollUv)
-    a.u_hue.value = this.hue
-
-    // 1) vorticity confinement: keeps the wake curling instead of smearing flat
-    this.curlMat.uniforms.u_velocity.value = this.velocity.read.texture
-    fboHelper.render(this.curlMat, this.curl)
-    const v = this.vortMat.uniforms
-    v.u_velocity.value = this.velocity.read.texture; v.u_curl.value = this.curl.texture
-    v.u_strength.value = this.curlStrength; v.u_dt.value = dt
-    fboHelper.render(this.vortMat, this.velocity.write); this.velocity.swap()
-
-    // 2) make it incompressible: divergence → pressure (warm-started) → subtract the gradient
-    this.divMat.uniforms.u_velocity.value = this.velocity.read.texture
-    fboHelper.render(this.divMat, this.divergence)
-    this.scaleMat.uniforms.u_source.value = this.pressure.read.texture
-    fboHelper.render(this.scaleMat, this.pressure.write); this.pressure.swap()
-    const p = this.presMat.uniforms
-    p.u_divergence.value = this.divergence.texture
-    for (let i = 0; i < this.pressureIterations; i++) {
-      p.u_pressure.value = this.pressure.read.texture
-      fboHelper.render(this.presMat, this.pressure.write); this.pressure.swap()
-    }
-    const g = this.gradMat.uniforms
-    g.u_pressure.value = this.pressure.read.texture; g.u_velocity.value = this.velocity.read.texture
-    fboHelper.render(this.gradMat, this.velocity.write); this.velocity.swap()
-
-    // 3) advect velocity (+ brush force, bursts), then the ink through it (+ brush ink)
-    a.u_mode.value = 0
-    a.u_velocity.value = this.velocity.read.texture; a.u_source.value = this.velocity.read.texture
-    a.u_dissipation.value.set(this.velocityDecay, this.velocityDecay, 0, 0)
-    fboHelper.render(this.advect, this.velocity.write); this.velocity.swap()
-
-    a.u_mode.value = 1
-    a.u_velocity.value = this.velocity.read.texture; a.u_source.value = this.dye.read.texture
-    a.u_dissipation.value.set(this.inkDecay, this.headDecay, this.hueDecay, this.ringDecay)
-    fboHelper.render(this.advect, this.dye.write); this.dye.swap()
-  }
-
-  get texture() { return this.pack.texture }
-  get lowTexture() { return this.pack.texture }
-  get dyeTexture() { return this.dye.read.texture }
-  get velocityTexture() { return this.velocity.read.texture }
+  get texture() { return this.curr.texture }
+  get lowTexture() { return this.low.texture }
 }
