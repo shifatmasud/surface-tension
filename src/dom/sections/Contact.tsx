@@ -96,7 +96,7 @@ export function Contact() {
           const r = o.getBoundingClientRect()
           const f = clamp((props.height - r.top) / (r.height + 1))
           props.overscroll = f
-          if (bar.current) bar.current.style.transform = `scaleX(${f.toFixed(3)})`
+          if (bar.current) bar.current.style.setProperty('--f', f.toFixed(3))
           if (f > 0.985 && !fired) { fired = true; audio.swell(false); scroll.wrapToTop(); setTimeout(() => (fired = false), 900) }
         }
       },

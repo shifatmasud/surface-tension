@@ -131,9 +131,13 @@ html.gl-cards .card__dom { visibility: hidden; }
 .overscroll { height: 60vh; display: grid; grid-template-columns: repeat(var(--grid-cols), minmax(0, 1fr)); column-gap: var(--grid-gap); align-content: center; padding: 0 var(--pad-x); }
 /* back-to-the-surface: flat UI only — a small label over a hairline track with a solid fill (no gradient, no pill) */
 .overscroll__bar { grid-column: 4 / span 6; display: grid; gap: var(--s2, 16px); color: var(--c-ink); }
+/* Shifat 13:58Z: "Calm Green filling pill progress bar" — a rounded capsule, light grey track, a calm sage-green fill
+   (#2E8B62 → #2A7F5A: 3.3:1 and 3.9:1 against the #E3E6E2 track, the 3:1 non-text minimum), eased fill */
+.overscroll__track { position: relative; height: 12px; border-radius: 999px; background: #e3e6e2; overflow: hidden; box-shadow: inset 0 1px 1.5px rgba(10, 10, 11, .08); }
+.overscroll__fill { position: absolute; inset: 0; border-radius: 999px; background: linear-gradient(90deg, #2e8b62, #2a7f5a); transform-origin: 0 50%; transform: translateX(calc((var(--f, 0) - 1) * 100%)); transition: transform .32s cubic-bezier(.22, .8, .24, 1); will-change: transform; }
+.overscroll__fill::after { content: ''; position: absolute; inset: 2px 6px auto 6px; height: 3px; border-radius: 999px; background: rgba(255, 255, 255, .22); }
+@media (prefers-reduced-motion: reduce) { .overscroll__fill { transition: none; } }
 .overscroll__label { margin: 0; font-size: var(--fs-small); font-weight: 400; line-height: 1.45; letter-spacing: 0; }
-.overscroll__track { position: relative; height: 1px; background: rgba(10, 10, 11, .14); overflow: hidden; }
-.overscroll__fill { position: absolute; inset: 0; background: currentColor; transform-origin: 0 50%; transform: scaleX(0); }
 @media (max-width: 812px) { .overscroll__bar { grid-column: 1 / -1; } }
 
 /* project overlay */
