@@ -33,14 +33,19 @@ let scrollForU: ((u: number) => number) | null = null
  *  ~0.8 forward to sell depth, then hands back to the fixed −6° of the deep descent. Scroll-driven, reversible. Applied to
  *  the camera AND to the guide stone's path pose, so the stone keeps its place in the frame. */
 function underwaterShape(u: number, pos: THREE.Vector3, target: THREE.Vector3) {
-  const kIn = ss(0.54, 0.62, u), kOut = ss(0.74, 0.84, u), k = kIn * (1 - kOut)
-  if (k <= 0) return
   const dx = target.x - pos.x, dz = target.z - pos.z, hz = Math.max(1e-3, Math.hypot(dx, dz))
   const fx = dx / hz, fz = dz / hz
-  const dolly = 0.8 * ss(0.54, 0.68, u) * (1 - kOut)
-  pos.x += fx * dolly; pos.z += fz * dolly; target.x += fx * dolly; target.z += fz * dolly
-  const pNow = Math.atan2(target.y - pos.y, hz), pDown = -10.5 * Math.PI / 180
-  target.y = pos.y + Math.tan(pNow + (pDown - pNow) * k) * hz
+  const kIn = ss(0.54, 0.62, u), kDeep = ss(0.70, 0.80, u), kBack = ss(0.92, 1.0, u)
+  const dolly = 0.8 * ss(0.54, 0.68, u) * (1 - kBack)
+  if (dolly > 0) { pos.x += fx * dolly; pos.z += fz * dolly; target.x += fx * dolly; target.z += fz * dolly }
+  const D = Math.PI / 180
+  // W19 (rules: only 2 tilts, UP +12–18°, DOWN −20–25°): the look-up is the path's own (peaks ~+40°, see below)
+  // (a +15° cap was tried at 21:30Z: the look-up then shows only grey fog, not the surface ripples Shifat asked for; held for his call)
+  let p = Math.atan2(target.y - pos.y, hz)
+  p = p + (-10.5 * D - p) * kIn                 // from ~60 % of the underwater span: a little down (base −6° − 4.5°)
+  p = p + (-22 * D - p) * kDeep                 // the deep descent tilt (−22°)
+  p = p + (-6 * D - p) * kBack                  // and back to the fixed −6° as the work slides up
+  target.y = pos.y + Math.tan(p) * hz
 }
 
 export function Dive() {
