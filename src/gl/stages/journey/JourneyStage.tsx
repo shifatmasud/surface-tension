@@ -54,6 +54,7 @@ export function JourneyStage(): JSX.Element {
   }, [S, gl])
 
   useFrame((state) => {
+    ;(window as any).__scene = state.scene // QA
     const g = group.current
     if (!journey.active) {
       if (g.visible) { g.visible = false; resetJourneyAudio(); journey.beat = -1 }
@@ -148,10 +149,20 @@ export function JourneyStage(): JSX.Element {
     su.u_ringT.value = O.ringT; su.u_ringAmp.value = O.ringAmp; su.u_bright.value = O.bright
     su.u_time.value = time; su.u_gloss.value = O.gloss
     S.backdropMat.uniforms.u_amount.value = O.gloss
-    // the backdrop always sits square behind what the camera looks at, so its glow stays composed
-    S.tmp2.copy(O.camTarget).sub(O.camPos).normalize()
-    S.backdrop.position.copy(O.camTarget).addScaledVector(S.tmp2, 55)
-    S.backdrop.lookAt(S.tmp.copy(O.camPos))
+    // the backdrop always sits square behind what the REAL camera looks at (the rig damps toward journey.pose, so on
+    // the pull-back and on a fast scroll it lags O.camPos; a plane aimed at O.camPos was seen at an angle and its edge
+    // showed as a slanted seam with the grey page field beside the tablet), and it always overfills the frustum
+    {
+      const cam = state.camera as THREE.PerspectiveCamera
+      const camL = S.tmp.copy(cam.position).sub(JOURNEY_ORIGIN)
+      const fwd = cam.getWorldDirection(S.tmp2)
+      const D = Math.max(1, camL.distanceTo(O.camTarget)) + 55
+      S.backdrop.position.copy(camL).addScaledVector(fwd, D)
+      S.backdrop.lookAt(cam.position) // Object3D.lookAt takes a WORLD point (the group sits at JOURNEY_ORIGIN; aiming at
+      // the local camL turned the plane ~70° away, which was the real cause of the seam)
+      const hh = D * Math.tan(((cam.fov || O.fov) * Math.PI) / 360), asp = Math.max(1, props.width / Math.max(1, props.height))
+      S.backdrop.scale.setScalar(Math.max(1, (hh * 2.4) / 80, (hh * asp * 2.4) / 130))
+    }
     S.crewOut.root.visible = O.crewVisible
     if (O.crewVisible) {
       // center → feet: the rig's origin is between the feet

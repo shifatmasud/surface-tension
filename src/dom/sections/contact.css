@@ -18,7 +18,7 @@
   section.contact .contact__title { grid-column: 1; grid-row: 2; align-self: end; }
   section.contact .contact__row {
     grid-column: 2; grid-row: 2; align-self: end; justify-self: end; margin: 0 0 0.9vh;
-    width: clamp(300px, 24vw, 460px); display: flex; flex-direction: column; gap: clamp(22px, 3.2vh, 40px);
+    width: clamp(300px, 24vw, 460px); display: flex; flex-direction: column; align-items: stretch; gap: clamp(22px, 3.2vh, 40px);
   }
   section.contact .contact__cta, section.contact .contact__meta { grid-column: auto; }
   section.contact .footer { grid-column: 1 / -1; grid-row: 3; padding-top: 4.5vh; }

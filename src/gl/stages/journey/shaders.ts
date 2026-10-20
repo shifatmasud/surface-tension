@@ -59,7 +59,10 @@ export function skyMaterial() {
         sky += vec3(1.0, 0.5, 0.2) * (pow(sd, 14.0) * 0.18 + pow(sd, 80.0) * 0.2) + vec3(1.0, 0.85, 0.6) * pow(sd, 1500.0) * 5.0;
         // dusk in the middle of the descent
         vec3 dusk = mix(vec3(1.0, 0.36, 0.22), vec3(0.09, 0.05, 0.26), pow(smoothstep(-0.03, 0.6, y), 0.5)) + vec3(1.0, 0.5, 0.25) * (pow(sd, 5.0) * 0.5 + pow(sd, 400.0) * 3.0);
-        dusk = mix(vec3(0.05, 0.04, 0.1), dusk, smoothstep(-0.06, 0.0, y));
+        // below the horizon: a hazy dim land that warms up into the horizon glow (it was a flat dark-violet slab with a
+        // hard edge, which showed as a purple band between the hill tops and the sky during the descent)
+        vec3 duskGnd = mix(vec3(0.05, 0.08, 0.07), vec3(0.5, 0.27, 0.21), smoothstep(-0.24, -0.005, y));
+        dusk = mix(duskGnd, dusk, smoothstep(-0.02, 0.012, y));
         float a = u_atmos;
         vec3 col = a < 0.5 ? mix(space, dusk, smoothstep(0.0, 0.5, a)) : mix(dusk, sky, smoothstep(0.5, 1.0, a));
         gl_FragColor = vec4(col, 1.0);
