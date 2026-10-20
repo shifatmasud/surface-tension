@@ -5,3 +5,21 @@
   section.contact .contact__row { margin-top: 4.5vh; }
   section.contact .footer { padding-top: 3.5vh; }
 }
+
+/* Contact, wide landscape: north-star frame. The headline keeps the lower-left, and the CTA + links move to the
+   bottom-right beside it, aligned to its last line, like the north-star caption. Before, they stacked under the
+   headline and pushed it up to ~35px under the stone. The headline column is max-content (nowrap), so the right
+   column can never overlap it. */
+@media (min-width: 1200px) and (min-aspect-ratio: 13/10) {
+  section.contact {
+    display: grid; grid-template-columns: max-content minmax(0, 1fr); grid-template-rows: 1fr auto auto;
+    column-gap: var(--grid-gap); align-content: stretch; padding-bottom: 3.5vh;
+  }
+  section.contact .contact__title { grid-column: 1; grid-row: 2; align-self: end; }
+  section.contact .contact__row {
+    grid-column: 2; grid-row: 2; align-self: end; justify-self: end; margin: 0 0 0.9vh;
+    width: clamp(300px, 24vw, 460px); display: flex; flex-direction: column; gap: clamp(22px, 3.2vh, 40px);
+  }
+  section.contact .contact__cta, section.contact .contact__meta { grid-column: auto; }
+  section.contact .footer { grid-column: 1 / -1; grid-row: 3; padding-top: 4.5vh; }
+}

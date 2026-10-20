@@ -77,7 +77,7 @@ export class ScreenPaintDistortionEffect extends Effect {
 export class GradeEffect extends Effect {
   constructor() {
     super('Grade', /* glsl */ `
-      uniform float u_exposure, u_saturation, u_contrast, u_brightness, u_vignette, u_vignetteSoft, u_fade;
+      uniform float u_exposure, u_saturation, u_contrast, u_brightness, u_vignette, u_vignetteSoft, u_fade, u_lift;
       uniform vec3 u_tint, u_fadeColor;
       uniform float u_waterline;   // -1 hidden, 0..1 screen y of the waterline band
       uniform float u_aspect;
@@ -106,6 +106,15 @@ export class GradeEffect extends Effect {
         vec2 q = uv - 0.5; q.x *= mix(1.0, u_aspect, 0.5);
         float vig = smoothstep(0.85, 0.85 - u_vignetteSoft, length(q) * 1.15);
         c *= mix(1.0, vig, u_vignette);
+        // airy field: pull near-white, near-neutral pixels toward paper white (north-star field). Gated by luminance,
+        // so the gem, the type and the grey water keep their values
+        if (u_lift > 0.0) {
+          vec3 cc = min(c, vec3(1.0));
+          float lw = smoothstep(0.52, 0.8, dot(cc, vec3(0.2126, 0.7152, 0.0722)));
+          // an equal offset on all channels (toward white by the headroom of the brightest channel) keeps tinted
+          // pixels' chroma, so the blue glow's falloff stays smooth (a chroma gate left a grey ring around it)
+          c += (1.0 - max(cc.r, max(cc.g, cc.b))) * u_lift * lw;
+        }
         // fade toward the section colour from a highlight-clipped copy: the HDR buffer carries speculars and caustics
         // far above 1.0, and a 0.97 fade of a value of 20 still leaves a bright blotch (the lab's white patches)
         c = mix(c, min(c, vec3(1.0)), smoothstep(0.0, 0.35, u_fade));
@@ -121,7 +130,7 @@ export class GradeEffect extends Effect {
       uniforms: new Map<string, THREE.Uniform<any>>([
         ['u_exposure', new THREE.Uniform(1)], ['u_saturation', new THREE.Uniform(1)], ['u_contrast', new THREE.Uniform(1)],
         ['u_brightness', new THREE.Uniform(0)], ['u_vignette', new THREE.Uniform(0.2)], ['u_vignetteSoft', new THREE.Uniform(0.7)],
-        ['u_fade', new THREE.Uniform(0)], ['u_tint', new THREE.Uniform(new THREE.Color(1, 1, 1))],
+        ['u_fade', new THREE.Uniform(0)], ['u_lift', new THREE.Uniform(0)], ['u_tint', new THREE.Uniform(new THREE.Color(1, 1, 1))],
         ['u_fadeColor', new THREE.Uniform(new THREE.Color(0, 0, 0))],
         ['u_waterline', new THREE.Uniform(-1)], ['u_aspect', new THREE.Uniform(1)],
         ['u_blueNoise', shared.u_blueNoise as any], ['u_blueNoiseOffset', shared.u_blueNoiseOffset as any], ['u_blueNoiseSize', shared.u_blueNoiseSize as any],

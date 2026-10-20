@@ -23,7 +23,7 @@ export function Lab() {
   const [active, setActive] = useState(0)
   useSection(ref, (range) => {
     const pose = { pos: new THREE.Vector3(0, 24, 1.5), target: new THREE.Vector3(0, 0, 0), fov: 40 }
-    const st = visuals.register('lab', () => pose, { fade: 0.97, vignette: 0.0, bloom: 0.15, bloomThreshold: 0.9, contrast: 1.0 })
+    const st = visuals.register('lab', () => pose, { fade: 0.97, bg: new THREE.Color('#f5f6f7'), fogColor: new THREE.Color('#f5f6f7'), vignette: 0.0, bloom: 0.15, bloomThreshold: 0.9, contrast: 1.0 })
     let x = 0, lastX = 0, lastActive = -1, applied = 0, primed = false
     return {
       name: 'lab',

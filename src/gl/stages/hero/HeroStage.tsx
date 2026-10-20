@@ -114,7 +114,9 @@ export function HeroStage() {
     m.position.copy(gem.pos)
     m.scale.setScalar(gem.radius)
     // contact bookend: the low camera saw the hero's forward tilt edge-on (a flat sliver); tip the table toward the lens
-    const baseTilt = props.stage === 'contact' ? 0.2 : -0.42
+    // hero: the classic three-quarter jewel view: crown, table and pavilion point all read (at -0.42 the camera
+    // saw the stone side-on: a thin crown over a dark pavilion window; at 0 and above it reads as a flat oval). The statement's top-down shot was framed for -0.42
+    const baseTilt = props.stage === 'contact' ? 0.2 : props.stage === 'statement' ? -0.42 : ((window as any).__heroTilt ?? -0.25)
     m.rotation.set(st.tiltX.update(baseTilt - pointer.y * 0.1, dt), st.spin, st.tiltZ.update(pointer.x * -0.12, dt), 'XYZ')
     if (bob < -0.985 && t - st.lastTouch > 2.5 && lift < 0.05) {
       pool.drop(0, 0, 0.035, 0.014); st.lastTouch = t

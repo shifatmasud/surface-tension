@@ -35,7 +35,7 @@ export function Statement() {
       live.target.copy(base.target); live.pos.copy(base.pos).sub(base.target).multiplyScalar(k).add(base.target); live.fov = pose.fov
       return live
     }
-    const st = visuals.register('statement', shot, { fade: 0.1, bg: new THREE.Color('#f7f8f9'), fogColor: new THREE.Color('#eceef0'), brightness: 0.05, saturation: 1.1, vignette: 0.02, bloom: 0.1, contrast: 1.02, exposure: 1.12 })
+    const st = visuals.register('statement', shot, { fade: 0.1, bg: new THREE.Color('#f7f8f9'), fogColor: new THREE.Color('#eceef0'), brightness: 0.05, saturation: 1.1, vignette: 0.02, bloom: 0.1, contrast: 1.02, exposure: 1.12, lift: 0.4 })
     const handles: ReturnType<typeof ufxText>[] = []
     let lastStep = -1
     return {

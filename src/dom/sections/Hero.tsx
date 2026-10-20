@@ -31,8 +31,12 @@ export function Hero() {
       // north-star frame: the gem centred in the upper ~60 %, giant type on the bottom margin
       pose.pos.z -= pr * HP.z * (1 - t); pose.pos.y -= pr * HP.y * (1 - t); pose.target.y -= pr * HP.ty * (1 - t)
       pose.fov = mix(vfovFor(44, 22, 58), vfovFor(58), t)
+      // ultrawide: the vertical fov hits its 22° floor and the stone grew past the header; back off along the view
+      // line so it keeps its 16:10 share of the frame height
+      const wideK = Math.max(1, Math.tan((14.2 * Math.PI) / 180) / Math.tan((pose.fov * Math.PI) / 360))
+      if (wideK > 1.001) pose.pos.sub(pose.target).multiplyScalar(mix(wideK, 1, t)).add(pose.target)
       return pose
-    }, { vignette: 0.0, bloom: 0.3, contrast: 1.0, saturation: 1.05, exposure: 1.12 })
+    }, { vignette: 0.0, bloom: 0.3, contrast: 1.0, saturation: 1.05, exposure: 1.12, lift: 0.6 })
     let handle: ReturnType<typeof ufxText> | null = null
     let reveal = { v: 0 }
     // the gem is the star: the name surfaces only after it has settled

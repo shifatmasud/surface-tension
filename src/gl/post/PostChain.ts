@@ -68,7 +68,7 @@ export class PostChain {
     const g = (n: string) => this.grade.u(n)
     g('u_exposure').value = L.exposure; g('u_saturation').value = L.saturation; g('u_contrast').value = L.contrast
     g('u_brightness').value = L.brightness; g('u_vignette').value = L.vignette; g('u_vignetteSoft').value = L.vignetteSoft
-    g('u_fade').value = L.fade; ;(g('u_tint').value as THREE.Color).copy(L.tint); ;(g('u_fadeColor').value as THREE.Color).copy(L.bg)
+    g('u_fade').value = L.fade; g('u_lift').value = L.lift; ;(g('u_tint').value as THREE.Color).copy(L.tint); ;(g('u_fadeColor').value as THREE.Color).copy(L.bg)
     this.bloom.intensity = L.bloom
     this.bloom.luminanceMaterial.threshold = L.bloomThreshold
     const d = (n: string) => this.distortion.u(n)

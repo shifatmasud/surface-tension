@@ -40,16 +40,18 @@ export function Contact() {
       pose.fov = vfovFor(46, 22, 60)
       // the stone keeps the same share of the frame height at any aspect: on ultrawide (narrow vertical fov) the
       // camera backs off along the same line instead of letting the gem crop off the top
-      const back = Math.max(1, 30 / pose.fov) * mix(1.25, 1, pr) // landscape: a touch further so the stone clears the type
+      const back = Math.max(1, 30 / pose.fov) * mix(1.15, 1, pr) // landscape: a touch further (the type now sits lower, so the stone can be a little bigger)
       pose.pos.y = 0.33 + (pose.pos.y - 0.33) * back; pose.pos.z *= back
       // aim so the gem sits ~28 % from the top at any aspect (ultrawide's narrow vertical fov would push a fixed
       // aim off the top): down-angle to the gem plus the angle that puts it k of the half-height above centre
-      const half = (pose.fov * Math.PI) / 360, k = 0.6 - pr * 0.06
+      const aspect = props.width / Math.max(1, props.height)
+      // ultrawide: the narrow vertical fov lifts the stone toward the header, so aim it a little lower there
+      const half = (pose.fov * Math.PI) / 360, k = 0.6 - pr * 0.06 - 0.24 * clamp((aspect - 1.6) / 0.8)
       const dz = pose.pos.z, gemDown = Math.atan2(pose.pos.y - 0.33, dz)
       const pitch = gemDown + Math.atan(k * Math.tan(half))
       pose.target.set(0, pose.pos.y - Math.tan(pitch) * dz, 0)
       return pose
-    }, { fade: 0.1, vignette: 0.05, bloom: 0.22, exposure: 1.1 })
+    }, { fade: 0.1, vignette: 0.05, bloom: 0.22, exposure: 1.1, lift: 0.5 })
     let h: ReturnType<typeof ufxText> | null = null
     let fired = false
     // the crewmate's break-out droplets land on the bright water as the field turns light again
