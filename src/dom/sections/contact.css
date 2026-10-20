@@ -85,3 +85,10 @@ html.no-gl .footer-spacer { display: none; }
 .sticker--l.sticker--drop { width: 8em; height: 8em; }
 @media (max-width: 812px) { .stickers { inset: 11vh var(--pad-x) 46vh; } .sticker { left: var(--mx); top: var(--my); } .sticker--wide-only { display: none; } .sticker { font-size: var(--fs-small); } .sticker--l.sticker--drop { width: 6.6em; height: 6.6em; } }
 html.no-gl .stickers { position: relative; inset: auto; height: 50vh; }
+
+/* W19 (Shifat 20:30Z m:f9db1b48 "center it, a bit bigger"): the one CTA sits on the page's centre line at every size and is
+   ~18 % bigger (height, padding, type, arrow), still white with the black invert on hover */
+.contact__row { grid-column: 1 / -1; justify-self: center; }
+.contact__cta { align-items: center; margin-inline: auto; text-align: center; }
+.contact .big-btn { height: 76px; padding: 0 12px 0 31px; gap: 21px; font-size: calc(var(--fs-body) * 1.18); max-width: 500px; }
+.contact .big-btn i { width: 54px; height: 54px; }

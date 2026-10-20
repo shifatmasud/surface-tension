@@ -22,7 +22,7 @@ const LOGOS: { id: string; label: string; shape: 'circle' | 'square'; bg: string
   { id: 'framer', label: 'Framer', shape: 'square', bg: '#ffffff', fg: '#000000', d: 'M4 0h16v8h-8zM4 8h8l8 8H4zM4 16h8v8z' },
   { id: 'figma', label: 'Figma', shape: 'square', bg: '#ffffff', fg: '#000', draw: figma },
   { id: 'react', label: 'React', shape: 'circle', bg: '#20232a', fg: '#61dafb', d: 'REACT' },
-  { id: 'vercel', label: 'Vercel', shape: 'circle', bg: '#000000', fg: '#ffffff', d: 'm12 1.608 12 20.784H0Z' },
+  // (Shifat 20:30Z m:f9db1b48 "Remove vercel sticker": the Vercel sticker is gone)
   { id: 'openai', label: 'ChatGPT', shape: 'circle', bg: '#ffffff', fg: '#000000', d: 'OPENAI' },
   { id: 'notion', label: 'Notion', shape: 'square', bg: '#ffffff', fg: '#000000', d: 'NOTION' },
 ]

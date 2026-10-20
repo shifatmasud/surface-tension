@@ -76,7 +76,7 @@ export function HeroStage() {
     const rt = new THREE.WebGLCubeRenderTarget(hi ? 256 : 128, { type: THREE.HalfFloatType, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter })
     const cam = new THREE.CubeCamera(0.05, 200, rt)
     cam.children.forEach((c) => { c.layers.enable(STUDIO_LAYER); c.layers.enable(SYSUI_LAYER) })
-    return { rt, cam, frame: 0, deep: false, lake: true }
+    return { rt, cam, frame: 0, deep: false, lake: true, dropped: false }
   }, [hi])
   // product-photography trick: a near-white world gives a pastel stone, so the env capture alone sees a ring of
   // dark flags with bright gaps around the gem (plus a deep floor card). The facets then tile into crisp
@@ -308,6 +308,8 @@ export function HeroStage() {
     // W19 (Shifat 19:50Z "diamond comes black"): the first 3 frames now run behind the preloader's warm gate, where the
     // studio/sky can still be unready, and a low tier never re-captured, so the stone kept a black env. Re-capture through
     // the first seconds and then every 90 frames in the hero on every tier (one cube pass, cheap at this rate)
+    // and once the intro drops (the curtain lifts, the real hero frame starts) the env starts over: 3 captures, then every 20 frames
+    if (props.introDrop && !env.dropped) { env.dropped = true; env.frame = 0 }
     const reEnv = env.frame < 240 && env.frame % 20 === 0   // (the warm gate no-ops clear/viewport/mipmaps on its frames)
     if (env.frame < 3 || reEnv || (camUnder && env.frame % (dive.abyss > 0.5 ? (hi ? 3 : 8) : 30) === 0) || (hi && env.frame % (deep ? 8 : 24) === 0 && props.stage !== 'contact')) {  // contact keeps the hero's studio env: a re-capture of the bright contact field washed the pavilion out
       m.visible = false; sheenMesh.current.visible = false
