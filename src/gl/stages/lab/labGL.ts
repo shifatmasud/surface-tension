@@ -7,6 +7,7 @@ import { input } from '../../../services/input'
 import { htmlRender } from '../../html/htmlRender'
 import { PROJECTS } from '../../../content/site'
 import { damp } from '../../../core/math'
+import { dive } from '../dive/diveState'
 
 /**
  * Lab cards in WebGL (ufx "under" layer, so the cursor paint bends them). Each DOM card stays the
@@ -22,14 +23,27 @@ const VERT = /* glsl */ `
 uniform float u_bendX, u_viewW, u_lift;
 uniform vec2 u_tilt;           // damped mouse tilt (radians-ish)
 uniform vec2 u_size;           // card size in px
+uniform float u_time, u_wave;  // v3: the slide floats in water (0 = flat, 1 = suspended, swaying)
 varying vec2 v_uv;
+varying float v_shade;
 void main(){
   v_uv = uv;
   vec3 p = position;
+  // v3 (Shifat 11:56Z: "fluid smooth soft material with wavy motion cause its in underwater"): a slow cloth-like swell
+  // runs through the slide (two travelling waves, the edges freer than the middle); v_shade is its slope, for a soft
+  // neutral light/shadow roll that never changes the reel's colours
+  float t = u_time;
+  float e = 0.35 + 0.65 * smoothstep(0.0, 0.5, length(p.xy));
+  float a1 = p.x * 4.2 + p.y * 1.6 - t * 1.05, a2 = p.y * 3.4 - p.x * 2.2 - t * 0.78;
+  float wz = (sin(a1) * 0.62 + sin(a2) * 0.38) * e;
+  float dzx = (cos(a1) * 0.62 * 4.2 - cos(a2) * 0.38 * 2.2) * e, dzy = (cos(a1) * 0.62 * 1.6 + cos(a2) * 0.38 * 3.4) * e;
+  v_shade = (dzx * 0.55 - dzy * 0.45) * u_wave * 0.12;
+  p.x += sin(p.y * 3.1 + t * 0.7) * 0.006 * u_wave;
+  p.y += sin(p.x * 2.7 + t * 0.9) * 0.009 * u_wave;
   // tilt about the card centre: z offset proportional to local x/y
   float tz = p.x * u_tilt.y * u_size.x + p.y * -u_tilt.x * u_size.y;
   vec4 world = modelMatrix * vec4(p, 1.0);
-  world.z += tz * 0.5 + u_lift;
+  world.z += tz * 0.5 + u_lift + wz * u_wave * u_size.x * 0.045;
   // cylinder bend across the screen, proportional to horizontal scroll velocity
   float nx = clamp(world.x / (u_viewW * 0.5), -1.6, 1.6);
   world.z -= (1.0 - cos(nx * 1.1)) * u_bendX * u_viewW * 0.35;
@@ -40,7 +54,9 @@ const FRAG = /* glsl */ `
 uniform sampler2D u_map, u_depth, u_html;
 uniform float u_hasDepth, u_hasHtml, u_focus, u_color, u_radius, u_opacity, u_time, u_ready;
 uniform vec2 u_size, u_mapSize, u_mouse;
+uniform float u_wave;
 varying vec2 v_uv;
+varying float v_shade;
 float rbox(vec2 p, vec2 b, float r){ vec2 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r; }
 void main(){
   // cover-fit the reel into the card
@@ -72,6 +88,9 @@ void main(){
     float m = h.a * smoothstep(0.9, 0.99, lum) * (1.0 - smoothstep(0.14, 0.2, v_uv.y));
     col = mix(col, vec3(1.0), m);
   }
+  // v3: the swell's soft light roll (neutral: brightness only, the colours stay true) and a satin sheen on its crests
+  col *= 1.0 + clamp(v_shade, -0.5, 0.5) * 0.55;
+  col += vec3(1.0) * pow(max(v_shade, 0.0), 2.0) * 0.9 * u_wave;
   vec2 px = (v_uv - 0.5) * u_size;
   float sd = rbox(px, u_size * 0.5, u_radius);
   float a = 1.0 - smoothstep(-1.0, 0.5, sd);
@@ -84,12 +103,15 @@ const loader = new THREE.TextureLoader()
 const geo = new THREE.PlaneGeometry(1, 1, 32, 20)
 const viewW = { value: 1 }
 const bendX = { value: 0 }
+const wave = { value: 0 }   // v3: the slides float in the dive's water
 
 export const labGL = {
   offsetX: 0,
   track: null as HTMLElement | null,
   cards: [] as Card[],
   hovered: '' as string,
+  /** cards lifted out into the detail card (slide→card morph): the GL copy hides while the DOM morph flies */
+  hidden: new Set<string>(),
   bend: 0,
   mount(el: HTMLElement) {
     this.track = el
@@ -105,7 +127,7 @@ export const labGL = {
           u_hasDepth: { value: 0 }, u_hasHtml: { value: 0 }, u_focus: { value: 0 }, u_color: { value: p.color ? 1 : 0 },
           u_radius: { value: 14 }, u_opacity: { value: 1 }, u_time: shared.u_time, u_ready: { value: 0 },
           u_size: { value: new THREE.Vector2(1, 1) }, u_mapSize: { value: new THREE.Vector2(16, 9) }, u_mouse: { value: new THREE.Vector2() },
-          u_bendX: bendX, u_viewW: viewW, u_lift: { value: 0 }, u_tilt: { value: new THREE.Vector2() },
+          u_bendX: bendX, u_viewW: viewW, u_wave: wave, u_lift: { value: 0 }, u_tilt: { value: new THREE.Vector2() },
         },
       })
       const mesh = new THREE.Mesh(geo, mat)
@@ -132,7 +154,7 @@ export const labGL = {
           const sc = 0.82 + 0.18 * card.focus
           it.mesh.scale.set(r.width * sc, r.height * sc, 1)
           const u = mat.uniforms
-          u.u_opacity.value = 0.62 + 0.38 * card.focus
+          u.u_opacity.value = (0.62 + 0.38 * card.focus) * (this.hidden.has(id) ? 0 : 1)
           u.u_focus.value = card.focus
           u.u_size.value.set(it.w, it.h)
           // damped mouse tilt + lift on hover (pointer relative to the card)
@@ -197,6 +219,17 @@ export const labGL = {
   },
   unmount() { this.cards.forEach((c) => { ufx.remove(c.item); c.video?.pause(); c.vtex?.dispose() }); this.cards = []; this.track = null },
   measure() { this.cards.forEach((c) => ufx.measure(c.item)) },
+  /** where the GL card is drawn right now, in CSS px (DOM rect × focus scale × hover lift), for the slide→card morph */
+  rectOf(id: string) {
+    const c = this.cards.find((x) => x.id === id)
+    const dom = c?.el.querySelector<HTMLElement>('.card__dom')
+    if (!c || !dom) return null
+    const r = dom.getBoundingClientRect()
+    const dist = ufx.camera.position.z
+    const k = settings.USE_GL && this.track ? (0.82 + 0.18 * c.focus) * dist / Math.max(1, dist - c.lift) : 1
+    const w = r.width * k, h = r.height * k
+    return { left: r.left + (r.width - w) / 2, top: r.top + (r.height - h) / 2, width: w, height: h, radius: 14 * k }
+  },
   hover(id: string, on: boolean) { const c = this.cards.find((x) => x.id === id); if (c) c.hover = on ? 1 : 0 },
   update(vel: number, dt: number) {
     viewW.value = ufx.w
@@ -205,5 +238,6 @@ export const labGL = {
     const target = ov ?? Math.max(-1, Math.min(1, vel / 4000)) * 0.35
     this.bend = damp(this.bend, target, 6, dt)
     bendX.value = this.bend
+    wave.value = damp(wave.value, dive.under ? 1 : 0, 3, dt)
   },
 }

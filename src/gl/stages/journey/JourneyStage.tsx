@@ -4,6 +4,8 @@ import { useThree } from '@react-three/fiber'
 import { nb, useStageFrame } from '../../systems/neighbour' // NEIGHBOUR HOOK
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { props } from '../../../state/props'
+import { input } from '../../../services/input'
+import { engine } from '../../engine'
 import { settings } from '../../../services/settings'
 import { mix, smoothstep as ss } from '../../../core/math'
 import { journey } from './journeyState'
@@ -12,6 +14,9 @@ import { makeEnvs } from './env'
 import { buildForest, buildShadows, longShadowGeometry, longShadowMaterial } from './forest'
 import { buildGrass, buildSunFan, buildMist, buildMotes } from './forestFx'
 import { buildFoliage } from './foliage' // FOLIAGE HOOK (foliage helper): fluffy grass + trees
+import { buildFireflies, buildCanopy } from './nightFx'
+import { buildTunnel } from './tunnel'
+import { buildCta, WALL_Z } from './ctaScene'
 import { skyMaterial, starMaterial, glintStarMaterial, screenMaterial, backdropMaterial, SUN_DIR } from './shaders'
 import { buildShatterGeometry, shatterMaterial, buildGlints } from './shatter'
 import { inner, outer, T, type Inner, type Outer } from './timeline'
@@ -51,6 +56,47 @@ export function JourneyStage(): JSX.Element {
   const low = settings.TIER === 'low'
   const S = useMemo(() => build(gl, portrait, low), [gl, portrait, low])
   const group = useRef<THREE.Group>(null!)
+  // W18 (Shifat 14:01Z): the CTA odometer type at full device density, drawn by the text layer behind the crewmate's depth
+  const { camera: mainCam } = useThree()
+  useEffect(() => {
+    S.cta.typeRoot.position.copy(JOURNEY_ORIGIN)
+    const body = S.crewOut.root
+    // the crewmate's depth only (one cheap override program), so the type sits BEHIND it at full density
+    const depthScene = new THREE.Scene()
+    depthScene.position.copy(JOURNEY_ORIGIN)
+    depthScene.overrideMaterial = new THREE.MeshBasicMaterial({ colorWrite: false })
+    const v = new THREE.Vector3()
+    const extra = {
+      active: () => journey.active && S.cta.type.visible && S.cta.group.visible,
+      // the scissor for the full-density pass: the type's box projected to the screen (CSS px), plus a trail margin
+      box: () => {
+        const r = S.cta.typeRect(), W = innerWidth, H = innerHeight
+        let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9
+        for (let i = 0; i < 4; i++) {
+          v.set((i & 1 ? r.x1 : r.x0) + JOURNEY_ORIGIN.x, (i & 2 ? r.y1 : r.y0) + JOURNEY_ORIGIN.y, r.z + JOURNEY_ORIGIN.z).project(mainCam)
+          if (v.z > 1) return null
+          const sx = (v.x * 0.5 + 0.5) * W, sy = (0.5 - v.y * 0.5) * H
+          x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy)
+        }
+        const m = 28
+        return { x: x0 - m, y: y0 - m, w: x1 - x0 + 2 * m, h: y1 - y0 + 2 * m }
+      },
+      draw: (r: THREE.WebGLRenderer) => {
+        const parent = body.parent
+        if (parent && body.visible) {
+          depthScene.add(body); depthScene.updateMatrixWorld(true)
+          r.render(depthScene, mainCam)
+          parent.add(body); parent.updateMatrixWorld(true)
+        }
+        S.cta.typeRoot.updateMatrixWorld()
+        r.render(S.cta.typeRoot, mainCam)
+      },
+    }
+    const list = (engine as any).chain?.text?.extras as typeof extra[] | undefined
+    list?.push(extra)
+    return () => { if (list) { const i = list.indexOf(extra); if (i >= 0) list.splice(i, 1) } }
+  }, [S, mainCam])
+
   useEffect(() => {
     // warm the inner world's programs up front (its lights live in its own scene, so they compile exactly once)
     // PERF HOOK: compiled with the tablet target bound — the inner world only ever draws into it (linear, no tone
@@ -109,6 +155,29 @@ export function JourneyStage(): JSX.Element {
     S.foliage.update(time, S.treeRim.value, I.crew) // FOLIAGE HOOK (foliage helper)
     S.motes.material.uniforms.u_time.value = time; S.motes.material.uniforms.u_opacity.value = land
     S.motes.points.visible = land > 0.01
+    // W18 (Shifat 14:25Z): the TUNNEL between the starry sky and the night sky over the forest (journey 0.12 → 0.31)
+    {
+      const u = Math.min(1, Math.max(0, (p - 0.12) / 0.19))
+      const tu = S.tunnel.material.uniforms
+      const inn = ss(0.0, 0.2, u), out = 1 - ss(0.8, 1.0, u)
+      tu.u_on.value = Math.min(inn, out)
+      tu.u_stretch.value = Math.min(ss(0.0, 0.28, u), 1 - ss(0.74, 1.0, u))  // stars stretch into streaks, then back to points
+      tu.u_travel.value = u * 900 + time * 6                                     // the rush is the scroll; a slow shimmer on top
+      tu.u_phase.value = u * 5.0; tu.u_bend.value = 0.6 + 0.4 * Math.sin(u * Math.PI)
+      tu.u_exit.value = ss(0.6, 1.0, u); tu.u_time.value = time
+      S.tunnel.mesh.visible = u > 0 && u < 1
+      if (S.tunnel.mesh.visible) { S.tunnel.mesh.position.copy(S.icam.position); S.tunnel.mesh.quaternion.copy(S.icam.quaternion) }
+    }
+    // W18 (13:24Z): stars → fireflies, then the fall through the canopy
+    {
+      const fu = S.fireflies.material.uniforms
+      fu.u_time.value = time; fu.u_px.value = S.rt.height; fu.u_day.value = ss(0.5, 0.9, I.atmos)
+      fu.u_on.value = ss(0.26, 0.36, p) * mix(1, 0.45, ss(0.5, 0.62, p)) * (1 - ss(0.74, 0.8, p))
+      S.fireflies.points.visible = fu.u_on.value > 0.002
+      const cu = S.canopy.material.uniforms
+      cu.u_time.value = time; cu.u_on.value = ss(0.3, 0.35, p) * (1 - ss(0.455, 0.49, p))
+      S.canopy.mesh.visible = cu.u_on.value > 0.002
+    }
     const h = Math.max(0, I.crew.y)
     // long shadow from the feet, cast towards the camera by the low sun behind the clearing
     S.shadow.position.set(I.crew.x, 0.04, I.crew.z - 0.25)
@@ -149,6 +218,43 @@ export function JourneyStage(): JSX.Element {
     proj.project(S.bcam)
     const start = { x: proj.x * S.sw / 2, y: proj.y * S.sh / 2, k: Math.max(0.6, (top.y - proj.y) * S.sh / 2 / (CREW_HEIGHT - CREW_CENTER_Y)) }
     const O = outer(p, S.O, fit, start, SCREEN_Z, farCorner(S.sw, S.sh, start.x, start.y))
+    // ---- W18 THE ENDING (STRUCTURE v3 13:27Z–13:33Z): glide down past the tablet with the crewmate alongside into the
+    // aligned CTA on the black wall (ctaScene.ts). g: a first touch of the glide as the crewmate floats free, the rest
+    // over the CTA section's arrival (journey.cta 0 → 1). Pure functions of scroll: reversible, never frozen.
+    {
+      const key = `${aspect.toFixed(3)}|${portrait}`
+      if (key !== S.ctaKey || S.cta.dirty) { S.ctaKey = key; S.cta.layout(S.sw, S.sh, aspect, CREW_HEIGHT) }
+      const L = S.cta.lay
+      const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
+      const cta = Math.min(1, Math.max(0, journey.cta))
+      const g = 0.16 * ease(Math.min(1, Math.max(0, (p - 0.88) / 0.12))) + 0.84 * ease(cta)
+      journey.ctaTime += dt
+      if (g > 0) {
+        const k = S.tmp.set(L.C.x, L.C.y, L.C.z + L.D)
+        // cursor / tilt parallax: the camera drifts, the aim stays on the wall's centre, so the three planes separate
+        S.par.lerp(input.isTouch ? S.par.set(0, 0) : input.mouseXY, 1 - Math.exp(-dt * 3))
+        const mx = S.par.x * g, my = S.par.y * g
+        k.x += mx * L.wv * 0.035; k.y += my * L.hw * 0.03
+        O.camPos.lerp(k, g)
+        O.camPos.z += Math.sin(Math.PI * g) * L.D * 0.08                       // a breath of pull-back mid-glide
+        O.camTarget.lerp(L.C, g)
+        O.fov = mix(O.fov, L.fov, g)
+        // the crewmate flies alongside, a little ahead of the camera, swooping out and back in
+        const gc = Math.pow(g, 0.8)
+        S.tmp2.set(L.C.x + Math.sin(Math.PI * gc) * S.sw * 0.12, L.crewY + Math.sin(journey.ctaTime * 0.9) * 0.06 * L.crewScale, L.crewZ)
+        O.crew.lerp(S.tmp2, gc)
+        O.crewScale = mix(O.crewScale, L.crewScale, gc)
+        O.yaw = mix(O.yaw, Math.sin(journey.ctaTime * 0.35) * 0.2 - 0.25 * Math.sin(Math.PI * gc), gc)
+        O.pitch = mix(O.pitch, 0.05, gc)
+        O.roll = mix(O.roll, Math.sin(journey.ctaTime * 0.27) * 0.06 + 0.22 * Math.sin(Math.PI * gc), gc)
+        O.float = 1
+        if (g > 0.3) O.shardsVisible = false
+        journey.crew.set(O.crew.x + JOURNEY_ORIGIN.x, O.crew.y, O.crew.z)
+        journey.crewScale = O.crewScale
+      }
+      S.rimU.u_rim.value = 0.55 * ss(0.3, 0.9, g)
+      S.cta.update(time, cta, O.camPos, p > 0.55)
+    }
     journey.pose.pos.copy(O.camPos).add(JOURNEY_ORIGIN)
     journey.pose.target.copy(O.camTarget).add(JOURNEY_ORIGIN)
     journey.pose.fov = O.fov
@@ -217,6 +323,13 @@ export function JourneyStage(): JSX.Element {
   )
 }
 
+/** every material under an object (the crewmate's depth pre-pass toggles their colour writes) */
+function crewMatsOf(root: THREE.Object3D) {
+  const out = new Set<THREE.Material>()
+  root.traverse((o: any) => { if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m: THREE.Material) => out.add(m)) })
+  return [...out]
+}
+
 /** PERF HOOK: the furthest screen corner from a point, without the per-frame array spread/map garbage */
 function farCorner(sw: number, sh: number, x: number, y: number) {
   const hx = sw / 2, hy = sh / 2
@@ -269,7 +382,7 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   }
   const sg = new THREE.BufferGeometry()
   sg.setAttribute('position', new THREE.BufferAttribute(sp, 3)); sg.setAttribute('aSize', new THREE.BufferAttribute(ss_, 1)); sg.setAttribute('aColor', new THREE.BufferAttribute(sc, 3))
-  const starPr = Math.min(gl.getPixelRatio(), 2) * (rt.width / 1024)
+  const starPr = Math.min(props.dpr, 2) * (rt.width / 1024)
   const starMat = starMaterial(starPr)
   const stars = new THREE.Points(sg, starMat); stars.frustumCulled = false; stars.renderOrder = -9
   // the bright few, placed in the part of the sky the space shots look at (behind and around the crewmate, not on it)
@@ -317,7 +430,7 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   const grass = foliage.grass
   const fan = buildSunFan(SUN_DIR)
   const mist = buildMist(low)
-  const motes = buildMotes(low, Math.min(gl.getPixelRatio(), 2) * (rt.width / 1024), SUN_DIR)
+  const motes = buildMotes(low, Math.min(props.dpr, 2) * (rt.width / 1024), SUN_DIR)
   forest.add(grass.mesh, mist.group, motes.points)
   const innerMats = crewMaterials(envs.space)
   innerMats.visor.envMap = envs.page // the visor always catches two soft studio highlights: it reads as glass in every beat
@@ -330,6 +443,9 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   // lights ride with the crewmate so the key is always composed the same way
   const lightRig = new THREE.Group(); lightRig.add(sun, rim, sun.target, rim.target)
   innerScene.add(sky, stars, fan.mesh, forest, shadow, crewIn.root, hemi, lightRig)
+  const fireflies = buildFireflies(260), canopy = buildCanopy()
+  const tunnel = buildTunnel()
+  innerScene.add(fireflies.points, canopy.mesh, tunnel.mesh)
 
   // ===== outer world: the tablet + the crewmate that breaks out
   const outerG = new THREE.Group()
@@ -355,13 +471,25 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   const shardMat = shatterMaterial(rt.texture)
   const shards = new THREE.Mesh(new THREE.BufferGeometry(), shardMat)
   shards.position.z = SCREEN_Z + 0.002; shards.frustumCulled = false; shards.visible = false
-  const glints = buildGlints(tier === 'low' ? 160 : tier === 'mid' ? 320 : 520, Math.min(gl.getPixelRatio(), 2))
+  const glints = buildGlints(tier === 'low' ? 160 : tier === 'mid' ? 320 : 520, Math.min(props.dpr, 2))
   glints.points.visible = false
   // the room behind the device: a graphite → deep-blue studio wash that melts into the page colour at its edges
   const backdropMat = backdropMaterial()
   const backdrop = new THREE.Mesh(new THREE.PlaneGeometry(260, 160), backdropMat)
   backdrop.position.set(0, 0, -60); backdrop.renderOrder = -5
   outerG.add(backdrop, body, bezel, lens, screen, shards, glints.points, crewOut.root)
+  // W18 THE ENDING: the tablet hangs on a matte black wall (ctaScene.ts); the wall replaces the studio backdrop
+  const cta = buildCta(portrait)
+  outerG.add(cta.group)
+  backdrop.visible = false
+  // the hero's rim light on the crewmate in the CTA (13:33Z: the front plane)
+  const rimU = { u_rim: { value: 0 }, u_rimColor: { value: new THREE.Color('#bfe3ff') } }
+  outerMats.body.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, rimU)
+    sh.fragmentShader = 'uniform float u_rim; uniform vec3 u_rimColor;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>',
+      '#include <emissivemap_fragment>\n{ float fr = pow(1.0 - abs(dot(normalize(normal), normalize(vViewPosition))), 3.0); totalEmissiveRadiance += u_rimColor * fr * u_rim; }')
+  }
+  outerMats.body.customProgramCacheKey = () => 'crew-rim'
 
   const c = {
     hSpace: new THREE.Color('#7a5cff'), hSky: new THREE.Color('#8a9cc0'), gSpace: new THREE.Color('#071a22'), gForest: new THREE.Color('#2f7a30'),
@@ -377,8 +505,8 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
     ;[innerScene, outerG].forEach((root) => root.traverse((o: any) => { if (o.geometry && !keep.has(o.geometry)) o.geometry.dispose?.(); if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m: any) => m.dispose()) }))
   }
   return {
-    sw, sh, rt, envs, inner: innerScene, grass, foliage, fan, mist, motes, treeRim, icam, bcam, sky, skyMat, stars, starMat, glintMat, forest, crewIn, innerMats, shadow, shadowMat, hemi, sun, rim, lightRig,
-    outer: outerG, backdrop, backdropMat, screenMat, crewOut, shards, shardMat, shardKey: '', tier, glints, c, I, IB, O, lastP: -1,
+    sw, sh, rt, envs, inner: innerScene, fireflies, canopy, tunnel, grass, foliage, fan, mist, motes, treeRim, icam, bcam, sky, skyMat, stars, starMat, glintMat, forest, crewIn, innerMats, shadow, shadowMat, hemi, sun, rim, lightRig,
+    outer: outerG, cta, rimU, ctaKey: '', par: new THREE.Vector2(), backdrop, backdropMat, screenMat, crewOut, shards, shardMat, shardKey: '', tier, glints, c, I, IB, O, lastP: -1,
     tmp: new THREE.Vector3(), tmp2: new THREE.Vector3(), o3: new THREE.Object3D(), dispose,
   }
 }

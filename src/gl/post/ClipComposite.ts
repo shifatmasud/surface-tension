@@ -19,7 +19,7 @@ export class ClipCompositeEffect extends Effect {
   constructor() {
     super('ClipComposite', /* glsl */ `
       uniform sampler2D u_snap;
-      uniform float u_on, u_has, u_swap, u_yTop, u_shift, u_scale, u_lag, u_dark, u_radius, u_inset, u_outRadius, u_px, u_xfade, u_t;
+      uniform float u_on, u_has, u_swap, u_yTop, u_shift, u_scale, u_lag, u_dark, u_radius, u_inset, u_outRadius, u_px, u_xfade, u_t, u_zoom;
       uniform vec2 u_view;
       uniform vec3 u_under;
       float sdRound(vec2 p, vec2 b, float r){ vec2 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r; }
@@ -30,9 +30,11 @@ export class ClipCompositeEffect extends Effect {
           // the outgoing frame softens (8-tap disc, radius grows with t) as it fades
           vec3 sn = inputColor.rgb;
           if (u_has > 0.5) {
-            vec2 rr = (2.0 + 10.0 * u_t) / u_view;
-            sn = texture2D(u_snap, uv).rgb * 0.2;
-            for (int i = 0; i < 8; i++) { float a = float(i) * 0.785398; sn += texture2D(u_snap, uv + vec2(cos(a), sin(a)) * rr).rgb * 0.1; }
+            vec2 rr = (2.0 + 10.0 * u_t * (1.0 - u_zoom)) / u_view;
+            // W18 push-through boundary: the outgoing frame keeps pushing in (scales about the centre) as it hands over
+            vec2 su = 0.5 + (uv - 0.5) / (1.0 + u_zoom * 0.35 * u_t * (1.0 - u_swap));
+            sn = texture2D(u_snap, su).rgb * 0.2;
+            for (int i = 0; i < 8; i++) { float a = float(i) * 0.785398; sn += texture2D(u_snap, su + vec2(cos(a), sin(a)) * rr).rgb * 0.1; }
           }
           // u_swap: scrolling up, the live frame is the upper block (fading out) and the still is the lower one
           float k = smoothstep(0.15, 0.85, u_t);
@@ -72,7 +74,7 @@ export class ClipCompositeEffect extends Effect {
         ['u_snap', new THREE.Uniform(null)], ['u_on', new THREE.Uniform(0)], ['u_has', new THREE.Uniform(0)], ['u_swap', new THREE.Uniform(0)],
         ['u_yTop', new THREE.Uniform(0)], ['u_shift', new THREE.Uniform(0)], ['u_scale', new THREE.Uniform(1)],
         ['u_lag', new THREE.Uniform(0)], ['u_dark', new THREE.Uniform(0)], ['u_radius', new THREE.Uniform(0)],
-        ['u_inset', new THREE.Uniform(0)], ['u_outRadius', new THREE.Uniform(0)], ['u_px', new THREE.Uniform(1)], ['u_xfade', new THREE.Uniform(0)], ['u_t', new THREE.Uniform(0)],
+        ['u_inset', new THREE.Uniform(0)], ['u_outRadius', new THREE.Uniform(0)], ['u_px', new THREE.Uniform(1)], ['u_xfade', new THREE.Uniform(0)], ['u_zoom', new THREE.Uniform(0)], ['u_t', new THREE.Uniform(0)],
         ['u_view', new THREE.Uniform(new THREE.Vector2(1, 1))],
         ['u_under', new THREE.Uniform(new THREE.Color('#0b0c0e').convertSRGBToLinear())],
       ]),
@@ -112,7 +114,7 @@ export class ClipCompositeEffect extends Effect {
     this.u('u_px').value = 1 / Math.max(1, props.dpr)
     this.u('u_yTop').value = clip.yTop; this.u('u_shift').value = clip.shift; this.u('u_scale').value = clip.scale
     this.u('u_lag').value = clip.lag; this.u('u_dark').value = clip.dark; this.u('u_radius').value = clip.radius
-    this.u('u_xfade').value = clip.reduced ? 1 : 0; this.u('u_t').value = clip.t
+    this.u('u_xfade').value = clip.xfade ? 1 : 0; this.u('u_zoom').value = clip.xfade && !clip.reduced ? 1 : 0; this.u('u_t').value = clip.t
     this.u('u_inset').value = clip.inset; this.u('u_outRadius').value = clip.outRadius
   }
 }

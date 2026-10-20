@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { clamp, mix, smoothstep as ss } from '../../../core/math'
+import { journey } from './journeyState'
 
 /**
  * The whole passage as pure functions of scroll progress p (0..1): any fixed p gives the same still,
@@ -162,5 +163,8 @@ export function outer(p: number, o: Outer, fit: { dFill: number; dFar: number; l
   o.bright = mix(1, 0.62, ss(0.88, 1, p))
   o.screenBright = o.bright * mix(1, 0.4, ss(T.BREAK, T.BREAK + 0.005, p))
   o.gloss = pull
+  // (W18) the CTA glide/alignment now lives in JourneyStage (ctaScene.ts layout): the wall, the type and the stickers
+  journey.crew.set(o.crew.x + 200, o.crew.y, o.crew.z)
+  journey.crewScale = o.crewScale
   return o
 }

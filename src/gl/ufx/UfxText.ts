@@ -8,9 +8,9 @@ gsap.registerPlugin(SplitText)
 const GEO = new THREE.PlaneGeometry(1, 1, 1, 24)
 
 /** Rasterise one DOM line (its computed font) into an alpha texture. */
-function rasterLine(el: HTMLElement, text: string, w: number, h: number) {
+export function rasterLine(el: HTMLElement, text: string, w: number, h: number) {
   const cs = getComputedStyle(el)
-  const dpr = Math.min(window.devicePixelRatio || 1, 2)
+  const dpr = Math.min(window.devicePixelRatio || 1, 3) // Shifat 14:01Z: big type rasterised at the device's own density (up to 3×)
   const c = document.createElement('canvas')
   const padX = Math.ceil(parseFloat(cs.fontSize) * 0.1)
   const padY = Math.ceil(parseFloat(cs.fontSize) * 0.22) // room for descenders: tight display leading would clip g/p/y

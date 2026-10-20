@@ -5,13 +5,14 @@ import { Cursor } from './dom/ui/Cursor'
 import { Intro } from './dom/ui/Intro'
 import { WaterLevel } from './dom/ui/WaterLevel'
 import { ProjectOverlay } from './dom/ui/ProjectOverlay'
+import { TextLayer } from './dom/ui/TextLayer'
 import { Hero } from './dom/sections/Hero'
 import { Statement } from './dom/sections/Statement'
 import { Lab } from './dom/sections/Lab'
 import { Systems } from './dom/sections/Systems'
 import { Dive } from './dom/sections/Dive'
 import { Journey } from './dom/sections/Journey'
-import { Contact } from './dom/sections/Contact'
+import { Contact, Footer } from './dom/sections/Contact'
 import { settings } from './services/settings'
 
 const Scene = lazy(() => import('./gl/Scene').then((m) => ({ default: m.Scene })))
@@ -26,15 +27,17 @@ export function App() {
       <Header />
       <Cursor />
       <WaterLevel />
+      <TextLayer />
       <main id="main" tabIndex={-1}>
         <Hero />
         <Statement />
+        <Dive />
         <Lab />
         <Systems />
-        <Dive />
         <Journey />
         <Contact />
       </main>
+      <Footer />
       <ProjectOverlay />
       {settings.GRID && <div className="grid-debug" aria-hidden>{Array.from({ length: 12 }, (_, i) => <i key={i} />)}</div>}
     </>

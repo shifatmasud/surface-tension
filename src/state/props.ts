@@ -26,6 +26,9 @@ export const props = {
   time: 0, dt: 1 / 60, frame: 0,
   width: window.innerWidth, height: window.innerHeight, dpr: 1,
   renderW: 1, renderH: 1,
+  /** Shifat 14:01Z: the canvas runs at the device's own density (cap 3) for the text layer; the 3D scene and the post
+   *  chain render at `dpr` (the governor's 0.75–1.25 ladder) and are upscaled once in the final pass */
+  textDpr: 1,
   useMobileLayout: window.innerWidth <= 812,
   // scroll (Lenis is the source)
   scroll: 0, scrollVel: 0, scrollDelta: 0, scrollStrength: 0, scrollLimit: 1, scrollProgress: 0,

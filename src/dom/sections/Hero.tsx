@@ -40,7 +40,7 @@ export function Hero() {
       if (wideK > 1.001) pose.pos.sub(pose.target).multiplyScalar(mix(wideK, 1, t)).add(pose.target)
       return pose
     }, { vignette: 0.0, bloom: 0.3, contrast: 1.0, saturation: 1.05, exposure: 1.12, lift: 0.6 })
-    let handle: ReturnType<typeof ufxText> | null = null
+    let handle = null as ReturnType<typeof ufxText> | null
     let reveal = { v: 0 }
     // the gem is the star: the name surfaces only after it has settled
     const onDrop = () => gsap.to(reveal, { v: 1, duration: 1.8, ease: 'expo.out', delay: 1.6 })
@@ -48,7 +48,8 @@ export function Hero() {
       name: 'hero',
       init() {
         window.addEventListener('st:drop', onDrop)
-        document.fonts.ready.then(() => { if (title.current) handle = ufxText(title.current, { color: '#0a0a0b', sheen: '#9fb4d6' }) })
+        // W17: the name is drawn by the global text layer (dom/ui/TextLayer.tsx); this h1 stays for screen readers / SEO
+        void ufxText
       },
       update() {
         const pinLen = Math.max(1, range.height - props.height)

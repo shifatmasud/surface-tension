@@ -10,4 +10,11 @@ export const journey = {
   snap: false,
   /** the beat currently on screen: 0 space · 1 descent · 2 forest · 3 reveal · 4 break · 5 out */
   beat: -1,
+  /** STRUCTURE v2: 0 → 1 as the CTA (the black wall) takes over after the break-out (written by the Contact section) */
+  cta: 0,
+  /** the crewmate's centre in world space and its scale this frame (written by the timeline; the CTA wall reads it) */
+  crew: new THREE.Vector3(200, 0, 0),
+  crewScale: 1,
+  /** seconds the CTA has been on screen (idle sway of the crewmate) */
+  ctaTime: 0,
 }

@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react'
 import type * as THREE from 'three'
 import { settings } from '../../services/settings'
 import { quality } from '../quality'
+import { BLOCKS } from './clip'
 
 /**
  * NEIGHBOUR — the outgoing section stays LIVE through a boundary (Shifat 10:51Z: "Preload before & after section of
@@ -29,7 +30,11 @@ type Tick = (state: RootState, dt: number) => void
 type StageReg = { tick: Tick; root: () => THREE.Object3D | null | undefined }
 
 /** which registered stages draw each block (index = clip block) */
-const BLOCK_STAGES: string[][] = [['hero'], ['hero'], ['systems'], ['dive', 'hero'], ['journey'], ['hero']]
+const SECTION_STAGES: Record<string, string[]> = {
+  hero: ['hero'], statement: ['hero'], dive: ['dive', 'hero'], lab: ['dive', 'hero'], systems: ['dive', 'divecyl', 'hero'],
+  journey: ['journey'], contact: ['journey'],
+}
+const blockStages = (i: number) => [...new Set((BLOCKS[i] || []).flatMap((s) => SECTION_STAGES[s] || []))]
 
 class Neighbour {
   enabled = settings.USE_GL && !(typeof location !== 'undefined' && /[?&]nonb/.test(location.search))
@@ -56,7 +61,7 @@ class Neighbour {
   /** the registered (mounted) stages that draw `block` (cached; no per-frame arrays) */
   stagesFor(block: number) {
     let r = this.forBlock.get(block)
-    if (!r) { r = (BLOCK_STAGES[block] || []).map((n) => this.stages.get(n)).filter(Boolean) as StageReg[]; this.forBlock.set(block, r) }
+    if (!r) { r = blockStages(block).map((n) => this.stages.get(n)).filter(Boolean) as StageReg[]; this.forBlock.set(block, r) }
     return r
   }
   /** steady-state scale for this device and governor level */

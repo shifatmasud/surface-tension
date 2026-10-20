@@ -80,7 +80,11 @@ export function skyMaterial() {
         vec3 duskGnd = mix(vec3(0.05, 0.08, 0.07), dusk, smoothstep(-0.28, 0.0, y));
         dusk = mix(duskGnd, dusk, step(0.0, y));
         float a = u_atmos;
-        vec3 col = a < 0.5 ? mix(space, dusk, smoothstep(0.0, 0.5, a)) : mix(dusk, sky, smoothstep(0.5, 1.0, a));
+        // W18 (13:24Z): the black of space becomes a NIGHT sky first (deep navy, the stars still out, a cold glow on
+        // the horizon) before the dusk warms it; the fireflies take over from the stars in that night
+        vec3 night = space * 1.15 + mix(vec3(0.03, 0.05, 0.11), vec3(0.003, 0.006, 0.022), smoothstep(-0.04, 0.55, y));
+        night = mix(vec3(0.006, 0.012, 0.012), night, smoothstep(-0.16, 0.0, y));
+        vec3 col = a < 0.5 ? mix(mix(space, night, smoothstep(0.0, 0.22, a)), dusk, smoothstep(0.22, 0.5, a)) : mix(dusk, sky, smoothstep(0.5, 1.0, a));
         // dither: the near-black grades would band on 8-bit screens
         col += (h31(vec3(gl_FragCoord.xy, fract(u_time) * 61.0)) - 0.5) * (1.5 / 255.0);
         gl_FragColor = vec4(max(col, 0.0), 1.0);

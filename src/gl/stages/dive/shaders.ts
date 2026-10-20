@@ -13,6 +13,8 @@ uniform vec3 u_cam;
 uniform vec3 u_sun;        // direction the sunlight travels underwater (points down)
 uniform vec3 u_sunAir;     // direction toward the sun in air
 uniform float u_time, u_deep, u_split, u_star;
+uniform float u_amb;       // v3: 0..1 the deep water's own glow takes over from the sunlit water (by depth)
+uniform float u_abyss;     // v3: 0..1 the systems deep: exponential fog density, marine snow, the last shafts
 uniform float u_caus;      // caustic strength 0..1 (QA: ?nocaus)
 uniform vec2 u_res;
 uniform sampler2D u_bn;
@@ -27,6 +29,25 @@ float vnoise(vec2 p){
   return mix(mix(hash12(i), hash12(i + vec2(1, 0)), u.x), mix(hash12(i + vec2(0, 1)), hash12(i + vec2(1, 1)), u.x), u.y);
 }
 float ign(vec2 p){ return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+
+/**
+ * v3 deep water (Shifat 11:56Z: "interesting deep underwater scene. Exp fog needed too"). Below the sunlit layer the
+ * water is not black: a blue-black volume, brighter overhead where the last light comes down, darkest below. This is
+ * also the colour the exponential fog fades everything toward, so the deep reads as one volume.
+ */
+vec3 deepWater(vec3 dir){
+  float up = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
+  // blue-black below, deep blue at the horizon, a teal-blue glow overhead; a little dimmer the deeper we are
+  vec3 c = mix(vec3(0.002, 0.012, 0.028), vec3(0.008, 0.055, 0.105), smoothstep(0.0, 0.55, up));
+  c = mix(c, vec3(0.030, 0.150, 0.230), smoothstep(0.5, 1.0, up));
+  c += vec3(0.020, 0.110, 0.150) * pow(up, 6.0);                    // the faint glow of the surface, far overhead
+  return c * (1.0 - 0.3 * u_abyss);
+}
+/** FogExp2: density thickens with depth (u_abyss) */
+float deepFog(float dist){
+  float d = mix(0.028, 0.052, u_abyss) * dist;
+  return 1.0 - exp(-d * d);
+}
 
 
 vec3 inscatter(vec3 dir, float depth){
@@ -208,6 +229,19 @@ void main(){
   col += acc * dt * u_rayGain * vec3(0.30, 0.78, 0.86) * (0.07 + 0.52 * pow(fwd, 2.5)) * (1.0 - u_deep); // shafts read as the star of the open-water frames
 
   col *= 1.0 - u_deep * 0.9;
+  // v3: the deep's own glow, and the last light shafts slanting down into it (fading with depth)
+  if (u_amb > 0.001){
+    vec3 deep = deepWater(dir);
+    float sh = 0.0;
+    for (int i = 0; i < 4; i++){
+      float ti = 2.0 + float(i) * 4.5 + jit * 4.5;
+      vec3 p = u_cam + dir * ti;
+      sh += shaft(p.xz * 0.35 - p.y * u_sun.xz * 0.35 + vec2(0.0, u_time * 0.01)) * exp(-0.06 * ti);
+    }
+    float upw = smoothstep(-0.25, 0.85, dir.y);
+    deep += vec3(0.020, 0.090, 0.125) * sh * upw * (1.0 - 0.5 * u_abyss);
+    col = mix(col, deep, u_amb);
+  }
   gl_FragColor = vec4(col, 1.0);
 }`
 
@@ -243,9 +277,12 @@ void main(){
   float d = max(-p.y, 0.0);
   vec2 q = surfaceEntry(p);
   float sunL = max(dot(n, -u_sun), 0.0);
-  vec3 c = causticsAt(q, d, length(p - u_cam));
-  vec3 light = exp(-K * d) * (sunL * (0.6 + 0.48 * c) * 0.62) + inscatter(vec3(0.0, 1.0, 0.0), d) * 0.55;
+  float czNew = step(0.001, u_czIntensity);
+  vec3 cOld = czNew > 0.5 ? vec3(1.0) : causticsAt(q, d, length(p - u_cam));
+  vec3 light = exp(-K * d) * (sunL * mix(0.6 + 0.48 * cOld, vec3(0.55), czNew) * 0.62) + inscatter(vec3(0.0, 1.0, 0.0), d) * 0.55;
   vec3 col = alb * light;
+  vec3 cz = causticLight(p, n);
+  col += alb * cz * 0.9 + cz * 0.08;
   vec3 v = p - u_cam;
   float dist = length(v);
   vec3 dir = v / dist;
@@ -257,6 +294,7 @@ void main(){
   // the deep slope and the plane's borders dissolve into the open water (no visible edges)
   float lose = max(max(smoothstep(14.0, 30.0, d), smoothstep(28.0, 43.0, abs(p.x))), smoothstep(58.0, 76.0, p.z));
   col *= 1.0 - u_deep * 0.85;
+  col = mix(col, deepWater(dir), u_amb * (0.3 + 0.7 * deepFog(dist)));
   gl_FragColor = vec4(col, 1.0 - lose);   // fades into the backdrop itself: no seam, no plane edge
 }`
 
@@ -270,7 +308,7 @@ varying float vL;
 void main(){
   vec3 base = position * u_box;
   float t = u_time;
-  base.y -= t * (0.025 + 0.03 * aRand.y);
+  base.y -= t * (0.025 + 0.03 * aRand.y + 0.05 * u_abyss * aRand.z);
   base.x += 0.22 * sin(t * 0.11 + aRand.x * 6.2831);
   base.z += 0.22 * cos(t * 0.09 + aRand.z * 6.2831);
   vec3 rel = mod(base - u_cam + u_box * 0.5, vec3(u_box)) - u_box * 0.5;
@@ -278,11 +316,12 @@ void main(){
   vec4 mv = viewMatrix * vec4(wp, 1.0);
   float dist = -mv.z;
   gl_Position = projectionMatrix * mv;
-  float sz = u_size * (0.45 + aRand.x * 1.1) * u_pxScale / max(dist, 0.1);
+  float sz = u_size * (0.45 + aRand.x * 1.1) * (1.0 + 0.9 * u_abyss) * u_pxScale / max(dist, 0.1);
   gl_PointSize = clamp(sz, 1.0, 7.0);
   float edge = 1.0 - smoothstep(u_box * 0.32, u_box * 0.5, length(rel));
   vA = smoothstep(0.25, 1.1, dist) * edge * exp(-0.11 * dist) * (sz < 1.0 ? sz : 1.0);
   vL = exp(-K.g * max(-wp.y, 0.0)) * (0.6 + 0.8 * shaft(surfaceEntry(wp)));
+  vL += u_amb * (0.16 + 0.22 * u_abyss) * (0.5 + aRand.y);   // marine snow: flakes catching the deep's faint light
 }`
 export const siltFrag = /* glsl */ `
 ${DIVE_COMMON}
@@ -293,7 +332,7 @@ void main(){
   splitClip();
   vec2 c = gl_PointCoord - 0.5;
   float a = smoothstep(0.5, 0.0, length(c));
-  vec3 col = vec3(0.62, 0.86, 0.88) * vL * (1.0 - u_star) * (1.0 - u_deep * 0.8);
+  vec3 col = vec3(0.62, 0.86, 0.88) * vL * (1.0 - u_star) * (1.0 - u_deep * 0.8 * (1.0 - u_amb));
   gl_FragColor = vec4(col * a * vA * 0.9, 1.0);
 }`
 

@@ -8,8 +8,8 @@ import { SITE } from '../../content/site'
 import { Logo } from '../../assets/logo/Logo'
 
 const LINKS = [
-  { id: 'hero', label: 'Surface' }, { id: 'statement', label: 'Statement' }, { id: 'lab', label: 'Lab' },
-  { id: 'systems', label: 'Systems' }, { id: 'dive', label: 'Dive' }, { id: 'journey', label: 'Journey' }, { id: 'contact', label: 'Say hi' },
+  { id: 'hero', label: 'Surface' }, { id: 'statement', label: 'Statement' }, { id: 'dive', label: 'Dive' }, { id: 'lab', label: 'Work' },
+  { id: 'systems', label: 'Shade DS' }, { id: 'journey', label: 'Journey' }, { id: 'contact', label: 'Say hi' },
 ]
 
 function Wave({ on }: { on: boolean }) {

@@ -10,6 +10,8 @@ import { settings } from '../../services/settings'
 import { quality, paintState } from '../quality' // PERF HOOK
 import { InlineSharpenEffect } from './perfEffects' // PERF HOOK
 import type { Look } from '../../state/props'
+import { ufx } from '../ufx/ufx'
+import { SharpText } from './SharpText'
 
 /**
  * The render queue (handbook ch.3 / 8). Effects are data: { pass, renderOrder, enabled }.
@@ -47,6 +49,8 @@ export class PostChain {
    *  pass program (clip composite, god rays, trail, SMAA/FXAA) compiles during loading, not at its first boundary */
   warmAll = false
   scenePass: RenderPass
+  /** W18 (Shifat 14:01Z): the global text slot at the canvas's full density */
+  text: SharpText
   preUfx: RenderPass
   postUfx: RenderPass
 
@@ -58,6 +62,7 @@ export class PostChain {
   constructor(public gl: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, ufxUnder: THREE.Scene, ufxOver: THREE.Scene, ufxCamera: THREE.Camera) {
     this.nbArgs = [scene, camera, ufxUnder, ufxOver, ufxCamera]
     this.composer = new EffectComposer(gl, { frameBufferType: THREE.HalfFloatType, multisampling: 0 })
+    this.text = new SharpText(this.distortion)
     this.scenePass = new RenderPass(scene, camera)
     this.bloom = settings.BLOOM_HQ
       ? new BloomEffect({ mipmapBlur: true, levels: 8, radius: 0.72, intensity: 0.4, luminanceThreshold: 0.9, luminanceSmoothing: 0.08 })
@@ -82,11 +87,23 @@ export class PostChain {
       { name: 'PostUfx', order: 100, pass: this.postUfx, needsRender: () => ufxOver.children.some((c) => c.visible) },
       { name: 'SMAA', order: 4000, pass: new EffectPass(camera, smaa), needsRender: () => quality.aa === 'smaa' },
       { name: 'FXAA', order: 4000, pass: new EffectPass(camera, fxaa), needsRender: () => quality.aa === 'fxaa' },
+      // W17 GLOBAL TEXT LAYER (Shifat 10:17Z + 11:46Z): all copy in one fixed slot, drawn ONCE over the composited frame
+      // (so a boundary never doubles it or slides it with a card) and BEFORE the trail, so the trail still bends it
+      // (W18, Shifat 14:01Z) the slot is no longer a pass in this chain: drawText() draws it after the final pass, at the
+      // canvas's full density, through the same trail displacement
       { name: 'ClipComposite', order: 3000, pass: new EffectPass(camera, new ClipCompositeEffect()), needsRender: () => clip.boundary || clip.capture >= 0 },
     ]
   }
+  /** the chain's own buffer size (scene density), independent of the canvas (text density) */
+  bw = 1; bh = 1
   setSize(w: number, h: number) {
-    this.composer.setSize(w, h, false)
+    // NOT composer.setSize: that sizes every target from the canvas, which now runs at the text density (Scene.tsx
+    // applyTextDpr). The scene, bloom, grade, trail and AA all keep the governor's DPR.
+    const bw = Math.max(1, Math.round(w * props.dpr)), bh = Math.max(1, Math.round(h * props.dpr))
+    this.bw = bw; this.bh = bh
+    this.composer.inputBuffer.setSize(bw, bh); this.composer.outputBuffer.setSize(bw, bh)
+    for (const e of this.entries) e.pass.setSize(bw, bh)
+    this.text.resize(w, h)
     const pw = Math.max(1, (w * props.dpr) >> 2), ph = Math.max(1, (h * props.dpr) >> 2)
     this.distortion.u('u_screenPaintTexelSize').value.set(1 / pw, 1 / ph)
     this.grade.u('u_aspect').value = w / h
@@ -112,7 +129,7 @@ export class PostChain {
       this.nbc = { composer, grade, bloom, w: 0, h: 0, swaps: passes.filter((p) => p.needsSwap).length }
     }
     const n = this.nbc
-    const full = this.gl.getDrawingBufferSize(this.nbFull)
+    const full = this.nbFull.set(this.bw, this.bh)
     const w = Math.max(2, Math.round(full.x * scale)), h = Math.max(2, Math.round(full.y * scale))
     if (w !== n.w || h !== n.h) {
       n.w = w; n.h = h
@@ -159,10 +176,11 @@ export class PostChain {
     if (sig !== this.signature) {
       this.signature = sig
       this.composer.removeAllPasses()
-      this.entries.filter((e) => e.on).sort((a, b) => a.order - b.order).forEach((e) => this.composer.addPass(e.pass))
+      this.entries.filter((e) => e.on).sort((a, b) => a.order - b.order).forEach((e) => { this.composer.addPass(e.pass); e.pass.setSize(this.bw, this.bh) })
       ;(window as any).__chain = this.entries.filter((e) => e.on).map((e) => `${e.order}:${e.name}`)
     }
     this.composer.render(dt)
+    this.text.draw(this.gl)
     void shared
   }
 }

@@ -33,11 +33,23 @@ import { Spring, Spring3 } from '../core/spring'
 // PRELOAD: code-split per scene. The hero is in this chunk; each later stage is its own chunk, mounted and
 // shader-warmed when its block enters the ±1 window around the current block (LaterStages below).
 const LATER: { name: string; load: () => Promise<ComponentType> }[] = [
-  { name: 'systems', load: () => import('./stages/systems/SystemsStage').then((m) => m.SystemsStage as ComponentType) },
   { name: 'dive', load: () => import('./stages/dive/DiveStage').then((m) => m.DiveStage as ComponentType) },
   { name: 'journey', load: () => import('./stages/journey/JourneyStage').then((m) => m.JourneyStage as ComponentType) },
 ]
 const LAZY = LATER.map((s) => lazy(() => s.load().then((C) => ({ default: C }))))
+
+/**
+ * Shifat 14:01Z ("every big text must be the sharpest thing on screen"): the canvas backing store runs at the device's
+ * own density (cap 3, and a total-pixel cap for huge screens) while the 3D scene and the post chain render at the
+ * governor's DPR into their own targets (PostChain.setSize sizes them explicitly). The final pass upscales the scene
+ * once onto the canvas, and the text layer is drawn after it at full density (PostChain.drawText).
+ */
+function applyTextDpr(gl: THREE.WebGLRenderer, w: number, h: number, sceneDpr: number) {
+  const dev = Math.min(3, window.devicePixelRatio || 1, Math.sqrt(9.0e6 / Math.max(1, w * h)))
+  const td = Math.max(sceneDpr, dev)
+  props.textDpr = td
+  if (Math.abs(gl.getPixelRatio() - td) > 1e-3) gl.setPixelRatio(td)
+}
 
 /** Owns the frame: paint → sim → (stages already updated) → post chain. Priority 1 = R3F stops auto-render. */
 function Renderer() {
@@ -57,9 +69,10 @@ function Renderer() {
     // keep the total-pixel cap as the window changes (ultrawide / 4K / external monitor)
     // PERF HOOK: the governor's DPR step (≤ the tier cap and the total-pixel cap)
     const want = quality.dprFor(size.width, size.height)
-    if (Math.abs(want - gl.getPixelRatio()) > 0.01) { setDpr(want); return }
-    const dpr = gl.getPixelRatio()
+    if (Math.abs(want - storeDpr) > 0.01) { setDpr(want); return }
+    const dpr = storeDpr
     props.dpr = dpr
+    applyTextDpr(gl, size.width, size.height, dpr)
     props.renderW = Math.floor(size.width * dpr); props.renderH = Math.floor(size.height * dpr)
     sys.paint.resize(props.renderW, props.renderH)
     sys.chain.setSize(size.width, size.height)
@@ -72,9 +85,10 @@ function Renderer() {
   // after React re-renders; a frame presented in between showed the page through an empty canvas (caught on the remote
   // GPU as blank frames at governor steps). So the step applies the same resize now and draws one frame immediately.
   useEffect(() => quality.on(() => {
-    setDpr(quality.dprFor(size.width, size.height))
-    const dpr = gl.getPixelRatio()
+    const dpr = quality.dprFor(size.width, size.height)
+    setDpr(dpr)
     props.dpr = dpr
+    applyTextDpr(gl, size.width, size.height, dpr)
     props.renderW = Math.floor(size.width * dpr); props.renderH = Math.floor(size.height * dpr)
     sys.paint.resize(props.renderW, props.renderH)
     sys.chain.setSize(size.width, size.height)
@@ -153,7 +167,7 @@ function NeighbourPass() {
     pos: new THREE.Vector3(), quat: new THREE.Quaternion(), fov: 35,
     bg: new THREE.Color(), fog: new THREE.Color(),
     vis: [] as (boolean | undefined)[],
-    d: { camY: 0, camZ: 0, under: false, split: -1, active: false, deep: 0, star: 0 },
+    d: { camY: 0, camZ: 0, under: false, split: -1, active: false, deep: 0, star: 0, gemOn: false },
     r: { on: false, intensity: 0, scene: null as THREE.Scene | null },
     ms: 0,
     // the neighbour's own camera springs (the rig's constants): they start where the live camera was when this block
@@ -176,7 +190,7 @@ function NeighbourPass() {
     const stage0 = props.stage, look0 = props.look, dt0 = props.dt
     const bg = scene.background as THREE.Color | null, fog = scene.fog as THREE.Fog | null
     if (bg) st.bg.copy(bg); if (fog) st.fog.copy(fog.color)
-    const D = st.d; D.camY = dive.camY; D.camZ = dive.camZ; D.under = dive.under; D.split = dive.split; D.active = dive.active; D.deep = dive.deep; D.star = dive.star
+    const D = st.d; D.camY = dive.camY; D.camZ = dive.camZ; D.under = dive.under; D.split = dive.split; D.active = dive.active; D.deep = dive.deep; D.star = dive.star; D.gemOn = dive.gemOn
     const R = st.r; R.on = diveRays.on; R.intensity = diveRays.intensity; R.scene = diveRays.scene
     const sysW = sysState.weight, jAct = journey.active
     if (!clip.flip()) return
@@ -188,6 +202,9 @@ function NeighbourPass() {
     try {
       // ---- the still block as if it were the live one
       props.stage = visuals.resolvePure(st.pose, st.look)
+      // W17: the stone follows the dive in the deep: the DOM section that sets this runs in the main loop only, so the
+      // neighbour pass would otherwise draw the deep with the stone hidden (Dive.tsx sets the same rule)
+      dive.gemOn = props.stage === 'dive' && dive.gemMix > 0
       props.look = st.look
       props.dt = dt
       const P = st.pose
@@ -221,7 +238,7 @@ function NeighbourPass() {
       if (c.fov !== st.fov) { c.fov = st.fov; c.updateProjectionMatrix() }
       c.updateMatrixWorld()
       if (bg) bg.copy(st.bg); if (fog) fog.color.copy(st.fog)
-      dive.camY = D.camY; dive.camZ = D.camZ; dive.under = D.under; dive.split = D.split; dive.active = D.active; dive.deep = D.deep; dive.star = D.star
+      dive.camY = D.camY; dive.camZ = D.camZ; dive.under = D.under; dive.split = D.split; dive.active = D.active; dive.deep = D.deep; dive.star = D.star; dive.gemOn = D.gemOn
       diveRays.on = R.on; diveRays.intensity = R.intensity; diveRays.scene = R.scene
       sysState.weight = sysW; journey.active = jAct
       st.ms = st.ms * 0.9 + (performance.now() - t0) * 0.1
@@ -244,6 +261,8 @@ function currentBlock() {
   const i = BLOCKS.findIndex((b) => b.includes(props.stage as string))
   return i < 0 ? 0 : i
 }
+const LOW_MEM = ((navigator as any).deviceMemory ?? 8) < 4
+
 function LaterStages() {
   const [mounted, setMounted] = useState<boolean[]>(() => LATER.map(() => false))
   const cur = useRef(mounted)
@@ -251,6 +270,26 @@ function LaterStages() {
   useEffect(() => {
     // fetch (not build) every later stage's code once the curtain is up, so a window move never waits on the network
     preload.afterIntro(() => LATER.forEach((s) => { s.load().catch(() => {}) }), 300)
+    // W18 PREWARM: once the hero has settled, mount every later stage in idle time, one at a time, so its programs
+    // compile and its textures upload (Warm) before anyone gets there; a deep jump to the footer then lands on the
+    // wall, not on a cold stage. They stay mounted (an inactive stage's frame returns at once) unless the device
+    // reports little memory.
+    let cancel = false
+    const ric: (cb: () => void) => void = (window as any).requestIdleCallback ? (cb) => (window as any).requestIdleCallback(cb, { timeout: 2500 }) : (cb) => setTimeout(cb, 400)
+    preload.afterIntro(() => {
+      let i = 0
+      const step = () => {
+        if (cancel || i >= LATER.length) return
+        const k = i++
+        ric(() => {
+          if (cancel) return
+          if (!cur.current[k]) { const next = cur.current.slice(); next[k] = true; cur.current = next; setMounted(next) }
+          setTimeout(step, 1200)
+        })
+      }
+      step()
+    }, 2500)
+    return () => { cancel = true }
   }, [])
   useFrame(() => {
     if (!props.introDone) return
@@ -261,7 +300,7 @@ function LaterStages() {
       const inWin = Math.abs(BLOCK_OF[i] - owner) <= 1
       // wall-clock hysteresis (props.dt is capped per frame, so a slow device would hold stages far longer)
       if (inWin) { away.current[i] = 0; if (!next[i]) { next[i] = true; changed = true } }
-      else if (next[i]) { if (!away.current[i]) away.current[i] = now; else if (now - away.current[i] > 8000) { next[i] = false; away.current[i] = 0; changed = true } }
+      else if (next[i] && LOW_MEM) { if (!away.current[i]) away.current[i] = now; else if (now - away.current[i] > 8000) { next[i] = false; away.current[i] = 0; changed = true } }
     }
     if (changed) { cur.current = next; setMounted(next) }
     ;(window as any).__stageWindow = { owner, mounted: LATER.filter((_, i) => cur.current[i]).map((s) => s.name) }

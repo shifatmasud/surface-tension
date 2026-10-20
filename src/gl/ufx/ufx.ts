@@ -15,7 +15,8 @@ export type UfxKind = 'text' | 'image' | 'html' | 'plane'
 export interface UfxItem {
   el: HTMLElement
   mesh: THREE.Mesh
-  layer: 'under' | 'over'
+  /** 'slot' = the global text layer (TextLayer.tsx): fixed, drawn once over the composited frame, before the trail */
+  layer: 'under' | 'over' | 'slot'
   docTop: number; docLeft: number; w: number; h: number
   /** extra per-frame hook (reveal progress, hover…) */
   onUpdate?: (it: UfxItem, screenY: number) => void
@@ -34,16 +35,21 @@ const FOV = 30
 class UfxSystem {
   under = new THREE.Scene()
   over = new THREE.Scene()
+  /** W17 global text layer: its own scene + camera (never shifted by the clip's inner parallax: the slot does not move) */
+  slot = new THREE.Scene()
+  slotCamera = new THREE.PerspectiveCamera(FOV, 1, 1, 10000)
   camera = new THREE.PerspectiveCamera(FOV, 1, 1, 10000)
   items: UfxItem[] = []
   enabled = true
   w = 1; h = 1
-  constructor() { this.under.name = 'PreUfx'; this.over.name = 'PostUfx' }
+  constructor() { this.under.name = 'PreUfx'; this.over.name = 'PostUfx'; this.slot.name = 'SlotUfx' }
   resize(w: number, h: number) {
     this.w = w; this.h = h
     const dist = (h / 2) / Math.tan(THREE.MathUtils.degToRad(FOV / 2))
     this.camera.aspect = w / h; this.camera.position.set(0, 0, dist); this.camera.near = dist / 20; this.camera.far = dist * 4
     this.camera.updateProjectionMatrix()
+    this.slotCamera.aspect = w / h; this.slotCamera.position.set(0, 0, dist); this.slotCamera.near = dist / 20; this.slotCamera.far = dist * 4
+    this.slotCamera.updateProjectionMatrix()
     this.measureAll()
   }
   measureAll() {
@@ -56,7 +62,7 @@ class UfxSystem {
   }
   add(it: UfxItem) {
     this.items.push(it); this.measure(it)
-    ;(it.layer === 'under' ? this.under : this.over).add(it.mesh)
+    ;(it.layer === 'under' ? this.under : it.layer === 'slot' ? this.slot : this.over).add(it.mesh)
     it.mesh.frustumCulled = false
     return it
   }

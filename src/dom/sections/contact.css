@@ -1,25 +1,88 @@
-/* Contact, landscape: the whole block sits on the bottom margin so the gem owns the upper third at the end of
-   the page (before, the footer pushed the headline up into the stone when scrolled to the bottom) */
-@media (min-width: 813px) and (min-aspect-ratio: 1/1) {
-  section.contact { padding-top: 0; padding-bottom: 4vh; justify-content: flex-end; }
-  section.contact .contact__row { margin-top: 4.5vh; }
-  section.contact .footer { padding-top: 3.5vh; }
-}
-
-/* Contact, wide landscape: north-star frame. The headline keeps the lower-left, and the CTA + links move to the
-   bottom-right beside it, aligned to its last line, like the north-star caption. Before, they stacked under the
-   headline and pushed it up to ~35px under the stone. The headline column is max-content (nowrap), so the right
-   column can never overlap it. */
+/* STRUCTURE v2 — the CTA: a plain black wall, huge flat white type (drawn in GL behind the crewmate from these DOM
+   line boxes; the DOM type stays for screen readers, selection and the no-GL page), stickers, the flat CTA. */
+.contact { height: 200vh; padding: 0; color: #fff; }
+.contact__inner { display: block; }
+.contact__grid { position: absolute; left: var(--pad-x); right: var(--pad-x); bottom: 5vh; display: grid; grid-template-columns: repeat(var(--grid-cols), minmax(0, 1fr)); column-gap: var(--grid-gap); align-items: end; pointer-events: none; }
+.contact__title { grid-column: 1 / -1; margin: 0 0 0 -0.055em; font-size: calc(var(--fs-display) * 1.12); font-weight: 400; letter-spacing: -0.065em; line-height: .88; color: #fff; }
+.contact__line { display: block; white-space: nowrap; }
+html.cta-gl .contact__title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+/* W18: the CTA row sits centred under the crewmate (the stickers frame the corners) */
+html.cta-gl .contact__row { grid-column: 1 / -1; justify-self: center; }
+.contact__row { grid-column: 9 / -1; justify-self: end; pointer-events: auto; margin-bottom: 0.6vh; }
+.contact__cta { display: flex; flex-direction: column; gap: 14px; align-items: stretch; width: clamp(280px, 24vw, 420px); }
+.contact .big-btn { background: #fff; color: #000; }
+.contact .big-btn i { background: #000; color: #fff; }
+.contact .form input { background: #161618; color: #fff; }
+.contact .form input::placeholder { color: #a9adb3; }
+.contact .pill { background: #fff; color: #000; }
+html.no-gl .contact { height: auto; min-height: 100vh; background: #000; }
+html.no-gl .contact__inner { position: relative; height: auto; min-height: 100vh; }
 @media (min-width: 1200px) and (min-aspect-ratio: 13/10) {
-  section.contact {
-    display: grid; grid-template-columns: max-content minmax(0, 1fr); grid-template-rows: 1fr auto auto;
-    column-gap: var(--grid-gap); align-content: stretch; padding-bottom: 3.5vh;
-  }
-  section.contact .contact__title { grid-column: 1; grid-row: 2; align-self: end; }
-  section.contact .contact__row {
-    grid-column: 2; grid-row: 2; align-self: end; justify-self: end; margin: 0 0 0.9vh;
-    width: clamp(300px, 24vw, 460px); display: flex; flex-direction: column; align-items: stretch; gap: clamp(22px, 3.2vh, 40px);
-  }
-  section.contact .contact__cta, section.contact .contact__meta { grid-column: auto; }
-  section.contact .footer { grid-column: 1 / -1; grid-row: 3; padding-top: 4.5vh; }
+  .contact__title { grid-column: 1 / span 8; }
+  .contact__row { grid-row: 1; }
 }
+@media (max-width: 1199px), (max-aspect-ratio: 13/10) {
+  .contact__grid { row-gap: 4vh; }
+  .contact__row { grid-column: 1 / -1; justify-self: stretch; }
+  .contact__cta { width: 100%; max-width: 460px; }
+}
+@media (max-width: 812px) { .contact__title { font-size: clamp(64px, 19vw, 132px); } }
+
+/* sticky footer: the CTA (canvas + DOM) slides up over it like a curtain; it never moves */
+.footer-spacer { height: calc(var(--footer-h) + 40vh); }  /* the reveal, then the back-to-the-surface bar fills */
+:root { --footer-h: 100vh; }
+.site-footer { position: fixed; left: 0; right: 0; bottom: 0; height: var(--footer-h); z-index: -1; background: var(--c-paper); color: var(--c-ink);
+  display: flex; flex-direction: column; justify-content: space-between; padding: calc(var(--s7) * 0.7) var(--pad-x) var(--pad-y); font-size: var(--fs-small); }
+.site-footer .overscroll__bar { display: grid; gap: var(--s2); width: min(100%, 520px); color: var(--c-ink); }
+/* Shifat 13:58Z: "Calm Green filling pill progress bar" — a rounded capsule, light grey track, a calm sage-green fill
+   (#2E8B62 → #2A7F5A: 3.3:1 and 3.9:1 against the #E3E6E2 track, the 3:1 non-text minimum), eased fill */
+.site-footer .overscroll__track { position: relative; height: 12px; border-radius: 999px; background: #e3e6e2; overflow: hidden; box-shadow: inset 0 1px 1.5px rgba(10, 10, 11, .08); }
+.site-footer .overscroll__fill { position: absolute; inset: 0; border-radius: 999px; background: linear-gradient(90deg, #2e8b62, #2a7f5a); transform-origin: 0 50%; transform: translateX(calc((var(--f, 0) - 1) * 100%)); transition: transform .32s cubic-bezier(.22, .8, .24, 1); will-change: transform; }
+.site-footer .overscroll__fill::after { content: ''; position: absolute; inset: 2px 6px auto 6px; height: 3px; border-radius: 999px; background: rgba(255, 255, 255, .22); }
+@media (prefers-reduced-motion: reduce) { .site-footer .overscroll__fill { transition: none; } }
+.site-footer .overscroll__label { margin: 0; font-size: var(--fs-small); line-height: 1.45; }
+html:not(.is-lifted) .site-footer { visibility: hidden; }
+.site-footer__top { display: grid; grid-template-columns: repeat(var(--grid-cols), minmax(0, 1fr)); column-gap: var(--grid-gap); row-gap: var(--s4); align-items: start; }
+.site-footer__name { grid-column: 1 / span 5; margin: 0; font-size: var(--fs-body); line-height: 1.3; }
+.site-footer__name span { color: var(--c-silver-3); }
+.site-footer__links { grid-column: 7 / span 3; display: grid; gap: 10px; font-size: var(--fs-body); }
+.site-footer__links a { display: inline-flex; align-items: center; gap: 8px; color: inherit; text-decoration: none; }
+.site-footer__time { grid-column: 10 / -1; display: grid; gap: 6px; font-size: var(--fs-body); }
+.site-footer__time > span:first-child { font-size: var(--fs-small); color: var(--c-silver-3); }
+.site-footer__bottom { display: flex; justify-content: space-between; align-items: center; gap: var(--s3); color: var(--c-silver-3); }
+.site-footer__top-btn { font: inherit; color: var(--c-ink); background: none; border: 0; padding: 8px 0; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+@media (max-width: 812px) {
+  .site-footer { padding-top: var(--s4); }
+  .site-footer__name, .site-footer__links, .site-footer__time { grid-column: 1 / -1; }
+  .site-footer__bottom { flex-direction: column-reverse; align-items: flex-start; }
+}
+html.no-gl .site-footer { position: static; z-index: auto; }
+html.no-gl .footer-spacer { display: none; }
+#canvas { will-change: transform; }
+
+/* stickers (scene objects on the CTA wall; the white die-cut edge is the vinyl's paper margin, not a CSS border) */
+.stickers { position: absolute; inset: 9vh var(--pad-x) 40vh; pointer-events: none; z-index: 2; }
+.sticker { position: absolute; left: var(--x); top: var(--y); pointer-events: auto; padding: 7px; background: #fff; color: var(--fg); font: 400 var(--fs-body)/1 var(--font); letter-spacing: -0.02em;
+  cursor: grab; touch-action: none; transform-style: preserve-3d; -webkit-tap-highlight-color: transparent; }
+.sticker:active { cursor: grabbing; }
+.sticker__face { position: relative; display: grid; place-items: center; background: var(--bg); overflow: hidden; border-radius: inherit; width: 100%; height: 100%; padding: 0 1.1em; }
+.sticker__label { position: relative; white-space: nowrap; }
+.sticker__sheen { position: absolute; top: -60%; bottom: -60%; width: 28%; left: -40%; background: rgba(255, 255, 255, .34); transform: rotate(24deg); transition: left .9s var(--ease); }
+@media (hover: hover) { .sticker:hover .sticker__sheen { left: 120%; } }
+.sticker__curl { position: absolute; right: 0; bottom: 0; width: 22px; height: 22px; background: #e6e7ea; clip-path: polygon(100% 0, 0 100%, 100% 100%); transform-origin: 100% 100%; transform: scale(0.35); transition: transform .5s var(--ease); }
+@media (hover: hover) { .sticker:hover .sticker__curl { transform: scale(1); } }
+.sticker--pill { border-radius: 999px; height: 3.2em; }
+.sticker--circle, .sticker--drop { border-radius: 50%; width: 6.4em; height: 6.4em; }
+.sticker--circle .sticker__face, .sticker--drop .sticker__face { padding: 0; text-align: center; }
+.sticker--drop { border-radius: 50% 50% 50% 8%; }
+.sticker--drop .sticker__label { white-space: normal; max-width: 4.6em; line-height: 1.05; }
+.sticker--square { border-radius: 18px; width: 5em; height: 5em; }
+.sticker--square .sticker__face { padding: 0; }
+.sticker--star { width: 6.6em; height: 6.6em; padding: 0; background: none; }
+.sticker--star::before { content: ''; position: absolute; inset: 0; background: #fff; clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%); }
+.sticker--star .sticker__face { position: absolute; inset: 9px; width: auto; height: auto; padding: 0; clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%); }
+.sticker--star .sticker__curl { display: none; }
+.sticker--s { font-size: var(--fs-small); }
+.sticker--l.sticker--drop { width: 8em; height: 8em; }
+@media (max-width: 812px) { .stickers { inset: 11vh var(--pad-x) 46vh; } .sticker { left: var(--mx); top: var(--my); } .sticker--wide-only { display: none; } .sticker { font-size: var(--fs-small); } .sticker--l.sticker--drop { width: 6.6em; height: 6.6em; } }
+html.no-gl .stickers { position: relative; inset: auto; height: 50vh; }

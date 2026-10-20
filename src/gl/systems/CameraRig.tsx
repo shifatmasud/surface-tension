@@ -25,6 +25,7 @@ export function CameraRig() {
     parK: 1,
     stage: '',
     owner: -1,
+    last: new THREE.Vector3(NaN, NaN, NaN),
   }), [])
   useFrame((_, dt) => {
     visuals.resolve(st.pose, dt)
@@ -43,6 +44,14 @@ export function CameraRig() {
         if (newOwner) st.fov.reset(st.pose.fov)
       }
     }
+    // a pose that JUMPS (a deep link / nav jump lands on a stage whose pose was stale the frame before, e.g. the
+    // footer's wall 30 m from where the journey last left it) is a cut, never a spring flight across the scene
+    if (st.last.distanceTo(st.pose.pos) > 12) {
+      st.pos.x.reset(st.pose.pos.x); st.pos.y.reset(st.pose.pos.y); st.pos.z.reset(st.pose.pos.z)
+      st.tgt.x.reset(st.pose.target.x); st.tgt.y.reset(st.pose.target.y); st.tgt.z.reset(st.pose.target.z)
+      st.fov.reset(st.pose.fov)
+    }
+    st.last.copy(st.pose.pos)
     const p = st.pos.update(st.pose.pos, dt), t = st.tgt.update(st.pose.target, dt)
     const f = st.fov.update(st.pose.fov, dt)
     // mouse-move parallax (damped) — or device tilt on phones

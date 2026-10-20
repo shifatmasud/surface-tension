@@ -130,9 +130,10 @@ void main(){
   alb *= 0.9 + 0.1 * sin(h * 23.0);
   vec3 sunAt = exp(-K * d);
   float ndl = abs(dot(N, toSun));
-  vec3 c = causticsAt(surfaceEntry(p), d, dist);
+  float czNew = step(0.001, u_czIntensity);
+  vec3 c = czNew > 0.5 ? vec3(1.0) : causticsAt(surfaceEntry(p), d, dist);
   if (vKind > 0.5) ndl = 0.6 + 0.4 * ndl;              // thin blades scatter light all round
-  vec3 lit = sunAt * ndl * (0.45 + 0.55 * c) * 0.6;
+  vec3 lit = sunAt * ndl * mix(0.45 + 0.55 * c, vec3(0.5), czNew) * mix(0.6, 1.0, czNew);
   // translucency: the sun through the leaf when looking toward the light. Thin rims glow gold-green, the
   // thicker core stays darker; a scattering rim catches the light on the silhouette edges.
   float back = pow(max(dot(V, toSun), 0.0), 2.0);
@@ -142,6 +143,7 @@ void main(){
   float rim = pow(1.0 - abs(dot(N, V)), 2.5);
   vec3 amb = inscatter(vec3(0.0, 1.0, 0.0), d) * (vKind > 0.5 ? 1.1 : 0.5);
   vec3 col = alb * (lit + amb) * (0.75 + 0.25 * rimK) + trans * mix(alb * 2.0, glowC, 0.45) + rim * sunAt * glowC * 0.22 * (0.3 + back);
+  col += alb * causticLight(p, N) * 1.0;
   // the same water as the backdrop: extinction + in-scatter veil, red dies first
   vec3 tv = exp(-KV * dist);
   float dc = max(-u_cam.y, 0.02);

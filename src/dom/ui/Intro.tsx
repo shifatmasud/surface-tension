@@ -34,6 +34,8 @@ export function Intro() {
       if (count.current) setOdometer(count.current, eased * 100, 3)
       logo3d.progress(eased) // logo3d hook
       // the curtain starts lifting with the first droplet, so the ring opens as the hero is revealed
+      // QA: ?introhold parks the counter at 60 % until window.__introGo is set (frames of the panel + its logo)
+      if (/[?&]introhold/.test(location.search) && !(window as any).__introGo) { eased = Math.min(eased, 0.6); if (count.current) setOdometer(count.current, eased * 100, 3); raf = requestAnimationFrame(loop); return }
       if (eased >= 1) { logo3d.exit(); boot.drop(); setTimeout(() => setGone(true), 120); return }
       raf = requestAnimationFrame(loop)
     }

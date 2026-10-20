@@ -67,22 +67,30 @@ export function SystemsStage() {
   const mats = useMemo(() => {
     const top = new THREE.MeshPhysicalMaterial({ color: '#1f5bff', roughness: 0.1, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.03, emissive: new THREE.Color('#1f5bff'), emissiveIntensity: 0.2, envMapIntensity: 0.7, sheen: 0.5, sheenRoughness: 0.35, sheenColor: new THREE.Color('#9cc0ff') })
     const white = new THREE.MeshPhysicalMaterial({ color: '#ffffff', roughness: 0.22, clearcoat: 1, clearcoatRoughness: 0.1, envMapIntensity: 1.0 })
+    // materials pass (Shifat 08:03Z: iridescent, fringed liquid glass / plastic / metal). The thin film is three's own
+    // physically based iridescence (interference by film thickness), kept low so it fringes edges and grazing faces only:
+    //  - plastic: the glossy ultramarine product tile gets a faint oil-film sheen on its clear coat
+    //  - metal: the toggle knob and slider thumb become polished anodised titanium (cool steel → violet/gold at the rim)
+    //  - liquid glass: the tinted base tile's transmission gets a soap-film fringe (set on the transmission material below)
+    top.iridescence = 0.28; top.iridescenceIOR = 1.45; top.iridescenceThicknessRange = [220, 480]
+    const metal = new THREE.MeshPhysicalMaterial({ color: '#e9edf5', metalness: 1, roughness: 0.14, clearcoat: 0.6, clearcoatRoughness: 0.08, envMapIntensity: 1.25,
+      iridescence: 0.55, iridescenceIOR: 1.8, iridescenceThicknessRange: [260, 620] })
     const track = new THREE.MeshPhysicalMaterial({ color: '#ffffff', roughness: 0.4, transparent: true, opacity: 0.3, depthWrite: false })
     const accent = new THREE.MeshPhysicalMaterial({ color: '#1f5bff', roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.15, emissive: new THREE.Color('#1f5bff'), emissiveIntensity: 0.18 })
     const grey = new THREE.MeshPhysicalMaterial({ color: '#c3c7cd', roughness: 0.5 })
     const chips = TOKENS.map((t) => new THREE.MeshPhysicalMaterial({ color: t.color, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.15, emissive: new THREE.Color(t.color), emissiveIntensity: 0.2, transparent: true }))
     // cheap glass for phones: no transmission pass at all
     const lowMid = new THREE.MeshPhysicalMaterial({ color: '#f4f6fa', roughness: 0.55, transparent: true, opacity: 0.78, clearcoat: 1, clearcoatRoughness: 0.4 })
-    const lowBase = new THREE.MeshPhysicalMaterial({ color: '#9db8ff', roughness: 0.15, transparent: true, opacity: 0.55, clearcoat: 1, clearcoatRoughness: 0.05, iridescence: 0.4 })
-    // PERF HOOK (his skill §3, "turn off clearcoat"): on phones the clearcoat/sheen/iridescence lobes go (each is a
-    // second specular evaluation per pixel); a slightly lower roughness keeps the glossy read of the pucks
+    const lowBase = new THREE.MeshPhysicalMaterial({ color: '#9db8ff', roughness: 0.15, transparent: true, opacity: 0.55, clearcoat: 1, clearcoatRoughness: 0.05, iridescence: 0.6, iridescenceIOR: 1.33, iridescenceThicknessRange: [180, 520] })
+    chips.forEach((c) => { c.iridescence = 0.2; c.iridescenceThicknessRange = [240, 460] })
+    // PERF HOOK (his skill §3, "turn off clearcoat"): on phones the clearcoat/sheen/iridescence lobes go
     if (settings.TIER === 'low') {
-      for (const m of [top, white, track, accent, grey, ...chips, lowMid, lowBase]) {
+      for (const m of [top, white, metal, track, accent, grey, ...chips, lowMid, lowBase]) {
         if (m.clearcoat > 0) { m.roughness *= 0.7; m.clearcoat = 0 }
         m.sheen = 0; m.iridescence = 0
       }
     }
-    return { top, white, track, accent, grey, chips, lowMid, lowBase }
+    return { top, white, metal, track, accent, grey, chips, lowMid, lowBase }
   }, [])
   const glass = useRef<{ mid: any; base: any }>({ mid: null, base: null })
 
@@ -276,7 +284,8 @@ export function SystemsStage() {
             <mesh geometry={geo.tiles[0]} material={hi ? undefined : mats.lowBase}>
               {hi && <MeshTransmissionMaterial ref={(m: any) => (glass.current.base = m)} buffer={buf.rt.texture} resolution={32} samples={settings.TIER === 'high' ? 8 : 5}
                 transmission={1} thickness={0.9} roughness={0.06} ior={1.45} chromaticAberration={0.06} anisotropicBlur={0.08} distortion={0.05} distortionScale={0.4} temporalDistortion={0}
-                color="#d6e2ff" attenuationColor="#8fb0ff" attenuationDistance={1.4} clearcoat={1} clearcoatRoughness={0.05} envMapIntensity={1} />}
+                color="#d6e2ff" attenuationColor="#8fb0ff" attenuationDistance={1.4} clearcoat={1} clearcoatRoughness={0.05} envMapIntensity={1}
+                iridescence={0.6} iridescenceIOR={1.33} iridescenceThicknessRange={[180, 520]} />}
             </mesh>
             {[0, 1, 2].map((i) => (
               <mesh key={i} geometry={geo.chip} material={mats.chips[i]} position={[P[('chip' + i) as ControlId].x, P.chip0.y + 0.035, P.chip0.z]}
@@ -293,13 +302,13 @@ export function SystemsStage() {
             <mesh geometry={geo.button} material={mats.accent} position={[P.button.x, P.button.y + 0.05, P.button.z]} ref={reg('button', 1)} />
             <mesh geometry={geo.sTrack} material={mats.grey} position={[P.slider.x, P.slider.y + 0.015, P.slider.z]} />
             <mesh geometry={geo.sFill} material={mats.accent} position={[P.slider.x, P.slider.y + 0.02, P.slider.z]} ref={(m) => { if (m) st.fill = m }} />
-            <mesh geometry={geo.thumb} material={mats.white} position={[P.slider.x, P.slider.y + 0.05, P.slider.z]} ref={(m) => { if (m) st.thumb = m }} />
+            <mesh geometry={geo.thumb} material={mats.metal} position={[P.slider.x, P.slider.y + 0.05, P.slider.z]} ref={(m) => { if (m) st.thumb = m }} />
           </group>
           {/* top: product — the vivid tile, and the toggle that is the light */}
           <group ref={tiles[2]}>
             <mesh geometry={geo.tiles[2]} material={mats.top} />
             <mesh geometry={geo.track} material={mats.track} position={[P.toggle.x, P.toggle.y + 0.018, P.toggle.z]} ref={(m) => { if (m) st.trackMat = m.material as THREE.MeshPhysicalMaterial }} />
-            <mesh geometry={geo.knob} material={mats.white} position={[P.toggle.x + 0.29, P.toggle.y + 0.07, P.toggle.z]} ref={(m) => { if (m) st.knobMesh = m }} />
+            <mesh geometry={geo.knob} material={mats.metal} position={[P.toggle.x + 0.29, P.toggle.y + 0.07, P.toggle.z]} ref={(m) => { if (m) st.knobMesh = m }} />
           </group>
         </group>
       </group>

@@ -8,7 +8,7 @@ import { portrait } from '../../core/frame'
 import { ufxText } from '../../gl/ufx/UfxText'
 import { audio } from '../../services/audio'
 
-const PHRASES = [
+export const PHRASES = [
   { t: ['Pixels', 'with mass.'], c: 'Springs, buoyancy and damping, written by hand, so an interface pushes back when you touch it.' },
   { t: ['Motion', 'with memory.'], c: 'Second-order motion that remembers its velocity: nothing snaps, everything settles.' },
   { t: ['Systems', 'that ship.'], c: 'A design system and the tooling around it, so the feel survives the hand-off.' },
@@ -40,7 +40,8 @@ export function Statement() {
     let lastStep = -1
     return {
       name: 'statement',
-      init() { document.fonts.ready.then(() => blocks.current.forEach((b) => { if (b) handles.push(ufxText(b, { color: '#0a0a0b', sheen: '#9fb4d6' })) })) },
+      // W17: the phrases are drawn by the global text layer (dom/ui/TextLayer.tsx); this copy stays for screen readers
+      init() { void ufxText; void blocks },
       update() {
         st.weight = weightFrom(range.ratio)
         const pinLen = Math.max(1, range.height - props.height)

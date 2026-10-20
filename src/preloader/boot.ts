@@ -2,7 +2,8 @@
  * Preloader 3D logo boot. Helper 99499b45 (logo3d).
  * Inlined into index.html at build time (scripts/logoInline.mjs), so it runs during HTML parse with zero requests,
  * before the ~1.5 MB scene bundle even starts. It owns one small fixed canvas above the black intro panel:
- * spins the mark, follows the curtain up when it lifts, then loses its GL context and removes itself.
+ * spins the mark INSIDE the black intro panel (a child of it, clipped by it: Shifat 14:44Z), leaves with the curtain,
+ * then loses its GL context and removes itself.
  *
  * Hook (src/preloader/hook.ts, called from Intro.tsx): logo3d.progress(0..1) each frame, logo3d.exit() when the
  * curtain starts. Without the hook it still works: idle spin, follows the .intro panel, cleans up on html.is-lifted.
@@ -32,7 +33,9 @@ declare global { interface Window { __logo3d?: Logo3DApi } }
   cv.setAttribute('aria-hidden', 'true')
   cv.className = 'logo3d'
   const st = cv.style
-  st.cssText = 'position:fixed;left:50%;top:44%;z-index:101;pointer-events:none;opacity:0;transition:opacity .45s linear;will-change:transform'
+  // Shifat 14:44Z: the logo lives INSIDE the preloader panel (a child of .intro, which clips), so it leaves with the
+  // panel frame-exact and is cut by the panel's own edge — never floating over the hero
+  st.cssText = 'position:absolute;left:50%;top:44%;z-index:1;pointer-events:none;opacity:0;transition:opacity .45s linear;transform:translate(-50%,-50%)'
   let size = 0
   const layout = () => {
     const w = innerWidth, hh = innerHeight
@@ -41,7 +44,10 @@ declare global { interface Window { __logo3d?: Logo3DApi } }
     st.width = st.height = size + 'px'
   }
   layout()
-  ;(d.body || h).appendChild(cv)
+  // the panel: React's .intro once it has mounted, else the static shell panel from index.html
+  const panelOf = () => d.querySelector('.intro:not(.shell-intro)') || d.querySelector('.shell-intro')
+  const adopt = () => { const p = panelOf(); if (p && cv.parentElement !== p) p.appendChild(cv); return p }
+  if (!adopt()) (d.body || h).appendChild(cv)
 
   let R: ReturnType<typeof createLogoRenderer> | null = null
   let raf = 0, last = 0, phase = 0.08, prog = 0, progS = 0, exitT = 0, done = false
@@ -79,30 +85,24 @@ declare global { interface Window { __logo3d?: Logo3DApi } }
     // reduced motion: one static 3/4 frame, then only the curtain/fade tracking below
     if (R && (!reduced || !api.frames || qa)) { R.render(fr); api.frames++; if (!api.firstFrame) api.firstFrame = now }
 
-    // follow the curtain (the .intro panel's own position and opacity)
-    if (!intro || !intro.isConnected) intro = d.querySelector('.intro')
-    if (intro) {
+    // ride inside the panel (re-adopted when React's panel replaces the shell); the panel's transform and opacity carry it
+    intro = adopt()
+    if (intro && exitT && !hold) {
       const r = intro.getBoundingClientRect()
-      st.transform = 'translate(-50%,-50%) translateY(' + r.top.toFixed(1) + 'px)'
-      if (exitT && !hold) {
-        const o = parseFloat(getComputedStyle(intro).opacity)
-        if (o < 1) st.opacity = String(o)
-        if (r.bottom <= 1 || o <= 0.01 || now - exitT > 15000) dispose()
-      }
+      if (r.bottom <= 1 || parseFloat(getComputedStyle(intro).opacity) <= 0.01 || now - exitT > 15000) dispose()
     }
     if (!hold && h.classList.contains('is-lifted')) dispose()
   }
 
   const api: Logo3DApi = {
     progress(v) { prog = Math.max(prog, Math.min(1, v || 0)) },
-    exit() { if (!exitT) { exitT = performance.now(); prog = 1; st.transition = 'none'; st.opacity = '1' } },
+    exit() { if (!exitT) { exitT = performance.now(); prog = 1 } },
     qa(f) { qa = f },
     dispose,
     firstFrame: 0,
     frames: 0,
   }
   window.__logo3d = api
-  st.transform = 'translate(-50%,-50%)'
   // GL setup after the shell's first paint AND after the main bundle's loader (deferBoot in vite.config) has queued its
   // requests in that same frame: rAF -> timer -> timer runs behind deferBoot's rAF -> timer, so the scene download never
   // waits on this shader compile

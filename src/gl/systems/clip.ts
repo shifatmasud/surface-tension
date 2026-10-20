@@ -19,12 +19,19 @@ import { settings, browser } from '../../services/settings'
  *
  * Blocks: hero+statement | lab | systems | dive | journey | contact.  ?noclip turns it off (QA).
  */
-export const BLOCKS: string[][] = [['hero', 'statement'], ['lab'], ['systems'], ['dive'], ['journey'], ['contact']]
+// STRUCTURE v2 (Shifat, Oct 20 08:32Z): three clipped scenes
+// v3 (Shifat 11:56Z): one continuous water scene — surface, sink, the work, deeper, the systems — then his world
+export const BLOCKS: string[][] = [['hero', 'statement', 'dive', 'lab', 'systems'], ['journey', 'contact']]
 const smooth = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
 
 class Clip {
   enabled = settings.USE_GL && !(typeof location !== 'undefined' && /[?&]noclip/.test(location.search))
   reduced = browser.reducedMotion || (typeof location !== 'undefined' && /[?&]clipfade/.test(location.search))
+  /** W18 (STRUCTURE v3 13:24Z "through the screen"): boundaries that crossfade instead of sliding a card. The dive ends with
+   *  the camera inside the tablet's starry screen and the journey opens on the same stars: one push, no card. */
+  private readonly FADE = new Set<number>([1])
+  /** the current boundary crossfades (reduced motion, or a FADE boundary) */
+  xfade = false
   /** block that owns the live render (the incoming one during a boundary) */
   owner = 0
   /** bumps whenever the owner changes: camera springs and the look snap to the new block (hidden under the card) */
@@ -99,6 +106,7 @@ class Clip {
     this.capture = -1
     this.ufxY = 0
     if (!this.boundary) {
+      this.xfade = false
       // arm: a neighbouring block is about to enter (either direction) — keep the latest frame of this one
       if ((owner + 1 < N && this.top(owner + 1) < vh * 1.6) || (owner > 0 && this.top(owner) > -vh * 0.6)) this.capture = owner
       this.still = -1
@@ -113,7 +121,8 @@ class Clip {
     const d = vh - yTop, t = Math.min(1, Math.max(0, d / vh))
     this.yTop = yTop; this.t = t; this.d = d
     const R = Math.min(64, Math.max(18, vw * 0.035))
-    if (this.reduced) {
+    this.xfade = this.reduced || this.FADE.has(b)
+    if (this.xfade) {
       // reduced motion: no card move — the composite crossfades the two frames (never a cut); the outgoing DOM fades
       this.shift = 0; this.scale = 1; this.lag = 0; this.dark = 0; this.radius = 0; this.inset = 0; this.outRadius = 0
     } else {
@@ -131,7 +140,7 @@ class Clip {
     // the live card is moved down by the shift: render its text that much higher (-shift)
     this.ufxY = this.liveUpper ? d : -this.shift
     this.styleOutgoing(BLOCKS[b - 1][BLOCKS[b - 1].length - 1], d, yTop)
-    if (this.reduced && this.styled) { this.styled.style.transform = ''; this.styled.style.clipPath = ''; this.styled.style.opacity = (1 - smooth(0.15, 0.85, t)).toFixed(3) }
+    if (this.xfade && this.styled) { this.styled.style.transform = ''; this.styled.style.clipPath = ''; this.styled.style.opacity = (1 - smooth(0.15, 0.85, t)).toFixed(3) }
   }
 
   /** NEIGHBOUR HOOK: switch to the opposite-direction context of this boundary — the still block becomes the "live"

@@ -1,7 +1,5 @@
-import * as THREE from 'three'
 import { useRef, useState } from 'react'
-import { useSection, weightFrom } from './useSection'
-import { visuals } from '../../gl/systems/visuals'
+import { useSection } from './useSection'
 import { props } from '../../state/props'
 import { clamp, damp } from '../../core/math'
 import { PROJECTS } from '../../content/site'
@@ -12,7 +10,7 @@ import { labGL } from '../../gl/stages/lab/labGL'
 import './lab.css'
 
 /**
- * S3 — Lab. Pinned; vertical scroll slides the shelf sideways. North-star frame: the centred reel is
+ * S3 — Lab (inside the water scene: the projects float over the sand, under the caustics). Pinned; vertical scroll slides the shelf sideways. North-star frame: the centred reel is
  * the star (upper ~60 %), its name huge on the bottom margin (mask slide-up per card), one specific
  * line + tags as the small caption on the right, the count rolling as an odometer.
  */
@@ -22,15 +20,13 @@ export function Lab() {
   const [seen, setSeen] = useState(false)
   const [active, setActive] = useState(0)
   useSection(ref, (range) => {
-    const pose = { pos: new THREE.Vector3(0, 24, 1.5), target: new THREE.Vector3(0, 0, 0), fov: 40 }
-    const st = visuals.register('lab', () => pose, { fade: 0.97, bg: new THREE.Color('#f5f6f7'), fogColor: new THREE.Color('#f5f6f7'), vignette: 0.0, bloom: 0.15, bloomThreshold: 0.9, contrast: 1.0 })
+    // STRUCTURE v2: no stage of its own — the work floats in the dive's water (the dive keeps the camera and the look)
     let x = 0, lastX = 0, lastActive = -1, applied = 0, primed = false
     return {
       name: 'lab',
       init() { if (track.current) labGL.mount(track.current) },
       show() { setSeen(true) },
       update(dt) {
-        st.weight = weightFrom(range.ratio)
         const el = track.current; if (!el) return
         const pinLen = Math.max(1, range.height - props.height)
         const p = clamp((props.scroll - range.docTop) / pinLen)
@@ -68,7 +64,7 @@ export function Lab() {
         <div className="lab__track" ref={track}>
           {PROJECTS.map((p, i) => (
             <article key={p.id} className={'card' + (i === active ? ' is-active' : '')} data-id={p.id} data-cursor data-cursor-label="Open" tabIndex={0}
-              onClick={() => { overlay.open(p.id); audio.splash() }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); overlay.open(p.id) } }}
+              onClick={() => { overlay.open(p.id, { morph: true, from: labGL.rectOf(p.id) }); audio.splash() }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); overlay.open(p.id, { morph: true, from: labGL.rectOf(p.id) }) } }}
               onFocus={() => labGL.hover(p.id, true)} onBlur={() => labGL.hover(p.id, false)}
               onMouseEnter={() => { audio.tick(); labGL.hover(p.id, true) }} onMouseLeave={() => labGL.hover(p.id, false)} aria-label={`${p.title}, ${p.year}. ${p.blurb} Open project.`}>
               <div className="card__dom">

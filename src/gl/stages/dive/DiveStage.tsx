@@ -1,19 +1,24 @@
 import * as THREE from 'three'
 import { useEffect, useMemo, useRef } from 'react'
 import { useThree } from '@react-three/fiber'
+import { slotBox } from '../../../dom/ui/TextLayer'
 import { nb, useStageFrame } from '../../systems/neighbour' // NEIGHBOUR HOOK
 import { props, shared } from '../../../state/props'
 import { settings } from '../../../services/settings'
 import { portrait } from '../../../core/frame'
 import { engine } from '../../engine'
 import { GEM_LAYER } from '../hero/HeroStage'
+import { brilliantGeometry } from '../hero/diamond'
 import { dive, diveRays, DIVE_LAYER, TOOL_POS, floorH } from './diveState'
 import { vegVert, vegFrag, rayMaskVert, rayMaskFrag } from './vegetation'
+import { applyCaustics, causticUniforms, causticsFrame } from '../../water/caustics'
+import { DeepSea } from './DeepSea'
+import { UiCylinder } from './UiCylinder'
 import { backdropVert, backdropFrag, floorVert, floorFrag, siltVert, siltFrag, starVert, starFrag } from './shaders'
 
 const ss = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
 const Q = typeof location !== 'undefined' ? location.search : ''
-const QA = { noRays: /[?&]norays/.test(Q), noVeg: /[?&]noveg/.test(Q), noCaus: /[?&]nocaus/.test(Q) }
+const QA = { noRays: /[?&]norays/.test(Q), noVeg: /[?&]noveg/.test(Q), noCaus: /[?&]nocaus/.test(Q), gemDbg: /[?&]gemdbg/.test(Q) }
 
 /** Seeded random so the forest is the same on every visit (and in every QA frame). */
 function rng(seed: number) { let s = seed >>> 0; return () => { s = (s + 0x6d2b79f5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296 } }
@@ -97,7 +102,7 @@ function sunDirs() {
  * Everything lives on its own layer so the hero's cube/planar captures never see it.
  */
 export function DiveStage() {
-  const { camera, scene } = useThree() as { camera: THREE.PerspectiveCamera; scene: THREE.Scene }
+  const { camera, scene, gl } = useThree() as { camera: THREE.PerspectiveCamera; scene: THREE.Scene; gl: THREE.WebGLRenderer }
   const group = useRef<THREE.Group>(null!)
   const backdrop = useRef<THREE.Mesh>(null!)
   const tier = settings.TIER
@@ -113,6 +118,8 @@ export function DiveStage() {
       u_deep: { value: 0 },
       u_split: { value: -1 },
       u_star: { value: 0 },
+      u_amb: { value: 0 },
+      u_abyss: { value: 0 },
       u_res: shared.u_resolution,
       u_bn: shared.u_blueNoise,
       u_caus: { value: QA.noCaus ? 0 : 1 },
@@ -141,6 +148,8 @@ export function DiveStage() {
     const veg = new THREE.ShaderMaterial({ vertexShader: vegVert, fragmentShader: vegFrag, uniforms: { ...u, u_part: { value: 2.6 } }, defines, side: THREE.DoubleSide })
     const vegFore = new THREE.ShaderMaterial({ vertexShader: vegVert, fragmentShader: vegFrag, uniforms: { ...u, u_part: { value: 2.6 } }, defines: { ...defines, FORE: 1 }, side: THREE.DoubleSide, transparent: true, depthWrite: false })
     const vegMask = new THREE.ShaderMaterial({ vertexShader: vegVert, fragmentShader: vegFrag, uniforms: { ...u, u_part: { value: 2.6 } }, defines: { ...defines, MASK: 1 }, side: THREE.DoubleSide, depthTest: false, depthWrite: false })
+    ;[floor, veg, vegFore].forEach((m) => applyCaustics(m))
+    causticUniforms.u_czSun.value = u.u_sun.value
     const rayMask = new THREE.ShaderMaterial({ vertexShader: rayMaskVert, fragmentShader: rayMaskFrag, uniforms: { ...u, u_invVP: { value: diveRays.invVP }, u_sunInfo: { value: diveRays.sun } }, defines, depthTest: false, depthWrite: false })
     return { backdrop, floor, silt, stars, veg, vegFore, vegMask, rayMask }
   }, [u, hi, low])
@@ -194,11 +203,12 @@ export function DiveStage() {
   }, [camera, mats, geos])
 
   const st = useMemo(() => ({
-    hero: null as THREE.Object3D | null, searched: 0, lineWas: false,
+    hero: null as THREE.Object3D | null, searched: 0, lineWas: false, dbg: null as THREE.Mesh | null,
     labels: [] as HTMLElement[], labelsAt: 0, v: new THREE.Vector3(), w: new THREE.Vector3(),
   }), [])
 
   useStageFrame('dive', () => {
+    causticsFrame(gl)
     const camY = camera.position.y
     dive.camY = camY
     dive.camZ = camera.position.z
@@ -227,7 +237,13 @@ export function DiveStage() {
         if (hit && c !== group.current) { st.hero = c; break }
       }
     }
-    if (st.hero && on && camY < -0.3) st.hero.visible = false
+    // (v2: while the dive drives the guide gem, the hero stage keeps the gem itself and hides only the lake)
+    if (st.hero && on && camY < -0.3 && !dive.gemOn) st.hero.visible = false
+    // QA (?gemdbg): a plain stand-in at the guide position, to check the path before the hero gem rides it
+    if (QA.gemDbg) {
+      if (!st.dbg) { st.dbg = new THREE.Mesh(brilliantGeometry(0.5), new THREE.MeshBasicMaterial({ color: '#3d7bff', fog: false })); scene.add(st.dbg) }
+      st.dbg.visible = dive.gemOn; st.dbg.position.copy(dive.gem); st.dbg.rotation.y = props.time * 0.4
+    }
 
     if (!showGL) { diveRays.on = false; if (!nb.active) hideLabels(st.labels); return }
     // screen-space god rays: on once fully under, fading out into the deep
@@ -239,9 +255,13 @@ export function DiveStage() {
     u.u_cam.value.copy(camera.position)
     backdrop.current.position.copy(camera.position)
     dive.deep = ss(-11, -25, camY) * 0.97
-    dive.star = ss(-15, -25.5, camY)
+    // v3 (Shifat 11:56Z): the deep never turns to space any more — the systems are the same water, deeper. Below the
+    // sunlit layer the deep's own blue glow takes over (u_amb) and the fog thickens toward the systems (u_abyss)
+    dive.star = 0
     u.u_deep.value = dive.deep
     u.u_star.value = dive.star
+    u.u_amb.value = ss(-9, -22, camY)
+    u.u_abyss.value = dive.abyss
     const rs = nb.active ? nb.scale : 1 // NEIGHBOUR HOOK: point sizes follow the neighbour's smaller target
     mats.silt.uniforms.u_pxScale.value = props.renderH * rs / (2 * Math.tan((camera.fov * Math.PI) / 360))
     mats.stars.uniforms.u_dpr.value = props.dpr * rs
@@ -265,7 +285,9 @@ export function DiveStage() {
       const sx = (st.w.x * 0.5 + 0.5) * props.width, sy = (-st.w.y * 0.5 + 0.5) * props.height
       const fx = st.w.x * 0.5 + 0.5, fy = 0.5 - st.w.y * 0.5             // 0..1 from left / top
       const edge = ss(0.03, 0.1, Math.min(fx, 1 - fx)) * ss(0.11, 0.2, fy) * ss(0.04, 0.12, 1 - fy)   // clear of the nav at the top
-      const a = inFront ? gate * Math.exp(-0.075 * dist) * ss(1.4, 3.2, dist) * edge * (1 - dive.deep) * 1.6 : 0
+      // W17: never under the global text slot (the copy owns the bottom of the frame)
+      const keep = ss(0, 48, slotBox.top - 28 - sy)
+      const a = inFront ? gate * Math.exp(-0.075 * dist) * ss(1.4, 3.2, dist) * edge * keep * (1 - dive.deep) * 1.6 : 0
       el.style.opacity = Math.min(1, a).toFixed(3)
       if (a > 0.002) el.style.transform = `translate3d(${sx.toFixed(1)}px, ${sy.toFixed(1)}px, 0)`
     })
@@ -280,6 +302,8 @@ export function DiveStage() {
       {!QA.noVeg && <mesh geometry={geos.fore} material={mats.vegFore} renderOrder={14} frustumCulled={false} onUpdate={(o) => o.layers.set(DIVE_LAYER)} />}
       <points geometry={geos.silt} material={mats.silt} renderOrder={12} frustumCulled={false} onUpdate={(o) => o.layers.set(DIVE_LAYER)} />
       <points geometry={geos.stars} material={mats.stars} renderOrder={13} frustumCulled={false} onUpdate={(o) => o.layers.set(DIVE_LAYER)} />
+      <DeepSea u={u} />
+      <UiCylinder u={u} />
     </group>
   )
 }
