@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { useEffect, useMemo, useRef } from 'react'
-import { useFrame, useThree } from '@react-three/fiber'
+import { useThree } from '@react-three/fiber'
+import { nb, useStageFrame } from '../../systems/neighbour' // NEIGHBOUR HOOK
 import { MeshTransmissionMaterial } from '@react-three/drei'
 import { props } from '../../../state/props'
 import { settings } from '../../../services/settings'
@@ -118,7 +119,7 @@ export function SystemsStage() {
     } as Record<ControlId, { layer: number; x: number; z: number; w: number; d: number; y: number }>
   }, [])
 
-  useFrame((_, dt) => {
+  useStageFrame('systems', (_, dt) => {
     const vis = sys.weight > 0.002 || props.stage === 'systems'
     root.current.visible = vis
     if (!vis) return
@@ -199,41 +200,44 @@ export function SystemsStage() {
     backdrop.uniforms.uBg.value.copy(props.look.bg)
 
     // ---- DOM hit areas follow the glass (viewport px → the layer's local px)
-    root.current.updateMatrixWorld()
-    const layerTop = sys.layer ? sys.layer.getBoundingClientRect().top : 0
-    const W2 = props.width / 2, H2 = props.height / 2
-    let sx0 = 1e9, sy0 = 1e9, sx1 = -1e9, sy1 = -1e9
-    const project = (obj: THREE.Object3D, x: number, yv: number, z: number, w: number, d: number) => {
-      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9
-      const cs = st.corners
-      cs[0].set(x - w / 2, yv, z - d / 2); cs[1].set(x + w / 2, yv, z - d / 2); cs[2].set(x + w / 2, yv, z + d / 2); cs[3].set(x - w / 2, yv, z + d / 2)
-      for (const p of cs) {
-        st.v.copy(p).applyMatrix4(obj.matrixWorld).project(c)
-        const px = (st.v.x + 1) * W2, py = (1 - st.v.y) * H2
-        x0 = Math.min(x0, px); x1 = Math.max(x1, px); y0 = Math.min(y0, py); y1 = Math.max(y1, py)
+    // NEIGHBOUR HOOK: not while this stage is drawn as the outgoing neighbour (its DOM rides the clip's still transform)
+    if (!nb.active) {
+      root.current.updateMatrixWorld()
+      const layerTop = sys.layer ? sys.layer.getBoundingClientRect().top : 0
+      const W2 = props.width / 2, H2 = props.height / 2
+      let sx0 = 1e9, sy0 = 1e9, sx1 = -1e9, sy1 = -1e9
+      const project = (obj: THREE.Object3D, x: number, yv: number, z: number, w: number, d: number) => {
+        let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9
+        const cs = st.corners
+        cs[0].set(x - w / 2, yv, z - d / 2); cs[1].set(x + w / 2, yv, z - d / 2); cs[2].set(x + w / 2, yv, z + d / 2); cs[3].set(x - w / 2, yv, z + d / 2)
+        for (const p of cs) {
+          st.v.copy(p).applyMatrix4(obj.matrixWorld).project(c)
+          const px = (st.v.x + 1) * W2, py = (1 - st.v.y) * H2
+          x0 = Math.min(x0, px); x1 = Math.max(x1, px); y0 = Math.min(y0, py); y1 = Math.max(y1, py)
+        }
+        return [x0, y0, x1, y1]
       }
-      return [x0, y0, x1, y1]
+      for (let i = 0; i < 3; i++) {
+        const [a, b, cc, d] = project(tiles[i].current, 0, H[i] / 2, 0, W, W)
+        sx0 = Math.min(sx0, a); sy0 = Math.min(sy0, b); sx1 = Math.max(sx1, cc); sy1 = Math.max(sy1, d)
+      }
+      const mx = input.mousePixelXY.x, my = input.mousePixelXY.y
+      const over = mx > sx0 - 20 && mx < sx1 + 20 && my > sy0 - 20 && my < sy1 + 40
+      st.hoverS = over ? 1 : 0
+      sys.hover = damp(sys.hover, over ? 1 : 0, 6, dt)
+      for (const k of Object.keys(parts) as ControlId[]) {
+        const el = sys.els[k]; if (!el) continue
+        const p = parts[k]
+        const [a, b, cc, d] = project(tiles[p.layer].current, p.x, p.y + 0.06, p.z, p.w, p.d)
+        // at least a 44 px target (WCAG / Fitts), centred on the part
+        const ww = Math.max(44, cc - a + 12), hh = Math.max(44, d - b + 12)
+        const cx = (a + cc) / 2, cy = (b + d) / 2
+        el.style.transform = `translate3d(${(cx - ww / 2).toFixed(1)}px, ${(cy - hh / 2 - layerTop).toFixed(1)}px, 0)`
+        el.style.width = `${ww.toFixed(1)}px`; el.style.height = `${hh.toFixed(1)}px`
+      }
+      const se = sys.els.stack
+      if (se) { se.style.transform = `translate3d(${sx0.toFixed(1)}px, ${(sy0 - layerTop).toFixed(1)}px, 0)`; se.style.width = `${(sx1 - sx0).toFixed(1)}px`; se.style.height = `${(sy1 - sy0).toFixed(1)}px` }
     }
-    for (let i = 0; i < 3; i++) {
-      const [a, b, cc, d] = project(tiles[i].current, 0, H[i] / 2, 0, W, W)
-      sx0 = Math.min(sx0, a); sy0 = Math.min(sy0, b); sx1 = Math.max(sx1, cc); sy1 = Math.max(sy1, d)
-    }
-    const mx = input.mousePixelXY.x, my = input.mousePixelXY.y
-    const over = mx > sx0 - 20 && mx < sx1 + 20 && my > sy0 - 20 && my < sy1 + 40
-    st.hoverS = over ? 1 : 0
-    sys.hover = damp(sys.hover, over ? 1 : 0, 6, dt)
-    for (const k of Object.keys(parts) as ControlId[]) {
-      const el = sys.els[k]; if (!el) continue
-      const p = parts[k]
-      const [a, b, cc, d] = project(tiles[p.layer].current, p.x, p.y + 0.06, p.z, p.w, p.d)
-      // at least a 44 px target (WCAG / Fitts), centred on the part
-      const ww = Math.max(44, cc - a + 12), hh = Math.max(44, d - b + 12)
-      const cx = (a + cc) / 2, cy = (b + d) / 2
-      el.style.transform = `translate3d(${(cx - ww / 2).toFixed(1)}px, ${(cy - hh / 2 - layerTop).toFixed(1)}px, 0)`
-      el.style.width = `${ww.toFixed(1)}px`; el.style.height = `${hh.toFixed(1)}px`
-    }
-    const se = sys.els.stack
-    if (se) { se.style.transform = `translate3d(${sx0.toFixed(1)}px, ${(sy0 - layerTop).toFixed(1)}px, 0)`; se.style.width = `${(sx1 - sx0).toFixed(1)}px`; se.style.height = `${(sy1 - sy0).toFixed(1)}px` }
 
     // ---- the glass's buffer: just this stage's backdrop + spill, from the main camera
     if (hi) {
@@ -248,7 +252,7 @@ export function SystemsStage() {
       scene.background = bg
       gl.setRenderTarget(prevRT); gl.setClearColor(cc, prevA)
     }
-  })
+  }, root)
 
   const onLayer = (o: THREE.Object3D) => o.layers.enable(SYS_LAYER)
   const reg = (id: ControlId, layer: number) => (m: THREE.Object3D | null) => {

@@ -2,6 +2,8 @@ import * as THREE from 'three'
 /** Shared state between the Journey DOM section and its GL stage. */
 export const journey = {
   active: false,
+  /** NEIGHBOUR HOOK: in range, before the clip gate (the neighbour pass draws with it) */
+  activeRaw: false,
   /** world-space camera pose the stage writes every frame (the rig blends to it) */
   pose: { pos: new THREE.Vector3(200, 0, 11), target: new THREE.Vector3(200, 0, 0), fov: 35 },
   /** set true to make every spring jump to its target this frame (anchor jumps, stills, harness) */

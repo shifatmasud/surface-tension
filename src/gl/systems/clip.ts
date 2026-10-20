@@ -49,6 +49,10 @@ class Clip {
   /** the outgoing section whose DOM carries the drift transform, and that transform's y (css px) */
   outName = ''
   outTy = 0
+  /** NEIGHBOUR HOOK: boundary travel (px) and the inverse context saved while the neighbour pass runs */
+  private d = 0
+  private blockSets?: Set<string>[]
+  private saved: { owner: number; allowed: Set<string>; liveUpper: boolean; ufxY: number; still: number; capture: number } | null = null
   private dir = 1
   private lastScroll = NaN
   private travel = 0
@@ -107,7 +111,7 @@ class Clip {
     this.capture = owner
     this.still = this.liveUpper ? b : b - 1
     const d = vh - yTop, t = Math.min(1, Math.max(0, d / vh))
-    this.yTop = yTop; this.t = t
+    this.yTop = yTop; this.t = t; this.d = d
     const R = Math.min(64, Math.max(18, vw * 0.035))
     if (this.reduced) {
       // reduced motion: no card move — the composite crossfades the two frames (never a cut); the outgoing DOM fades
@@ -128,6 +132,27 @@ class Clip {
     this.ufxY = this.liveUpper ? d : -this.shift
     this.styleOutgoing(BLOCKS[b - 1][BLOCKS[b - 1].length - 1], d, yTop)
     if (this.reduced && this.styled) { this.styled.style.transform = ''; this.styled.style.clipPath = ''; this.styled.style.opacity = (1 - smooth(0.15, 0.85, t)).toFixed(3) }
+  }
+
+  /** NEIGHBOUR HOOK: switch to the opposite-direction context of this boundary — the still block becomes the "live"
+   *  one (owner, allowed stages, GL-text camera offset) exactly as it would be if the scroll direction were flipped,
+   *  so the neighbour pass draws it with every offset the composite expects. unflip() restores. No DOM is touched. */
+  flip() {
+    if (!this.boundary || this.still < 0 || this.saved) return false
+    this.saved = { owner: this.owner, allowed: this.allowedSet, liveUpper: this.liveUpper, ufxY: this.ufxY, still: this.still, capture: this.capture }
+    const other = this.still
+    this.still = this.owner
+    this.owner = other
+    this.allowedSet = (this.blockSets ??= BLOCKS.map((b) => new Set(b)))[other]
+    this.liveUpper = !this.liveUpper
+    this.ufxY = this.liveUpper ? this.d : -this.shift
+    this.capture = -1
+    return true
+  }
+  unflip() {
+    const s = this.saved; if (!s) return
+    this.owner = s.owner; this.allowedSet = s.allowed; this.liveUpper = s.liveUpper; this.ufxY = s.ufxY; this.still = s.still; this.capture = s.capture
+    this.saved = null
   }
 
   /** The outgoing section's DOM rides with its captured frame: same lag, scale, darkening; clipped at the card edge. */

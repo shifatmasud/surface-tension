@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { useEffect, useMemo, useRef } from 'react'
-import { useFrame, useThree } from '@react-three/fiber'
+import { useThree } from '@react-three/fiber'
+import { nb, useStageFrame } from '../../systems/neighbour' // NEIGHBOUR HOOK
 import { props, shared } from '../../../state/props'
 import { settings } from '../../../services/settings'
 import { portrait } from '../../../core/frame'
@@ -197,7 +198,7 @@ export function DiveStage() {
     labels: [] as HTMLElement[], labelsAt: 0, v: new THREE.Vector3(), w: new THREE.Vector3(),
   }), [])
 
-  useFrame(() => {
+  useStageFrame('dive', () => {
     const camY = camera.position.y
     dive.camY = camY
     dive.camZ = camera.position.z
@@ -211,7 +212,7 @@ export function DiveStage() {
     const split = showGL && camY > -0.25 ? Math.min(1, Math.max(0, 0.5 - camY * 2)) : -1
     dive.split = split
     u.u_split.value = split
-    const grade = engine.chain?.grade
+    const grade = engine.chain?.gradeFor(nb.active) // NEIGHBOUR HOOK: the neighbour pass has its own grade
     if (grade) {
       if (split > 0 && split < 1) { grade.u('u_waterline').value = split; st.lineWas = true }
       else if (st.lineWas) { grade.u('u_waterline').value = -1; st.lineWas = false }
@@ -228,7 +229,7 @@ export function DiveStage() {
     }
     if (st.hero && on && camY < -0.3) st.hero.visible = false
 
-    if (!showGL) { diveRays.on = false; hideLabels(st.labels); return }
+    if (!showGL) { diveRays.on = false; if (!nb.active) hideLabels(st.labels); return }
     // screen-space god rays: on once fully under, fading out into the deep
     diveRays.scene = maskScene
     diveRays.toSun.copy(u.u_sun.value).negate()
@@ -241,9 +242,12 @@ export function DiveStage() {
     dive.star = ss(-15, -25.5, camY)
     u.u_deep.value = dive.deep
     u.u_star.value = dive.star
-    mats.silt.uniforms.u_pxScale.value = props.renderH / (2 * Math.tan((camera.fov * Math.PI) / 360))
-    mats.stars.uniforms.u_dpr.value = props.dpr
+    const rs = nb.active ? nb.scale : 1 // NEIGHBOUR HOOK: point sizes follow the neighbour's smaller target
+    mats.silt.uniforms.u_pxScale.value = props.renderH * rs / (2 * Math.tan((camera.fov * Math.PI) / 360))
+    mats.stars.uniforms.u_dpr.value = props.dpr * rs
 
+    // NEIGHBOUR HOOK: the DOM labels belong to the main pass (the outgoing section's DOM rides the clip's transform)
+    if (nb.active) return
     // his tools: crisp DOM labels pinned to points in the water
     if (!st.labels.length && props.time - st.labelsAt > 1) {
       st.labelsAt = props.time
@@ -265,7 +269,7 @@ export function DiveStage() {
       el.style.opacity = Math.min(1, a).toFixed(3)
       if (a > 0.002) el.style.transform = `translate3d(${sx.toFixed(1)}px, ${sy.toFixed(1)}px, 0)`
     })
-  })
+  }, group)
 
   return (
     <group ref={group} visible={false}>

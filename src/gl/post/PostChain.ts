@@ -9,6 +9,7 @@ import { props, shared } from '../../state/props'
 import { settings } from '../../services/settings'
 import { quality, paintState } from '../quality' // PERF HOOK
 import { InlineSharpenEffect } from './perfEffects' // PERF HOOK
+import type { Look } from '../../state/props'
 
 /**
  * The render queue (handbook ch.3 / 8). Effects are data: { pass, renderOrder, enabled }.
@@ -49,7 +50,13 @@ export class PostChain {
   preUfx: RenderPass
   postUfx: RenderPass
 
+  /** NEIGHBOUR HOOK: the outgoing section's own small chain (systems/neighbour.ts) — created on first use */
+  private nbc: { composer: EffectComposer; grade: GradeEffect; bloom: BloomEffect; w: number; h: number; swaps: number } | null = null
+  private nbFull = new THREE.Vector2()
+  private nbArgs: [THREE.Scene, THREE.Camera, THREE.Scene, THREE.Scene, THREE.Camera]
+
   constructor(public gl: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, ufxUnder: THREE.Scene, ufxOver: THREE.Scene, ufxCamera: THREE.Camera) {
+    this.nbArgs = [scene, camera, ufxUnder, ufxOver, ufxCamera]
     this.composer = new EffectComposer(gl, { frameBufferType: THREE.HalfFloatType, multisampling: 0 })
     this.scenePass = new RenderPass(scene, camera)
     this.bloom = settings.BLOOM_HQ
@@ -84,6 +91,44 @@ export class PostChain {
     this.distortion.u('u_screenPaintTexelSize').value.set(1 / pw, 1 / ph)
     this.grade.u('u_aspect').value = w / h
   }
+  /** NEIGHBOUR HOOK: the grade the stages should write to right now (the dive's waterline): the neighbour's own while
+   *  its pass runs, else the main one */
+  gradeFor(neighbour: boolean) { return neighbour && this.nbc ? this.nbc.grade : this.grade }
+  /** NEIGHBOUR HOOK: draw the scene as it stands (the neighbour context is set by the caller) through scene → bloom +
+   *  grade (one pass) → GL text under/over, at `scale` of the main render size, and return the image. The same
+   *  look keys as the main chain; no god rays, trail, composite or AA (the trail and AA are applied to the final frame). */
+  renderNeighbour(look: Look, scale: number, dt: number): THREE.Texture {
+    const [scene, camera, ufxUnder, ufxOver, ufxCamera] = this.nbArgs
+    if (!this.nbc) {
+      const composer = new EffectComposer(this.gl, { frameBufferType: THREE.HalfFloatType, multisampling: 0 })
+      composer.autoRenderToScreen = false
+      const grade = new GradeEffect()
+      const bloom = new BloomEffect({ mipmapBlur: false, kernelSize: KernelSize.SMALL, intensity: 0.35, luminanceThreshold: 0.9, luminanceSmoothing: 0.1, resolutionScale: 0.5 })
+      const passes: Pass[] = [new RenderPass(scene, camera), new EffectPass(camera, bloom, grade)]
+      const pre = new RenderPass(ufxUnder, ufxCamera); pre.clear = false; pre.ignoreBackground = true
+      const post = new RenderPass(ufxOver, ufxCamera); post.clear = false; post.ignoreBackground = true
+      passes.push(pre, post)
+      for (const p of passes) { p.renderToScreen = false; composer.addPass(p) }
+      this.nbc = { composer, grade, bloom, w: 0, h: 0, swaps: passes.filter((p) => p.needsSwap).length }
+    }
+    const n = this.nbc
+    const full = this.gl.getDrawingBufferSize(this.nbFull)
+    const w = Math.max(2, Math.round(full.x * scale)), h = Math.max(2, Math.round(full.y * scale))
+    if (w !== n.w || h !== n.h) {
+      n.w = w; n.h = h
+      n.composer.inputBuffer.setSize(w, h); n.composer.outputBuffer.setSize(w, h)
+      for (const p of n.composer.passes) p.setSize(w, h)
+      n.grade.u('u_aspect').value = full.x / Math.max(1, full.y)
+    }
+    const g = (k: string) => n.grade.u(k)
+    g('u_exposure').value = look.exposure; g('u_saturation').value = look.saturation; g('u_contrast').value = look.contrast
+    g('u_brightness').value = look.brightness; g('u_vignette').value = look.vignette; g('u_vignetteSoft').value = look.vignetteSoft
+    g('u_fade').value = look.fade; g('u_lift').value = look.lift; ;(g('u_tint').value as THREE.Color).copy(look.tint); ;(g('u_fadeColor').value as THREE.Color).copy(look.bg)
+    n.bloom.intensity = settings.USE_BLOOM ? look.bloom : 0
+    n.bloom.luminanceMaterial.threshold = look.bloomThreshold
+    n.composer.render(dt)
+    return (n.swaps % 2 === 1 ? n.composer.outputBuffer : n.composer.inputBuffer).texture
+  }
   /** Copy the blended section look into the passes (ch.7.1: visuals → post stack). */
   sync() {
     const L = props.look
@@ -106,7 +151,11 @@ export class PostChain {
       e.on = warm ? !(e.name === 'Bloom' && !settings.USE_BLOOM) && !(e.name === 'FXAA' && settings.TIER !== 'low') : e.needsRender()
       if (e.on) sig |= 1 << i
     }
-    if (warm) this.warmAll = false
+    if (warm) {
+      this.warmAll = false
+      // NEIGHBOUR HOOK: link the neighbour chain's programs (bloom+grade pass, its targets) behind the curtain too
+      try { this.renderNeighbour(props.look, 0.5, dt) } catch { /* warm-up only */ }
+    }
     if (sig !== this.signature) {
       this.signature = sig
       this.composer.removeAllPasses()

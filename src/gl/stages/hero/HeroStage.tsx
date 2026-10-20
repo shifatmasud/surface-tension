@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { useEffect, useMemo, useRef } from 'react'
-import { useFrame, useThree } from '@react-three/fiber'
+import { useThree } from '@react-three/fiber'
+import { nb, useStageFrame } from '../../systems/neighbour' // NEIGHBOUR HOOK
 import { MeshRefractionMaterial } from '@react-three/drei'
 import { createWaterMaterial } from '../../materials/water'
 import { createSkyDome, sky } from '../../shaders/sky'
@@ -102,7 +103,7 @@ export function HeroStage() {
     look: new THREE.Vector3(), cc: new THREE.Color(),
   }), [])
 
-  useFrame((_, dt) => {
+  useStageFrame('hero', (_, dt) => {
     const t = props.time
     // underwater, the gem's reflection/env capture are wasted work: stop once the dive camera is below the surface
     const vis = (props.look.dive < 0.999 || props.stage === 'dive') && props.stage !== 'journey' && props.stage !== 'systems'
@@ -162,7 +163,7 @@ export function HeroStage() {
     env.frame++
     scene.background = bg
     gl.setRenderTarget(prevRT); gl.setClearColor(cc, prevClear)
-  })
+  }, group)
 
   return (
     <group ref={group}>

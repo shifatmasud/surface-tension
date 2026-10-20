@@ -22,6 +22,13 @@ import { clip, BLOCKS } from './systems/clip'
 import { quality, paintState } from './quality' // PERF HOOK
 import { diveRays } from './stages/dive/diveState' // PERF HOOK
 import { input } from '../services/input' // PERF HOOK
+import { nb } from './systems/neighbour' // NEIGHBOUR HOOK
+import { visuals, type Pose } from './systems/visuals'
+import { makeLook } from '../state/props'
+import { dive } from './stages/dive/diveState'
+import { sys as sysState } from './stages/systems/state'
+import { journey } from './stages/journey/journeyState'
+import { Spring, Spring3 } from '../core/spring'
 
 // PRELOAD: code-split per scene. The hero is in this chunk; each later stage is its own chunk, mounted and
 // shader-warmed when its block enters the ±1 window around the current block (LaterStages below).
@@ -61,7 +68,20 @@ function Renderer() {
   }, [size, gl, sys, setDpr, storeDpr])
 
   // PERF HOOK: a governor step changes the DPR; the effect above re-sizes the paint, the chain and the uniforms
-  useEffect(() => quality.on(() => setDpr(quality.dprFor(size.width, size.height))), [size, setDpr])
+  // NEIGHBOUR HOOK (flash fix): setDpr resizes the canvas at once (which clears it), but the effect above only runs
+  // after React re-renders; a frame presented in between showed the page through an empty canvas (caught on the remote
+  // GPU as blank frames at governor steps). So the step applies the same resize now and draws one frame immediately.
+  useEffect(() => quality.on(() => {
+    setDpr(quality.dprFor(size.width, size.height))
+    const dpr = gl.getPixelRatio()
+    props.dpr = dpr
+    props.renderW = Math.floor(size.width * dpr); props.renderH = Math.floor(size.height * dpr)
+    sys.paint.resize(props.renderW, props.renderH)
+    sys.chain.setSize(size.width, size.height)
+    shared.u_resolution.value.set(props.renderW, props.renderH)
+    ufx.resize(size.width, size.height)
+    if (engine.warm && props.introDone) sys.chain.render(0)
+  }), [size, setDpr, gl, sys])
 
   useEffect(() => {
     // blue noise (generated offline with void-and-cluster, CC0 by construction)
@@ -116,6 +136,98 @@ function Renderer() {
     if (!props.introDrop && props.frame % 3 !== 0) return
     sys.chain.render(dt)
   }, 1)
+  return null
+}
+
+
+/** NEIGHBOUR — the outgoing block stays live through a boundary (systems/neighbour.ts). Runs before the camera rig
+ *  (priority -2): flip the clip to the still block, resolve that block's pose + look without side effects, run its
+ *  stages' frame callbacks with its own dt (DOM/audio fenced inside them), draw it through the small neighbour chain,
+ *  then put every shared value back exactly as it was, so the rig, the stages and the main chain see an untouched frame. */
+function NeighbourPass() {
+  const { camera, scene } = useThree()
+  const get = useThree((s) => s.get)
+  const st = useMemo(() => ({
+    pose: { pos: new THREE.Vector3(), target: new THREE.Vector3(), fov: 35 } as Pose,
+    look: makeLook(),
+    pos: new THREE.Vector3(), quat: new THREE.Quaternion(), fov: 35,
+    bg: new THREE.Color(), fog: new THREE.Color(),
+    vis: [] as (boolean | undefined)[],
+    d: { camY: 0, camZ: 0, under: false, split: -1, active: false, deep: 0, star: 0 },
+    r: { on: false, intensity: 0, scene: null as THREE.Scene | null },
+    ms: 0,
+    // the neighbour's own camera springs (the rig's constants): they start where the live camera was when this block
+    // stopped being the live render, so the first neighbour frame continues the camera, never jumps to the pose
+    cp: new Spring3({ x: 0, y: 0, z: 0 }, 0.9, 1, 0), ct: new Spring3({ x: 0, y: 0, z: 0 }, 0.9, 1, 0), cf: new Spring(35, 0.9, 1, 0),
+    fwd: new THREE.Vector3(), camBlock: -1,
+  }), [])
+  useFrame(() => {
+    const chain = engine.chain
+    if (!nb.enabled || !chain || !clip.enabled || !clip.boundary || clip.still < 0 || !props.introDone || props.overlayOpen) {
+      if (nb.block >= 0) nb.reset()
+      return
+    }
+    const [due, dt, scale] = nb.plan(clip.still, props.frame, props.dt)
+    if (!due) return
+    const t0 = performance.now()
+    const c = camera as THREE.PerspectiveCamera
+    // ---- save everything the pass may touch
+    st.pos.copy(c.position); st.quat.copy(c.quaternion); st.fov = c.fov
+    const stage0 = props.stage, look0 = props.look, dt0 = props.dt
+    const bg = scene.background as THREE.Color | null, fog = scene.fog as THREE.Fog | null
+    if (bg) st.bg.copy(bg); if (fog) st.fog.copy(fog.color)
+    const D = st.d; D.camY = dive.camY; D.camZ = dive.camZ; D.under = dive.under; D.split = dive.split; D.active = dive.active; D.deep = dive.deep; D.star = dive.star
+    const R = st.r; R.on = diveRays.on; R.intensity = diveRays.intensity; R.scene = diveRays.scene
+    const sysW = sysState.weight, jAct = journey.active
+    if (!clip.flip()) return
+    nb.active = true
+    nb.scale = scale
+    const regs = nb.stagesFor(clip.owner)
+    st.vis.length = regs.length
+    for (let i = 0; i < regs.length; i++) st.vis[i] = regs[i].root()?.visible
+    try {
+      // ---- the still block as if it were the live one
+      props.stage = visuals.resolvePure(st.pose, st.look)
+      props.look = st.look
+      props.dt = dt
+      const P = st.pose
+      if (st.camBlock !== clip.owner || nb.drawnAt < 0) {
+        st.camBlock = clip.owner
+        st.fwd.set(0, 0, -1).applyQuaternion(st.quat).multiplyScalar(P.pos.distanceTo(P.target)).add(st.pos)
+        st.cp.x.reset(st.pos.x); st.cp.y.reset(st.pos.y); st.cp.z.reset(st.pos.z)
+        st.ct.x.reset(st.fwd.x); st.ct.y.reset(st.fwd.y); st.ct.z.reset(st.fwd.z)
+        st.cf.reset(st.fov)
+      }
+      const cp = st.cp.update(P.pos, dt), ct = st.ct.update(P.target, dt), cf = st.cf.update(P.fov, dt)
+      c.position.set(cp.x, cp.y, cp.z); c.lookAt(ct.x, ct.y, ct.z)
+      if (Math.abs(c.fov - cf) > 1e-3) { c.fov = cf; c.updateProjectionMatrix() }
+      c.updateMatrixWorld()
+      sysState.weight = sysState.weightRaw
+      journey.active = journey.activeRaw
+      const state = get()
+      for (const r of regs) r.tick(state, dt)
+      if (bg) bg.copy(st.look.bg); if (fog) fog.color.copy(st.look.fogColor)
+      ufx.update()
+      nb.texture = chain.renderNeighbour(st.look, scale, dt)
+      nb.drawnAt = props.frame
+      nb.renders++
+    } finally {
+      // ---- put it all back (the stage roots' visibility too: the main pass decides its own)
+      for (let i = 0; i < regs.length; i++) { const o = regs[i].root(); if (o && st.vis[i] !== undefined) o.visible = st.vis[i]! }
+      nb.active = false
+      clip.unflip()
+      props.stage = stage0; props.look = look0; props.dt = dt0
+      c.position.copy(st.pos); c.quaternion.copy(st.quat)
+      if (c.fov !== st.fov) { c.fov = st.fov; c.updateProjectionMatrix() }
+      c.updateMatrixWorld()
+      if (bg) bg.copy(st.bg); if (fog) fog.color.copy(st.fog)
+      dive.camY = D.camY; dive.camZ = D.camZ; dive.under = D.under; dive.split = D.split; dive.active = D.active; dive.deep = D.deep; dive.star = D.star
+      diveRays.on = R.on; diveRays.intensity = R.intensity; diveRays.scene = R.scene
+      sysState.weight = sysW; journey.active = jAct
+      st.ms = st.ms * 0.9 + (performance.now() - t0) * 0.1
+      nb.ms = st.ms
+    }
+  }, -2)
   return null
 }
 
@@ -232,6 +344,7 @@ export function Scene() {
       style={{ position: 'fixed', inset: 0 }}
     >
       <Renderer />
+      <NeighbourPass />
       <CameraRig />
       <ambientLight intensity={0.25} />
       <directionalLight position={[4, 10, 6]} intensity={1.2} />

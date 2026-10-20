@@ -60,6 +60,7 @@ export function Systems() {
       update() {
         st.weight = weightFrom(range.ratio) * 0.95
         sys.weight = clip.allowed('systems') ? st.weight : 0
+        sys.weightRaw = st.weight // NEIGHBOUR HOOK
         const pinLen = Math.max(1, range.height - props.height)
         p = clamp((props.scroll - range.docTop) / pinLen)
         out = Math.max(0, range.ratio)

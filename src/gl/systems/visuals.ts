@@ -23,6 +23,41 @@ class Visuals {
     this.stages.set(name, s); return s
   }
   setWeight(name: string, w: number) { const s = this.stages.get(name); if (s) s.weight = w }
+  private nbPos = new THREE.Vector3(); private nbTgt = new THREE.Vector3()
+  /** NEIGHBOUR HOOK: the pose + look of the block clip.allowed() names right now (the neighbour pass calls it inside
+   *  clip.flip()), with no side effects: no props.stage, no damping, no owner key, no UI tone. Returns the heaviest stage. */
+  resolvePure(out: Pose, look: Look): string {
+    let total = 0, best = '', bw = -1
+    const W = this.nbW
+    W.clear()
+    for (const s of this.stages.values()) { const w = clip.allowed(s.name) ? s.weight : 0; W.set(s.name, w); total += w }
+    if (clip.enabled && total <= 1e-6) { const lead = BLOCKS[clip.owner][0]; if (this.stages.has(lead)) { W.set(lead, 1); total = 1 } }
+    for (const [n, w] of W) if (w > bw) { bw = w; best = n }
+    if (total <= 0 || !best) return best
+    const keys = this.keys ??= Object.keys(look) as (keyof Look)[]
+    for (const k of keys) { const v = (look as any)[k]; if (typeof v === 'number') (look as any)[k] = 0; else if (v instanceof THREE.Color) v.setRGB(0, 0, 0) }
+    const bestPose = this.stages.get(best)!.pose()
+    const bpx = bestPose.pos.x, bpy = bestPose.pos.y, bpz = bestPose.pos.z
+    let pw = 0
+    for (const s of this.stages.values()) {
+      const w = W.get(s.name)!; if (w <= 0) continue
+      const p = s.pose(); if (Math.hypot(p.pos.x - bpx, p.pos.y - bpy, p.pos.z - bpz) <= 30) pw += w
+    }
+    const pos = this.nbPos.set(0, 0, 0), tgt = this.nbTgt.set(0, 0, 0); let fov = 0
+    for (const s of this.stages.values()) {
+      const ew = W.get(s.name)!; if (ew <= 0) continue
+      const w = ew / total, p = s.pose()
+      if (Math.hypot(p.pos.x - bpx, p.pos.y - bpy, p.pos.z - bpz) <= 30) { const wp = ew / pw; pos.addScaledVector(p.pos, wp); tgt.addScaledVector(p.target, wp); fov += p.fov * wp }
+      for (const k of keys) {
+        const v = (s.look as any)[k]
+        if (typeof v === 'number') (look as any)[k] += v * w
+        else if (v instanceof THREE.Color) (look as any)[k].r += v.r * w, (look as any)[k].g += v.g * w, (look as any)[k].b += v.b * w
+      }
+    }
+    out.pos.copy(pos); out.target.copy(tgt); out.fov = fov
+    return best
+  }
+  private nbW = new Map<string, number>()
   /** blend poses + looks by weight */
   resolve(out: Pose, dt: number) {
     // clipped sections: only the owning block's stages count; a block entering from the bottom owns the

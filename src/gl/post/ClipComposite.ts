@@ -3,6 +3,7 @@ import { Effect, EffectAttribute } from 'postprocessing'
 import { fboHelper } from '../core/fbo'
 import { clip } from '../systems/clip'
 import { props } from '../../state/props'
+import { nb } from '../systems/neighbour' // NEIGHBOUR HOOK
 
 /**
  * ClipComposite — the last pass (order 3000) of the clipped-sections transition (see systems/clip.ts).
@@ -102,9 +103,11 @@ export class ClipCompositeEffect extends Effect {
     if (!on) return
     // the still block's slot holds its frame from when it was last the live render (copied every frame while live)
     const s = clip.still >= 0 ? this.slot(clip.still, false) : undefined
+    // NEIGHBOUR HOOK: the still block drawn live this frame (or within the last few, phones) beats its frozen frame
+    const live = clip.still >= 0 && nb.texture && nb.fresh(clip.still, props.frame) ? nb.texture : null
     this.u('u_swap').value = clip.liveUpper ? 1 : 0
-    this.u('u_has').value = s ? 1 : 0
-    this.u('u_snap').value = s ? s.rt.texture : null
+    this.u('u_has').value = live || s ? 1 : 0
+    this.u('u_snap').value = live ?? (s ? s.rt.texture : null)
     ;(this.u('u_view').value as THREE.Vector2).set(props.width, props.height)
     this.u('u_px').value = 1 / Math.max(1, props.dpr)
     this.u('u_yTop').value = clip.yTop; this.u('u_shift').value = clip.shift; this.u('u_scale').value = clip.scale

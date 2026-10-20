@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useFrame, useThree } from '@react-three/fiber'
+import { useThree } from '@react-three/fiber'
+import { nb, useStageFrame } from '../../systems/neighbour' // NEIGHBOUR HOOK
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { props } from '../../../state/props'
 import { settings } from '../../../services/settings'
@@ -59,23 +60,23 @@ export function JourneyStage(): JSX.Element {
     return () => S.dispose()
   }, [S, gl])
 
-  useFrame((state) => {
+  useStageFrame('journey', (state) => {
     ;(window as any).__scene = state.scene // QA
     const g = group.current
     if (!journey.active) {
-      if (g.visible) { g.visible = false; resetJourneyAudio(); journey.beat = -1 }
+      if (g.visible) { g.visible = false; if (!nb.active) { resetJourneyAudio(); journey.beat = -1 } } // NEIGHBOUR HOOK: no audio from the neighbour pass
       S.lastP = -1
       return
     }
     const W = state.size.width, H = state.size.height
     const wantPortrait = H > W * 1.05
-    if (wantPortrait !== portrait) { setPortrait(wantPortrait); return }
+    if (wantPortrait !== portrait) { if (!nb.active) setPortrait(wantPortrait); return }
     g.visible = true
     const p = props.journey, dt = Math.min(props.dt, 1 / 20), time = props.time
     const snap = journey.snap || S.lastP < 0 || Math.abs(p - S.lastP) > 0.06
     journey.snap = false
     S.lastP = p
-    journey.beat = journeyAudio(p)
+    if (!nb.active) journey.beat = journeyAudio(p) // NEIGHBOUR HOOK: the soundtrack follows the live section only
 
     // ---- inner world
     const I = inner(p, S.I, portrait)
@@ -207,7 +208,7 @@ export function JourneyStage(): JSX.Element {
     gl.clear()
     gl.render(S.inner, S.icam)
     gl.setRenderTarget(prev)
-  })
+  }, group)
 
   return (
     <group ref={group} position={JOURNEY_ORIGIN} visible={false}>

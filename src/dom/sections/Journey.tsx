@@ -20,6 +20,7 @@ export function Journey() {
         const pinLen = Math.max(1, range.height - props.height)
         props.journey = clamp((props.scroll - range.docTop) / pinLen)
         journey.active = range.isActive && clip.allowed('journey')
+        journey.activeRaw = range.isActive // NEIGHBOUR HOOK
         // two small lines, timed to beats: one in space, one at the reveal (mask slide-up in, slide on out)
         const p = props.journey
         b1.current?.classList.toggle('is-on', range.isActive && p > 0.03 && p < 0.2)

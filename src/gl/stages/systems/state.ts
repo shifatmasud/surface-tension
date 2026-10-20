@@ -30,6 +30,7 @@ export const sys = {
   exit: 0,               // 0..1 the hook: dim + tilt toward the dive
   enter: 0,              // 0..1 entry
   weight: 0,             // stage weight (visibility)
+  weightRaw: 0,          // NEIGHBOUR HOOK: the section's weight before the clip gate (the neighbour pass draws with it)
   active: false,         // the stage owns the camera
   /** DOM hit areas the stage positions every frame (viewport px) */
   els: {} as Partial<Record<ControlId | 'stack', HTMLElement>>,
