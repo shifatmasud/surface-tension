@@ -8,7 +8,9 @@
     <meta property="og:title" content="Shifat Masud — Surface Tension" />
     <meta property="og:description" content="A portfolio you can make ripples in." />
     <meta property="og:image" content="./og.png" />
-    <meta name="theme-color" content="#e8e9eb" />
+    <meta name="theme-color" content="#000000" />
+    <!-- black from the very first paint until the preloader curtain has lifted (no white flash) -->
+    <style>html, body { background: #000; } html.is-lifted, html.is-lifted body, html.no-gl, html.no-gl body { background: #f7f7f8; } .shell-intro { position: fixed; inset: 0; z-index: 100; background: #000; color: #fff; }</style>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <script>
       // first-paint probe (mirrors services/settings.ts): visitors without a GPU or with reduced motion get the static page,

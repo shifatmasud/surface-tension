@@ -8,6 +8,7 @@ import { mix } from '../../core/math'
 export function Intro() {
   const [gone, setGone] = useState(false)
   const [hidden, setHidden] = useState(false)
+  const reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
   const count = useRef<HTMLDivElement>(null)
   useEffect(() => {
     let raf = 0, eased = 0, t0 = performance.now(), last = t0, nearT = 0
@@ -27,7 +28,8 @@ export function Intro() {
       eased = mix(eased, target, 1 - Math.exp(-7 * dt))
       if (target >= 1 && (eased > 0.995 || now - t0 > 12000)) eased = 1
       if (count.current) setOdometer(count.current, eased * 100, 3)
-      if (eased >= 1) { boot.drop().then(() => setGone(true)); return }
+      // the curtain starts lifting with the first droplet, so the ring opens as the hero is revealed
+      if (eased >= 1) { boot.drop(); setTimeout(() => setGone(true), 120); return }
       raf = requestAnimationFrame(loop)
     }
     raf = requestAnimationFrame(loop)
@@ -35,9 +37,12 @@ export function Intro() {
   }, [])
   // hidden, never unmounted: removing the node mid-commit could tear down the sibling Canvas
   return (
-    <motion.div className="intro" aria-hidden={gone} initial={{ opacity: 1 }} animate={{ opacity: gone ? 0 : 1 }}
-      transition={{ duration: 0.9, ease: [0.22, 0.9, 0.24, 1] }}
-      onAnimationComplete={() => { if (gone) setHidden(true) }}
+    // Shifat 08:51Z: the black panel lifts off like a curtain (expo in-out, flat edge) over the already-rendered hero;
+    // reduced motion: a quick fade
+    <motion.div className="intro" aria-hidden={gone} initial={reduced ? { opacity: 1 } : { y: '0%' }}
+      animate={reduced ? { opacity: gone ? 0 : 1 } : { y: gone ? '-100%' : '0%' }}
+      transition={reduced ? { duration: 0.35, ease: 'linear' } : { duration: /[?&]introslow/.test(location.search) ? 12 : 1.05, ease: [0.87, 0, 0.13, 1] }}
+      onAnimationComplete={() => { if (gone) { setHidden(true); document.documentElement.classList.add('is-lifted') } }}
       style={{ pointerEvents: gone ? 'none' : undefined, visibility: hidden ? 'hidden' : undefined }}>
       <div className="intro__count" ref={count} aria-label="Loading">
         <span className="odo">
