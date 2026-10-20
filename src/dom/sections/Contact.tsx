@@ -107,7 +107,7 @@ export function Contact() {
             <h2 className="contact__title" id="contact-title"><span className="contact__line" ref={l1}>Let’s make</span><span className="contact__line" ref={l2}>it ripple.</span></h2>
             <div className="contact__row">
               <div className="contact__cta">
-                <a className="big-btn" href={SITE.email ? `mailto:${SITE.email}` : SITE.x} target={SITE.email ? undefined : '_blank'} rel="noreferrer" data-cursor onMouseEnter={() => audio.tick()}>
+                <a className="big-btn" href={SITE.email ? `mailto:${SITE.email}` : SITE.x} target={SITE.email ? undefined : '_blank'} rel="noreferrer" aria-label={SITE.email ? 'Write to me' : 'Say hi on X'} data-cursor onMouseEnter={() => audio.tick()}>
                   <span className="big-btn__label">{SITE.email ? 'Write to me' : 'Say hi on X'}</span> <i><ArrowUpRight size={20} weight="bold" /></i>
                 </a>
                 {/* POLISH (Shifat 18:19Z/18:20Z "only one clean CTA button"): the message form and its send pill are gone */}
@@ -147,15 +147,15 @@ export function Footer() {
       <div className="site-footer__top">
         <p className="site-footer__name" data-roll="marked"><span data-roll-line=""><span className="site-footer__lockup" role="img" aria-label={SITE.name}><span className="site-footer__mark" aria-hidden="true"><Logo size="100%" /></span><span aria-hidden="true">Shifat</span></span></span><span data-roll-line=""><span>{SITE.role}.</span></span></p>
         <nav className="site-footer__links" aria-label="Elsewhere" data-roll="marked">
-          <a href={SITE.github} target="_blank" rel="noreferrer" data-cursor data-roll-line="inline"><GithubLogo size={16} /> GitHub</a>
-          <a href={SITE.x} target="_blank" rel="noreferrer" data-cursor data-roll-line="inline"><XLogo size={16} /> X / Twitter</a>
+          <a href={SITE.github} target="_blank" rel="noreferrer" aria-label="GitHub" data-cursor data-roll-line="inline"><GithubLogo size={16} /> GitHub</a>
+          <a href={SITE.x} target="_blank" rel="noreferrer" aria-label="X / Twitter" data-cursor data-roll-line="inline"><XLogo size={16} /> X / Twitter</a>
         </nav>
       </div>
       <div className="overscroll__bar" aria-hidden="true"><p className="overscroll__label" data-roll="split">{noOrphan('Keep scrolling — back to the surface')}</p><div className="overscroll__track"><div className="overscroll__fill" ref={(e) => { footerBar.el = e }} /></div></div>
       <div className="site-footer__bottom" data-roll="marked">
         <span data-roll-line="inline">© <Odometer value={new Date().getFullYear()} digits={4} /> {SITE.name}. Surface Tension.</span>
         {/* POLISH (one CTA button): a plain text link, not a button */}
-        <a className="site-footer__top-link" href="#hero" data-cursor data-roll-line="inline" onClick={(e) => { e.preventDefault(); audio.swell(false); scroll.scrollTo(0, { duration: 3.2 }) }}>Back to the surface <ArrowUp size={14} weight="bold" /></a>
+        <a className="site-footer__top-link" href="#hero" aria-label="Back to the surface" data-cursor data-roll-line="inline" onClick={(e) => { e.preventDefault(); audio.swell(false); scroll.scrollTo(0, { duration: 3.2 }) }}>Back to the surface <ArrowUp size={14} weight="bold" /></a>
       </div>
     </footer>, document.body)
 }

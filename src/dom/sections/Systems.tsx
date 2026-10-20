@@ -68,7 +68,7 @@ export function Systems() {
           </button>
           <label className="systems__hit systems__hit--range" ref={bind('slider')}>
             <span className="systems__label">Light level</span>
-            <input type="range" min={0} max={100} value={level} aria-valuetext={`${level} percent`}
+            <input type="range" min={0} max={100} value={level} aria-label="Light level" aria-valuetext={`${level} percent`}
               onPointerDown={press('slider')}
               onChange={(e) => { const v = +e.target.value; setLevel(v); sys.level = v / 100 }} />
           </label>

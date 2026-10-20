@@ -72,13 +72,27 @@ export function warmCompile(gl: THREE.WebGLRenderer, root: THREE.Object3D, camer
     if (gl.extensions.has('KHR_parallel_shader_compile')) { resolve(); return }
     const todo = (gl.info.programs ?? []).filter((q) => !before.has(q))
     let i = 0
-    const step = () => {
-      if (i >= todo.length) { resolve(); return }
+    const linkOne = () => {
       try { (todo[i] as any).getUniforms() } catch (e) { console.warn('[preload] link', e) }
       i++; report?.(i / todo.length)
+    }
+    // W20 PERF: the blocking link reads run in the browser's idle time after a frame, never inside one (they were
+    // landing in the hero's rAF at one link per frame: 5–6 ms frames on the 390 rig against 2 ms once linked). As
+    // many links as the idle slice holds run per callback, so the queue also drains sooner and a cold jump finds the
+    // stage linked. Without requestIdleCallback (Safari) it stays one link per frame, as before.
+    const ric = (window as any).requestIdleCallback as undefined | ((cb: (d: { timeRemaining(): number; didTimeout: boolean }) => void, o?: { timeout: number }) => number)
+    const idle = (d: { timeRemaining(): number; didTimeout: boolean }) => {
+      do { if (i >= todo.length) break; linkOne() } while (d.timeRemaining() > 4)
+      if (i >= todo.length) { resolve(); return }
+      ric!(idle, { timeout: 500 })
+    }
+    const step = () => {
+      if (i >= todo.length) { resolve(); return }
+      linkOne()
       requestAnimationFrame(step)
     }
-    requestAnimationFrame(step)
+    if (ric) ric(idle, { timeout: 500 })
+    else requestAnimationFrame(step)
   })
   return Promise.race([p.then(linkEach, linkEach), new Promise<void>((r) => setTimeout(r, 10000))])
 }
