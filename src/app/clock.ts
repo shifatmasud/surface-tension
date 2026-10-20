@@ -45,6 +45,7 @@ export function startClock() {
     // PERF HOOK: the governor judges real frame deltas once the intro is done and the page is visible
     quality.judging = props.introDone && !props.overlayOpen && document.visibilityState === 'visible' && engine.warm
     quality.frame(ms, now)
+    quality.restTick(Math.abs(props.scrollVel) > 0.5 || input.hadMoved || input.isDown || props.overlayOpen, now)
     stageWindow.step()
     // rolling FPS probe for QA (window.__fps)
     fpsSamples.push(deltaMs); if (fpsSamples.length > 120) fpsSamples.shift()

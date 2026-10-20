@@ -35,7 +35,7 @@ declare global { interface Window { __logo3d?: Logo3DApi } }
   const st = cv.style
   // Shifat 14:44Z: the logo lives INSIDE the preloader panel (a child of .intro, which clips), so it leaves with the
   // panel frame-exact and is cut by the panel's own edge — never floating over the hero
-  st.cssText = 'position:absolute;left:50%;top:44%;z-index:1;pointer-events:none;opacity:0;transition:opacity .45s linear;transform:translate(-50%,-50%)'
+  st.cssText = 'position:absolute;left:50%;top:44%;z-index:1;pointer-events:none;opacity:0;transition:opacity .45s cubic-bezier(0.65,0,0.35,1);transform:translate(-50%,-50%)'
   let size = 0
   const layout = () => {
     const w = innerWidth, hh = innerHeight

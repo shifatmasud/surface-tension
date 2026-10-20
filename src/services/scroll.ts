@@ -1,5 +1,6 @@
 import { props } from '../state/props'
 import { clamp, damp } from '../core/math'
+import { houseInOut } from '../core/house'
 
 /**
  * Layer 3 — virtual scroll (handbook ch.5.2–5.4), written fresh after Lusion's ScrollPane.
@@ -395,7 +396,7 @@ class ScrollService {
     }
     if (opts.duration && opts.duration > 0) {
       this.velocityPixel = 0; this.history.length = 0; this.isWheelScrolling = false
-      this.tween = { from: this.scrollPixel, to: y, t: 0, dur: opts.duration, ease: (t) => 1 - Math.pow(1 - t, 4), done: opts.onComplete }
+      this.tween = { from: this.scrollPixel, to: y, t: 0, dur: opts.duration, ease: houseInOut, done: opts.onComplete } // house A→B move: eases in and out, never a hard start
     } else {
       this.tween = null; this.velocityPixel = 0; this.history.length = 0
       this.targetScrollPixel = y; this.isWheelScrolling = true

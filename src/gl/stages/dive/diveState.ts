@@ -14,6 +14,7 @@ export const dive = {
   camZ: 0,
   under: false,    // camera below the surface
   split: -1,       // -1 off, 0..1 screen y of the lens waterline while crossing
+  under01: 0,      // W18-DIVE OVER-UNDER: 0 above the surface … 1 just after the line has passed the top of the frame
   deep: 0,         // 0..1 extra darkening (the last stretch)
   star: 0,         // 0..1 silt → stars
   active: false,   // the dive stage is showing anything this frame
@@ -61,13 +62,18 @@ export function floorH(x: number, z: number) {
 type Key = { u: number; p: [number, number, number]; t: [number, number, number]; h: number }
 // u: section progress · p: camera · t: look-at · h: horizontal fov (deg) kept across aspect ratios
 const KEYS: Key[] = [
-  // STRUCTURE v2: the dive opens on the statement's view of the stone and follows it down through the surface
+  // STRUCTURE v2: the dive opens on the statement's view of the stone
   { u: 0.00, p: [0, 5.6, 1.8],   t: [0, 0.0, 0.6],  h: 62 },  // the statement's frame: the stone on the lake from above
-  { u: 0.10, p: [0, 3.0, 2.7],   t: [0, 0.1, 0.3],  h: 60 },  // closing in as it starts to sink
-  { u: 0.20, p: [0, 1.05, 2.6],  t: [0, -0.7, 0.4], h: 62 },  // low over the water, the stone slipping under
-  { u: 0.28, p: [0, 0.2, 2.5],   t: [0, -1.5, 0.9], h: 66 },  // eye on the waterline
-  { u: 0.34, p: [0, -0.9, 2.6],  t: [0, -2.3, 2.0], h: 70 },  // through, following it down
-  { u: 0.42, p: [0, -2.4, 4.2],  t: [0, 1.2, 14],   h: 74 },  // tilt up: the window opens overhead, the stone ahead in the light
+  // W18-DIVE OVER-UNDER (Shifat 15:29Z + 15:30Z): a crane-down with a slow half arc around the stone (yaw +z → +x → −z,
+  // never through the zenith) that settles head-on at eye level, facing the dive (+z); then the lens sinks through the
+  // surface (Dive: split = 1 − camY / PORT), the waterline rising across the frame, and we follow the stone down
+  { u: 0.07, p: [2.31, 4.0, 2.76], t: [0, 0.1, 0.2], h: 60 },  // the arc begins, still looking down
+  { u: 0.13, p: [3.94, 2.1, -0.69], t: [0, 0.15, 0], h: 56 },  // three-quarter, dropping
+  { u: 0.19, p: [1.73, 0.95, -3.72], t: [0, 0.14, 0.1], h: 50 }, // almost head-on, low over the water
+  { u: 0.235, p: [0.3, 0.6, -3.95], t: [0, 0.1, 0.2], h: 48 },   // head-on at eye level: the waterline enters at the bottom
+  { u: 0.27, p: [0.1, 0.3, -3.85], t: [0, 0.05, 0.35], h: 48 },  // over-under: half air, half water, the stone straddling it
+  { u: 0.305, p: [0, 0.0, -3.7], t: [0, -0.05, 0.6], h: 50 },    // the line reaches the top of the frame
+  { u: 0.35, p: [0, -0.8, -3.2], t: [0, -0.75, 1.6], h: 56 },    // under: the stone hangs ahead in the light, starting to sink
   // (Shifat 09:11Z: the under-the-sea beat stays as it was — from here on the original glide)
   { u: 0.53, p: [0, -3.4, 9.2],  t: [0, 2.6, 16.4], h: 74 },  // hold on the light (title)
   { u: 0.66, p: [0, -5.2, 12.0], t: [0, -6.6, 21],  h: 70 },  // level out over the sand
@@ -82,6 +88,9 @@ const KEYS: Key[] = [
 ]
 /** v3: the end of the dive (the systems water) and the centre of the UI cylinder, where the stone settles */
 export const U_MAX = 1.5
+/** W18-DIVE OVER-UNDER: the virtual dome port. The waterline sits at the bottom of the frame with the lens PORT above
+ *  the water and reaches the top as the lens meets it (so the air half is always rendered from above the surface) */
+export const PORT = 0.6
 export const SYS_C = new THREE.Vector3(0, -40, 50)
 /** W17 Scene 3 (13:24Z): where the floating tablet settles, relative to SYS_C (in front of the stone's old place) */
 export const TAB_F = new THREE.Vector3(0, 0.05, -0.7)
@@ -124,9 +133,13 @@ export const TOOL_POS: [number, number, number][] = [
 /** The guide gem's path while it sinks (world). After U_LEAD it rides ahead of the camera, high in the frame. */
 const GEM_KEYS: { u: number; p: [number, number, number] }[] = [
   { u: 0.06, p: [0, 0.45, 0] },
-  { u: 0.20, p: [0, -0.45, 0.3] },
-  { u: 0.34, p: [0, -2.1, 1.7] },
-  { u: 0.42, p: [0, -2.4, 8.0] },
+  // W18-DIVE OVER-UNDER: the stone settles into the surface (girdle on the waterline: crown in air, pavilion under) for
+  // the split shot, then sinks ahead of the lens and leads us into the light
+  { u: 0.17, p: [0, 0.12, 0] },
+  { u: 0.26, p: [0, 0.03, 0.05] },
+  { u: 0.31, p: [0, -0.05, 0.2] },
+  { u: 0.37, p: [0, -1.0, 1.9] },
+  { u: 0.43, p: [0, -2.4, 8.0] },
   { u: 0.53, p: [0, -1.4, 13.2] },
   { u: 0.64, p: [0, -4.4, 17.0] },
 ]

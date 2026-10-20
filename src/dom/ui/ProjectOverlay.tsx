@@ -8,6 +8,7 @@ import { PROJECTS } from '../../content/site'
 import { inkWipe } from './inkWipe'
 import { labGL } from '../../gl/stages/lab/labGL'
 import { browser } from '../../services/settings'
+import { HOUSE } from '../../core/house'
 
 /**
  * Project detail card.
@@ -102,10 +103,10 @@ export function ProjectOverlay() {
   }
   const blurIn = (ms: number, delay = 0) => bg.current?.animate(
     [{ opacity: 0, backdropFilter: 'blur(0px)', WebkitBackdropFilter: 'blur(0px)' } as any, { opacity: 1, backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)' } as any],
-    { duration: ms, delay, easing: 'cubic-bezier(.33,0,.2,1)', fill: 'both' })
+    { duration: ms, delay, easing: HOUSE.CSS_IN, fill: 'both' })
   const blurOut = (ms: number, delay = 0) => bg.current?.animate(
     [{ opacity: 1, backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)' } as any, { opacity: 0, backdropFilter: 'blur(0px)', WebkitBackdropFilter: 'blur(0px)' } as any],
-    { duration: ms, delay, easing: 'cubic-bezier(.5,0,.75,0)', fill: 'forwards' })
+    { duration: ms, delay, easing: HOUSE.CSS_INOUT, fill: 'forwards' })
 
   // morph in: runs once the card is laid out (hidden) so its final rects can be measured
   useLayoutEffect(() => {
@@ -121,14 +122,14 @@ export function ProjectOverlay() {
     const arrive = (delay: number) => {
       const els = risers(pn)
       els.forEach((el, i) => {
-        if (reduced) { el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, fill: 'backwards' }); return }
+        if (reduced) { el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: HOUSE.DUR_FADE * 1000, easing: HOUSE.CSS_INOUT, fill: 'backwards' }); return }
         el.animate([{ transform: 'translate3d(0,108%,0) rotate(2.5deg)' }, { transform: 'translate3d(0,0,0) rotate(0deg)' }],
           { duration: 1000, delay: delay + i * 75, easing: 'cubic-bezier(.19,1,.22,1)', fill: 'backwards' })
       })
     }
     if (reduced || !from) {
       pn.style.visibility = ''
-      pn.animate([{ opacity: 0 }, { opacity: 1 }], { duration: reduced ? 240 : 420, easing: 'ease-out' })
+      pn.animate([{ opacity: 0 }, { opacity: 1 }], { duration: reduced ? 240 : 420, easing: reduced ? HOUSE.CSS_INOUT : HOUSE.CSS_IN })
       blurIn(reduced ? 240 : 420); arrive(0); land(); return
     }
     morphing.current = true
@@ -142,7 +143,7 @@ export function ProjectOverlay() {
     labGL.hidden.add(id); cardEl(id)?.classList.add('is-lifted')
     blurIn(T_OPEN * 0.9)
     const g = gl.animate([{ clipPath: glassClip(pn, md), opacity: 0.0 }, { clipPath: glassClip(pn, md), opacity: 1, offset: 0.12 }, { clipPath: FULL, opacity: 1 }],
-      { duration: T_OPEN * 0.62, delay: T_OPEN * 0.4, easing: 'cubic-bezier(.22,.9,.25,1)', fill: 'both' })
+      { duration: T_OPEN * 0.62, delay: T_OPEN * 0.4, easing: HOUSE.CSS_IN, fill: 'both' })
     holdQA([g])
     texts(pn).forEach((el) => { el.style.opacity = '' })
     arrive(T_OPEN * 0.72)
@@ -160,7 +161,7 @@ export function ProjectOverlay() {
     const to = cur ? slideRect(cur, overlay.from) : null
     if (!cur || !pn || !md || !gl || reduced || !to) {
       const ms = reduced ? 200 : 320
-      pn?.animate([{ opacity: 1 }, { opacity: 0 }], { duration: ms, fill: 'forwards' })
+      pn?.animate([{ opacity: 1 }, { opacity: 0 }], { duration: ms, easing: HOUSE.CSS_INOUT, fill: 'forwards' })
       blurOut(ms)
       setTimeout(finish, ms); return
     }
@@ -170,7 +171,7 @@ export function ProjectOverlay() {
     risers(pn).forEach((el, i) => el.animate([{ transform: 'translate3d(0,0,0) rotate(0deg)' }, { transform: 'translate3d(0,-108%,0) rotate(-1.5deg)' }],
       { duration: 380, delay: i * 30, easing: 'cubic-bezier(.65,0,.35,1)', fill: 'forwards' }))
     gl.animate([{ clipPath: FULL, opacity: 1 }, { clipPath: glassClip(pn, md), opacity: 1, offset: 0.88 }, { clipPath: glassClip(pn, md), opacity: 0 }],
-      { duration: T_CLOSE * 0.55, delay: 90, easing: 'cubic-bezier(.6,0,.4,1)', fill: 'forwards' })
+      { duration: T_CLOSE * 0.55, delay: 90, easing: HOUSE.CSS_INOUT, fill: 'forwards' })
     blurOut(T_CLOSE * 0.9, T_CLOSE * 0.25)
     setTimeout(() => {
       const mr = md.getBoundingClientRect()
@@ -227,7 +228,7 @@ export function ProjectOverlay() {
     <AnimatePresence>
       {p && (
         <motion.div className={'overlay' + (shown ? ' is-shown' : '')} role="dialog" aria-modal="true" aria-label={p.title}
-          initial={morph ? false : { opacity: 0 }} animate={{ opacity: 1 }} exit={morph ? { opacity: 1, transition: { duration: 0 } } : { opacity: 0 }}>
+          initial={morph ? false : { opacity: 0 }} animate={{ opacity: 1, transition: { duration: 0.42, ease: HOUSE.IN } }} exit={morph ? { opacity: 1, transition: { duration: 0 } } : { opacity: 0, transition: { duration: HOUSE.DUR_FADE, ease: HOUSE.INOUT } }}>
           <div className="overlay__bg" ref={bg} onClick={() => overlay.close()} />
           <motion.div className="overlay__panel" ref={panel}
             initial={morph ? false : { y: 40, scale: 0.97 }} animate={{ y: 0, scale: 1 }} exit={morph ? undefined : { y: 30, scale: 0.98 }}

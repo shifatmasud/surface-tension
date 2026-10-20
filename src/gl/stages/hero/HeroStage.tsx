@@ -164,6 +164,11 @@ export function HeroStage() {
     group.current.visible = vis
     if (!vis) return
     waterMesh.current.visible = lakeOn; dome.visible = lakeOn
+    // W18-DIVE OVER-UNDER: the lake is cut at the lens waterline for the main camera only (never in the env/mirror captures)
+    if (!waterMesh.current.userData.wl) {
+      waterMesh.current.userData.wl = true
+      waterMesh.current.onBeforeRender = (_r, _s, cam) => { wu.u_wlClip.value = cam === camera ? dive.split : -1 }
+    }
     // gem: slow breathing hover; the tip dips into the water once per ~3.4 s
     st.phase += dt * (Math.PI * 2 / 3.4)
     const bob = Math.cos(st.phase)                     // -1 = lowest (touching)
@@ -248,8 +253,10 @@ export function HeroStage() {
     }
     // underwater the stone sees the water, not the studio: the cards go and the env re-captures as it sinks
     const deep = gem.pos.y < -0.05
-    if (deep !== env.deep || lakeOn !== env.lake) { env.deep = deep; env.lake = lakeOn; env.frame = 0 }
-    const camUnder = !lakeOn
+    // W18-DIVE OVER-UNDER: once the lens is under (the line has left the top of the frame) the stone sees the water
+    // already, before the lake hides (it went pale between the crossing and camY −0.3); a change re-captures the env
+    const camUnder = !lakeOn || (props.stage === 'dive' && dive.under && dive.split < -0.5)
+    if (deep !== env.deep || !camUnder !== env.lake) { env.deep = deep; env.lake = !camUnder; env.frame = 0 }
     // sinking seen from above: the stone sees the water. Camera under with it: the dark product flags come back for the
     // env capture only (STUDIO_LAYER, never seen by the camera) so the facets tile dark/bright and it stays a vivid sapphire
     studio.visible = !camUnder && !deep
@@ -260,7 +267,10 @@ export function HeroStage() {
     uStudio.uDeep.value = Math.min(1, dive.abyss * 1.2)
     // the dive's backdrop sphere draws at renderOrder 10 with no depth test: under water the stone must draw after it
     // (11 = with the sand/kelp, depth-sorted against them); the additive sheen shell is in the transparent list anyway
-    m.renderOrder = camUnder ? 11 : 0; sheenMesh.current.renderOrder = camUnder ? 15 : 2
+    // W18-DIVE OVER-UNDER: while the lens crosses (dive.split ≥ 0) the water world draws below the line too, so the stone
+    // must draw after the dive backdrop there as well (the lake is cut at the line, so it never hides the pavilion)
+    const crossing = dive.split > -0.5
+    m.renderOrder = camUnder || crossing ? 11 : 0; sheenMesh.current.renderOrder = camUnder || crossing ? 15 : 2
     // env capture: first frames, then every 24 frames on capable tiers (every 8 while the stone is under)
     if (env.frame < 3 || (camUnder && env.frame % (dive.abyss > 0.5 ? (hi ? 3 : 8) : 30) === 0) || (hi && env.frame % (deep ? 8 : 24) === 0 && props.stage !== 'contact')) {  // contact keeps the hero's studio env: a re-capture of the bright contact field washed the pavilion out
       m.visible = false; sheenMesh.current.visible = false

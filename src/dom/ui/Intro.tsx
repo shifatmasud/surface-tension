@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import { setOdometer } from './Odometer'
 import { boot } from '../../app/boot'
 import { mix } from '../../core/math'
+import { HOUSE } from '../../core/house'
 import { preload } from '../../services/preload'
 import { logo3d } from '../../preloader/hook' // logo3d hook (helper 99499b45): drives the inline 3D logo
 
@@ -48,7 +49,7 @@ export function Intro() {
     // reduced motion: a quick fade
     <motion.div className="intro" aria-hidden={gone} initial={reduced ? { opacity: 1 } : { y: '0%' }}
       animate={reduced ? { opacity: gone ? 0 : 1 } : { y: gone ? '-100%' : '0%' }}
-      transition={reduced ? { duration: 0.35, ease: 'linear' } : { duration: /[?&]introslow/.test(location.search) ? 12 : 1.05, ease: [0.87, 0, 0.13, 1] }}
+      transition={reduced ? { duration: 0.35, ease: HOUSE.INOUT } : { duration: /[?&]introslow/.test(location.search) ? 12 : 1.05, ease: [0.87, 0, 0.13, 1] }}
       onAnimationComplete={() => { if (gone) { setHidden(true); document.documentElement.classList.add('is-lifted') } }}
       style={{ pointerEvents: gone ? 'none' : undefined, visibility: hidden ? 'hidden' : undefined }}>
       <div className="intro__count" ref={count} aria-label="Loading">

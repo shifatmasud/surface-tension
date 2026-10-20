@@ -6,6 +6,7 @@ import { audio } from '../../services/audio'
 import { scroll } from '../../services/scroll'
 import { SITE } from '../../content/site'
 import { Logo } from '../../assets/logo/Logo'
+import { HOUSE } from '../../core/house'
 
 const LINKS = [
   { id: 'hero', label: 'Surface' }, { id: 'statement', label: 'Statement' }, { id: 'dive', label: 'Dive' }, { id: 'lab', label: 'Work' },
@@ -69,7 +70,7 @@ export function Header() {
               <ol>
                 {LINKS.map((l, i) => (
                   <li key={l.id}>
-                    <motion.a href={'#' + l.id} onClick={(e) => { e.preventDefault(); go(l.id) }} initial={{ y: '110%' }} animate={{ y: 0 }} exit={{ y: '110%' }} transition={{ delay: 0.08 + i * 0.045, duration: 0.7, ease: [0.22, 0.9, 0.24, 1] }} onMouseEnter={() => audio.tick()}>
+                    <motion.a href={'#' + l.id} onClick={(e) => { e.preventDefault(); go(l.id) }} initial={{ y: '110%' }} animate={{ y: 0 }} exit={{ y: '110%' }} transition={{ delay: 0.08 + i * 0.045, duration: 0.7, ease: HOUSE.IN }} onMouseEnter={() => audio.tick()}>
                       <small><Odometer value={i + 1} digits={2} delay={0.1 + i * 0.05} /></small>{l.label}
                     </motion.a>
                   </li>

@@ -32,6 +32,9 @@ import { Spring, Spring3 } from '../core/spring'
 
 // PRELOAD: code-split per scene. The hero is in this chunk; each later stage is its own chunk, mounted and
 // shader-warmed when its block enters the ±1 window around the current block (LaterStages below).
+// Shifat 15:39Z sharper 3D: every texture samples with 8x anisotropic filtering (three clamps to the GPU's max)
+THREE.Texture.DEFAULT_ANISOTROPY = 8
+
 const LATER: { name: string; load: () => Promise<ComponentType> }[] = [
   { name: 'dive', load: () => import('./stages/dive/DiveStage').then((m) => m.DiveStage as ComponentType) },
   { name: 'journey', load: () => import('./stages/journey/JourneyStage').then((m) => m.JourneyStage as ComponentType) },
@@ -74,7 +77,7 @@ function Renderer() {
     props.dpr = dpr
     applyTextDpr(gl, size.width, size.height, dpr)
     props.renderW = Math.floor(size.width * dpr); props.renderH = Math.floor(size.height * dpr)
-    sys.paint.resize(props.renderW, props.renderH)
+    { const pd = quality.dprFor(size.width, size.height, true); props.paintDpr = pd; sys.paint.resize(Math.floor(size.width * pd), Math.floor(size.height * pd)) } // the trail sim ignores the rest refinement (no reset when the pointer stops)
     sys.chain.setSize(size.width, size.height)
     shared.u_resolution.value.set(props.renderW, props.renderH)
     ufx.resize(size.width, size.height)
@@ -90,7 +93,7 @@ function Renderer() {
     props.dpr = dpr
     applyTextDpr(gl, size.width, size.height, dpr)
     props.renderW = Math.floor(size.width * dpr); props.renderH = Math.floor(size.height * dpr)
-    sys.paint.resize(props.renderW, props.renderH)
+    { const pd = quality.dprFor(size.width, size.height, true); props.paintDpr = pd; sys.paint.resize(Math.floor(size.width * pd), Math.floor(size.height * pd)) } // the trail sim ignores the rest refinement (no reset when the pointer stops)
     sys.chain.setSize(size.width, size.height)
     shared.u_resolution.value.set(props.renderW, props.renderH)
     ufx.resize(size.width, size.height)

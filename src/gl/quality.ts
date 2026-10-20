@@ -31,8 +31,10 @@ const tier = settings.TIER
  *  device that already holds 60. Entries above the device's own DPR or the total-pixel cap are clipped at runtime. */
 const LADDER: Record<string, number[]> = {
   high: [1.5, 1.3, 1.15, 1.0, 0.85],
-  mid: [1.25, 1.1, 1.0, 0.85, 0.75],
-  low: [1.25, 1.1, 1.0, 0.875, 0.75],
+  // Shifat 15:39Z sharper 3D: phones start higher and floor at ~1.0 where the frame budget allows (the governor
+  // still steps down a phone that cannot hold 60)
+  mid: [1.5, 1.3, 1.15, 1.0, 0.85],
+  low: [1.3, 1.15, 1.0, 0.9, 0.8],
   none: [1],
 }
 /** render-target scale per level (multiplies a stage's own base scale) and loop-count scale */
@@ -72,9 +74,25 @@ class Quality {
   }
   get maxLevel() { return this.ladder.length - 1 }
   /** DPR for a window size: the level's step, clipped by the device DPR and the total-pixel cap, floored at 0.6 */
-  dprFor(w: number, h: number) {
+  dprFor(w: number, h: number, noRest = false) {
     const byPixels = Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h))
-    return Math.max(0.6, Math.min(browser.dpr, this.ladder[this.level], byPixels))
+    // REST REFINEMENT (Shifat 15:39Z): at rest, with headroom (level 0), one step toward native (×1.35, ≤ 2)
+    const r = this.rest && !noRest
+    const step = this.ladder[this.level] * (r ? 1.35 : 1)
+    return Math.max(0.6, Math.min(browser.dpr, r ? 2 : 9, step, byPixels * (r ? 1.2 : 1)))
+  }
+  /** at rest (no scroll, no pointer for ~300 ms) the canvas refines one step; any motion drops it back. Only at level 0
+   *  on mid/high tiers and when the governor runs. */
+  rest = false
+  private still = 0
+  restTick(moving: boolean, now: number) {
+    const can = this.enabled && this.judging && this.level === 0 && tier !== 'low' && this.probing < 0
+    if (moving || !can) { this.still = now; if (this.rest) this.setRest(false, now); return }
+    if (!this.rest && now - this.still > 300) this.setRest(true, now)
+  }
+  private setRest(v: boolean, now: number) {
+    this.rest = v; this.lastStep = now; this.n = 0
+    const s = this.state(); this.listeners.forEach((fn) => fn(s))
   }
   /** a stage's render-target scale at the current level (base = the stage's own tier scale) */
   rt(base: number) { return base * RT[Math.min(this.level, RT.length - 1)] }

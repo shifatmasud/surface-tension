@@ -20,8 +20,15 @@
   --u: 8px;
   --s1: 8px; --s2: 16px; --s3: 24px; --s4: 40px; --s5: 64px; --s6: 104px; --s7: 168px;
   --radius: 999px;
-  --ease: cubic-bezier(0.22, 0.9, 0.24, 1);
-  --ease-in-out: cubic-bezier(0.65, 0, 0.18, 1);
+  /* HOUSE MOTION (core/ease.ts HOUSE): expo-out for every entrance and hover, the matching in-out for exits and
+     A→B moves, a sine for idle loops; three durations. No default or linear easing anywhere. */
+  --ease: cubic-bezier(0.19, 1, 0.22, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-sine: cubic-bezier(0.37, 0, 0.63, 1);
+  --dur-in: 1s;
+  --dur-out: .6s;
+  --dur-ui: .6s;
+  --dur-fade: .24s;
   --vh: 1vh;
   /* Three sizes only, Inter Regular 400 only: giant display vs tiny labels, no timid middle. */
   --fs-display: clamp(96px, 14vw, 240px);

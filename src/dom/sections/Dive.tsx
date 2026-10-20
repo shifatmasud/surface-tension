@@ -11,10 +11,15 @@ import { portrait } from '../../core/frame'
 import { sections } from '../../app/sections'
 import { TOOLS } from '../../content/site'
 import { pool } from '../../gl/systems/pool'
+import { browser } from '../../services/settings'
 
 /** dive progress where the work (lab) takes over, and where the scene ends under the Shade DS card */
 export const U_LAB = 0.88, U_END = 1.0
 const ss = (a: number, b: number, x: number) => { const t = clamp((x - a) / (b - a)); return t * t * (3 - 2 * t) }
+const RM = browser.reducedMotion
+/** QA: the scroll position at which the dive reaches progress u (0 … U_LAB, the dive section only) */
+let scrollForU: ((u: number) => number) | null = null
+;(window as any).__diveScrollFor = (u: number) => (scrollForU ? scrollForU(u) : 0)
 
 /**
  * S5 — Dive. Pinned ~200vh. The camera skims the lake, breaks through, looks up into the light
@@ -32,6 +37,14 @@ export function Dive() {
     const st = visuals.register('dive', () => {
       const h = divePath(dive.u, pose.pos, pose.target)
       pose.fov = vfovFor(h, 30, 74)
+      // W18-DIVE OVER-UNDER: a slow operator's float through the crane-down and the crossing (≈0.1–0.25°, two incommensurate
+      // sines in yaw and pitch); none under reduced motion
+      const fl = RM ? 0 : 1 - ss(0.4, 0.5, dive.u)
+      if (fl > 0) {
+        const dist = pose.pos.distanceTo(pose.target), tt = props.time
+        pose.target.x += dist * fl * (0.0032 * Math.sin(tt * 0.31) + 0.0014 * Math.sin(tt * 0.83 + 1.3))
+        pose.target.y += dist * fl * (0.0026 * Math.sin(tt * 0.23 + 0.7) + 0.0012 * Math.sin(tt * 0.67 + 2.1))
+      }
       // v3: in the deep, phones step back so the whole UI cylinder fits the tall frame
       const pb = portrait() * ss(1.0, 1.22, dive.u) * (1 - dive.push)
       if (pb > 0) {
@@ -59,6 +72,7 @@ export function Dive() {
       saturation: 1.02, contrast: 1.05, vignette: 0.34, vignetteSoft: 0.7, bloom: 0.5, bloomThreshold: 0.86, dive: 1,
     })
     const back = new THREE.Vector3(), pushP = new THREE.Vector3(), tabW = new THREE.Vector3()
+    scrollForU = (u: number) => range.docTop - props.height + Math.max(0, Math.min(1, u / U_LAB)) * Math.max(1, range.height)
     let lastT = -1
     const gp = new THREE.Vector3(), gt = new THREE.Vector3()
     let stirT = 0

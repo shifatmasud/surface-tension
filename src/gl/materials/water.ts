@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { WL_EDGE } from '../water/waterline'
 import { shared } from '../../state/props'
 import { sky, SKY_PARS } from '../shaders/sky'
 import { settings } from '../../services/settings'
@@ -45,6 +46,7 @@ export function createWaterMaterial() {
     u_underOn: { value: 0 },
     u_resolution: shared.u_resolution,                                           // stochastic sun glints
     u_fogNear: { value: 7 }, u_fogFar: { value: 26 },
+    u_wlClip: { value: -1 },   // W18-DIVE OVER-UNDER (set per draw by HeroStage: main camera only)
   }
   const material = new THREE.ShaderMaterial({
     uniforms,
@@ -79,6 +81,8 @@ export function createWaterMaterial() {
       uniform sampler2D u_reflTex; uniform float u_reflOn; uniform float u_gemReflK;
       uniform float u_bedDepth; uniform vec3 u_absorb; uniform vec3 u_scatter; uniform vec3 u_bedColor;
       uniform vec4 u_gem; uniform vec3 u_gemTint; uniform float u_touch, u_glint, u_dbg, u_underOn, u_cau; uniform sampler2D u_underTex; uniform vec2 u_resolution; uniform float u_fogNear, u_fogFar;
+      uniform float u_wlClip;   // W18-DIVE OVER-UNDER: -1 off, else the lens waterline (screen y); the lake draws above it only
+      ${WL_EDGE}
       varying vec3 v_world; varying vec2 v_ruv; varying float v_rmask; varying vec4 v_refl;
 
       // ---- height gradient: swells (analytic derivative) -------------------------------------
@@ -131,6 +135,7 @@ export function createWaterMaterial() {
       }
 
       void main(){
+        if (u_wlClip > -0.5 && gl_FragCoord.y < (u_wlClip + wlEdge(gl_FragCoord.x / u_resolution.y, u_time)) * u_resolution.y) discard;   // W18-DIVE OVER-UNDER
         vec3 V = normalize(cameraPosition - v_world);
         float dist = length(cameraPosition - v_world);
         // ---- normal ----

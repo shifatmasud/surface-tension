@@ -79,7 +79,7 @@ export class PostChain {
     // sharpen (convolution) first, then the grade on its result: one pass instead of two when below native size
     const gradeOnly = new EffectPass(camera, this.grade)
     const sharpGrade = new EffectPass(camera, new InlineSharpenEffect(), this.grade)
-    const sharp = () => renderScale() < 0.99
+    const sharp = () => false && renderScale() < 0.99   // W18: CAS in the final upscale replaces the inline sharpen
     this.entries = [
       { name: 'Scene', order: 0, pass: this.scenePass, needsRender: () => true },
       { name: 'DiveGodRays', order: 5, pass: new DiveGodRaysPass(camera), needsRender: () => diveRays.on },
@@ -101,15 +101,34 @@ export class PostChain {
   // the one full-density pass: the finished frame (in the composer's input buffer after its last swap) upscaled once
   private blitCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
   private blitMat = new THREE.ShaderMaterial({
-    uniforms: { tMap: { value: null as THREE.Texture | null } },
+    uniforms: { tMap: { value: null as THREE.Texture | null }, u_texel: { value: new THREE.Vector2(1, 1) }, u_sharp: { value: 0 } },
     vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
-    fragmentShader: 'uniform sampler2D tMap; varying vec2 vUv; void main(){ gl_FragColor = texture2D(tMap, vUv);\n#include <colorspace_fragment>\n}',
+    // CONTRAST-ADAPTIVE SHARPENING (AMD CAS-style, Shifat 15:39Z) fused into the upscale: a 5-tap cross at the scene's
+    // own texel size; the weight adapts to local contrast so flat areas stay clean and edges don't ring. Only when the
+    // scene is upscaled (u_sharp > 0).
+    fragmentShader: `uniform sampler2D tMap; uniform vec2 u_texel; uniform float u_sharp; varying vec2 vUv;
+void main(){
+  vec3 e = texture2D(tMap, vUv).rgb;
+  if (u_sharp > 0.0) {
+    vec3 b = texture2D(tMap, vUv + vec2(0.0, -u_texel.y)).rgb, d = texture2D(tMap, vUv + vec2(-u_texel.x, 0.0)).rgb;
+    vec3 f = texture2D(tMap, vUv + vec2(u_texel.x, 0.0)).rgb, h = texture2D(tMap, vUv + vec2(0.0, u_texel.y)).rgb;
+    vec3 mn = min(e, min(min(b, d), min(f, h))), mx = max(e, max(max(b, d), max(f, h)));
+    vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, 1e-4), 0.0, 1.0));
+    vec3 w = -amp * mix(0.125, 0.2, u_sharp);
+    e = clamp((e + (b + d + f + h) * w) / (1.0 + 4.0 * w), 0.0, 64.0);
+  }
+  gl_FragColor = vec4(e, 1.0);
+  #include <colorspace_fragment>
+}`,
     depthTest: false, depthWrite: false, toneMapped: false,
   })
   private blitScene = (() => { const s = new THREE.Scene(); const m = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.blitMat); m.frustumCulled = false; s.add(m); return s })()
   private blit() {
     const gl = this.gl, prev = gl.getRenderTarget(), auto = gl.autoClear
     this.blitMat.uniforms.tMap.value = this.composer.inputBuffer.texture
+    this.blitMat.uniforms.u_texel.value.set(1 / this.bw, 1 / this.bh)
+    // sharpen only when the scene is upscaled onto the canvas (its DPR below the canvas's)
+    this.blitMat.uniforms.u_sharp.value = props.textDpr > props.dpr * 1.05 ? Math.min(1, (props.textDpr / props.dpr - 1) * 0.8) : 0
     gl.setRenderTarget(null); gl.autoClear = false
     gl.render(this.blitScene, this.blitCam)
     gl.autoClear = auto; gl.setRenderTarget(prev)
@@ -124,7 +143,7 @@ export class PostChain {
     this.composer.inputBuffer.setSize(bw, bh); this.composer.outputBuffer.setSize(bw, bh)
     for (const e of this.entries) e.pass.setSize(bw, bh)
     this.text.resize(w, h)
-    const pw = Math.max(1, (w * props.dpr) >> 2), ph = Math.max(1, (h * props.dpr) >> 2)
+    const pw = Math.max(1, (w * props.paintDpr) >> 2), ph = Math.max(1, (h * props.paintDpr) >> 2)
     this.distortion.u('u_screenPaintTexelSize').value.set(1 / pw, 1 / ph)
     this.grade.u('u_aspect').value = w / h
   }

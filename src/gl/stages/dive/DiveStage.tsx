@@ -9,7 +9,9 @@ import { portrait } from '../../../core/frame'
 import { engine } from '../../engine'
 import { GEM_LAYER } from '../hero/HeroStage'
 import { brilliantGeometry } from '../hero/diamond'
-import { dive, diveRays, DIVE_LAYER, TOOL_POS, floorH } from './diveState'
+import { dive, diveRays, DIVE_LAYER, TOOL_POS, floorH, PORT } from './diveState'
+import { Floaters } from './floaters' // FLOATERS HOOK
+import { browser } from '../../../services/settings'
 import { vegVert, vegFrag, rayMaskVert, rayMaskFrag } from './vegetation'
 import { applyCaustics, causticUniforms, causticsFrame } from '../../water/caustics'
 import { DeepSea } from './DeepSea'
@@ -18,6 +20,7 @@ import { backdropVert, backdropFrag, floorVert, floorFrag, siltVert, siltFrag, s
 
 const ss = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
 const Q = typeof location !== 'undefined' ? location.search : ''
+const RM = browser.reducedMotion && !/[?&]rmoff/.test(Q)   // W18-DIVE OVER-UNDER: reduced motion → no ripple/drops/wobble
 const QA = { noRays: /[?&]norays/.test(Q), noVeg: /[?&]noveg/.test(Q), noCaus: /[?&]nocaus/.test(Q), gemDbg: /[?&]gemdbg/.test(Q) }
 
 /** Seeded random so the forest is the same on every visit (and in every QA frame). */
@@ -213,19 +216,30 @@ export function DiveStage() {
     dive.camY = camY
     dive.camZ = camera.position.z
     const on = props.stage === 'dive'
-    const showGL = on && camY < 0.3
+    // W18-DIVE OVER-UNDER (Shifat 15:29Z + 15:30Z): the water world shows from the moment the waterline enters the frame
+    const showGL = on && camY < PORT
     dive.active = showGL
     dive.under = on && camY < 0
     group.current.visible = showGL
 
-    // the lens crossing the surface: the water rises over the frame, bottom to top
-    const split = showGL && camY > -0.25 ? Math.min(1, Math.max(0, 0.5 - camY * 2)) : -1
+    // the split-level shot: a dome port PORT tall. With the lens PORT above the water the line sits at the bottom of the
+    // frame; it rises as the camera cranes down and reaches the top as the lens meets the surface (so everything above
+    // the line is always the air render, from above the water). Then a brief wobble as it passes, and we are under.
+    // A pure function of the camera height, i.e. of the dive's scroll progress (through the camera's spring).
+    const split = showGL && camY > 0 && camY < PORT ? 1 - camY / PORT : -1
+    const past = on && camY <= 0 && camY > -0.6 ? -camY / 0.6 : -1      // 0..1 just after the line left the top
     dive.split = split
+    dive.under01 = split >= 0 ? split : past >= 0 ? 1 : camY <= 0 && on ? 1 : 0
     u.u_split.value = split
     const grade = engine.chain?.gradeFor(nb.active) // NEIGHBOUR HOOK: the neighbour pass has its own grade
     if (grade) {
-      if (split > 0 && split < 1) { grade.u('u_waterline').value = split; st.lineWas = true }
-      else if (st.lineWas) { grade.u('u_waterline').value = -1; st.lineWas = false }
+      if (split >= 0 || past >= 0) {
+        grade.u('u_waterline').value = split >= 0 ? split : 1.03 + past
+        grade.u('u_wlK').value = split >= 0 ? 1 : 1 - ss(0, 1, past)
+        grade.u('u_wlWob').value = split >= 0 ? 0.3 * ss(0.86, 1, split) : ss(0, 0.1, past) * (1 - ss(0.12, 0.75, past))
+        grade.u('u_wlMo').value = RM ? 0 : 1
+        st.lineWas = true
+      } else if (st.lineWas) { grade.u('u_waterline').value = -1; grade.u('u_wlK').value = 0; grade.u('u_wlWob').value = 0; st.lineWas = false }
     }
 
     // fully under: the lake above (and its diamond) is replaced by the view from below
@@ -303,6 +317,7 @@ export function DiveStage() {
       <points geometry={geos.silt} material={mats.silt} renderOrder={12} frustumCulled={false} onUpdate={(o) => o.layers.set(DIVE_LAYER)} />
       <points geometry={geos.stars} material={mats.stars} renderOrder={13} frustumCulled={false} onUpdate={(o) => o.layers.set(DIVE_LAYER)} />
       <DeepSea u={u} />
+      <Floaters u={u} /> {/* FLOATERS HOOK */}
       <UiCylinder u={u} />
     </group>
   )

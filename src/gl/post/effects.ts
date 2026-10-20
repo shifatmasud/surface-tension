@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { BlendFunction, Effect, EffectAttribute } from 'postprocessing'
 import { shared } from '../../state/props'
 import { BLUE_NOISE } from '../shaders/chunks'
+import { WL_EDGE } from '../water/waterline'
 
 /**
  * ScreenPaintDistortion (ch.14 S.6) — order 75. Smears the finished frame along the paint velocity
@@ -85,22 +86,55 @@ export class GradeEffect extends Effect {
     super('Grade', /* glsl */ `
       uniform float u_exposure, u_saturation, u_contrast, u_brightness, u_vignette, u_vignetteSoft, u_fade, u_lift;
       uniform vec3 u_tint, u_fadeColor;
-      uniform float u_waterline;   // -1 hidden, 0..1 screen y of the waterline band
+      uniform float u_waterline;   // -1 hidden, else the lens waterline's screen y (0 bottom … 1 top; > 1 = just passed above the frame)
+      uniform float u_wlK;         // W18-DIVE OVER-UNDER: strength of the underwater half's look (tint, refraction, caustic shimmer)
+      uniform float u_wlWob;       // the crossing: a brief wobble through the whole frame as the line rises past the lens
+      uniform float u_wlMo;        // 1 = motion, 0 = reduced motion (no ripple, no droplets, no wobble)
+      uniform float u_wlTime;
       uniform float u_aspect;
       ${BLUE_NOISE}
+      ${WL_EDGE}
       float wlHash(float n){ return fract(sin(n) * 43758.5453); }
       float wlNoise(float x){ float i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f); return mix(wlHash(i), wlHash(i + 1.0), f) * 2.0 - 1.0; }
+      /** the line's screen y at this x: the same edge the water world and the lake are cut along (water/waterline.ts) */
+      float wlLine(vec2 uv){ return u_waterline + wlEdge(uv.x * u_aspect, u_wlTime); }
+      /** droplets clinging to the dome just above the meniscus: xy = offset from the drop's centre (in drop radii), z = coverage */
+      vec3 wlDrop(vec2 uv){
+        float d = uv.y - u_waterline;
+        if (u_wlMo < 0.5 || d < 0.0 || d > 0.2) return vec3(0.0);
+        vec2 g = vec2(uv.x * u_aspect, d) * 24.0;
+        vec2 id = floor(g), f = fract(g) - 0.5;
+        float h1 = wlHash(id.x * 7.13 + id.y * 13.71 + 3.0), h2 = wlHash(id.x * 3.31 - id.y * 5.97 + 17.0);
+        if (h1 > 0.38) return vec3(0.0);
+        vec2 q = f - (vec2(h1 / 0.38, h2) - 0.5) * 0.5;
+        float r = mix(0.14, 0.34, h2) * (1.0 - smoothstep(0.03, 0.2, d));
+        float l = length(q / vec2(1.0, 1.3));
+        return vec3(q / max(r, 1e-3), 1.0 - smoothstep(r * 0.8, r, l));
+      }
       void mainUv(inout vec2 uv){
-        // refraction band around the waterline (surface break): bend + slight chroma-free magnify.
-        // the meniscus wobble is two octaves of value noise along x (aspect-scaled so ultrawide isn't stretched),
-        // not a regular sine scallop
         if (u_waterline > -0.5) {
-          float d = uv.y - u_waterline;
-          float band = exp(-d * d * 900.0);
-          float x = uv.x * u_aspect, s = u_waterline * 6.0;
-          float wob = wlNoise(x * 7.0 + s) * 0.65 + wlNoise(x * 19.0 - s * 1.7 + 11.0) * 0.35;
-          uv.y += band * 0.010 * wob + band * d * -0.6;
-          uv.x += band * 0.004 * wlNoise(uv.y * 60.0 + s * 3.0);
+          float L = wlLine(uv);
+          float d = uv.y - L;
+          float t = u_wlTime;
+          // the meniscus: water climbing the dome is a thin cylindrical lens along the line; it pulls the image toward
+          // the line (a magnified sliver of both worlds) and shivers along x
+          float band = exp(-d * d * 2200.0);
+          uv.y -= band * d * 0.6;
+          uv.x += band * 0.003 * wlNoise(uv.x * u_aspect * 30.0 + t * 0.8) * u_wlMo;
+          // the underwater half: refraction ripple, and the slight magnification of the water (n = 1.33) about the line
+          float uw = smoothstep(0.0, -0.012, d) * u_wlK;
+          vec2 rp = vec2(sin(uv.y * 38.0 + t * 1.6 + 2.0 * sin(uv.x * u_aspect * 9.0)), cos(uv.x * u_aspect * 31.0 - t * 1.3 + uv.y * 7.0));
+          uv += uw * rp * 0.0024 * u_wlMo;
+          float Lm = min(L, 1.0);
+          uv.y = mix(uv.y, Lm + (uv.y - Lm) * 0.95, uw);
+          // droplets above the line: each a tiny inverted lens
+          vec3 dr = wlDrop(uv);
+          uv -= dr.xy * dr.z * 0.010;
+          // the crossing: the frame wobbles once as the line rises past the lens
+          if (u_wlWob > 0.0) {
+            float w = u_wlWob * u_wlMo;
+            uv += w * vec2(0.010 * sin(uv.y * 14.0 + t * 3.1 + sin(uv.x * 6.0)), 0.014 * sin(uv.x * u_aspect * 10.0 - t * 2.7 + uv.y * 4.0));
+          }
         }
       }
       void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor){
@@ -126,8 +160,25 @@ export class GradeEffect extends Effect {
         c = mix(c, min(c, vec3(1.0)), smoothstep(0.0, 0.35, u_fade));
         c = mix(c, u_fadeColor, u_fade);
         if (u_waterline > -0.5) {
-          float d = uv.y - u_waterline;
-          c += exp(-d * d * 4000.0) * 0.35;           // bright meniscus line
+          // W18-DIVE OVER-UNDER: the split-level shot
+          float L = wlLine(uv);
+          float d = uv.y - L;
+          float uw = smoothstep(0.002, -0.006, d) * u_wlK;
+          // the underwater half: teal absorption (red goes first) and caustic light dancing just under the surface
+          c = mix(c, c * vec3(0.64, 0.92, 1.0) + vec3(0.0, 0.012, 0.018), uw);
+          float cs = wlNoise(uv.x * u_aspect * 21.0 + u_wlTime * 0.9 + 1.5 * sin(uv.y * 26.0 + u_wlTime * 0.7)) * 0.5 + 0.5;
+          c *= 1.0 + uw * exp(d * 7.0) * 0.22 * pow(cs, 3.0);
+          // the meniscus: a silvered underside (total internal reflection) just under the line, a crisp bright edge on
+          // it and a thin cool halo above it
+          float sil = exp(-pow((d + 0.011) / 0.009, 2.0)) * min(1.0, u_wlK * 1.5);
+          c = mix(c, c * 0.7 + vec3(0.66, 0.82, 0.86) * 0.36, sil * 0.6);   // W18: lighter underside band
+          c += vec3(0.93, 0.98, 1.0) * exp(-pow(d / 0.0016, 2.0)) * 0.95;
+          c += vec3(0.55, 0.82, 0.95) * exp(-pow((d - 0.004) / 0.006, 2.0)) * 0.12;
+          // droplets: a dark rim and a highlight up and to the left (the sky caught in each bead)
+          vec3 dr = wlDrop(uv);
+          float rim = smoothstep(0.55, 0.95, length(dr.xy));
+          c = mix(c, c * 0.72, dr.z * rim * 0.5);
+          c += vec3(1.0) * dr.z * smoothstep(0.18, 0.0, length(dr.xy - vec2(-0.35, 0.4))) * 0.55;
         }
         c += (getBlueNoise(gl_FragCoord.xy).r - 0.5) / 255.0;  // dither
         outputColor = vec4(c, inputColor.a);
@@ -139,6 +190,8 @@ export class GradeEffect extends Effect {
         ['u_fade', new THREE.Uniform(0)], ['u_lift', new THREE.Uniform(0)], ['u_tint', new THREE.Uniform(new THREE.Color(1, 1, 1))],
         ['u_fadeColor', new THREE.Uniform(new THREE.Color(0, 0, 0))],
         ['u_waterline', new THREE.Uniform(-1)], ['u_aspect', new THREE.Uniform(1)],
+        // W18-DIVE OVER-UNDER
+        ['u_wlK', new THREE.Uniform(0)], ['u_wlWob', new THREE.Uniform(0)], ['u_wlMo', new THREE.Uniform(1)], ['u_wlTime', shared.u_time as any],
         ['u_blueNoise', shared.u_blueNoise as any], ['u_blueNoiseOffset', shared.u_blueNoiseOffset as any], ['u_blueNoiseSize', shared.u_blueNoiseSize as any],
       ]),
     })

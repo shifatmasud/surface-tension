@@ -83,7 +83,7 @@ type LineGL = { it: UfxItem; mat: THREE.ShaderMaterial; el: HTMLElement; role: '
 // Shifat 15:33Z ("looks cheap" → premium): one motion language for all copy. IN: each line rises from under its hard
 // mask on cubic-bezier(0.19, 1, 0.22, 1) over 1.0 s, 75 ms apart, with a 2.5° tilt that settles to 0; OUT: up and out
 // through the top of the mask, 0.6 s ease-in-out, a touch quicker. No opacity on the glyphs (reduced motion: fades).
-const OUT_DUR = 0.6, IN_DUR = 1.0, STAGGER = 0.075, IN_DELAY = 0.18
+const OUT_DUR = 0.6, IN_DUR = 1.0, STAGGER = 0.075, IN_DELAY = 0.42   // the incoming beat waits until the outgoing lines have (nearly) cleared the shared masks
 export function bezier(x1: number, y1: number, x2: number, y2: number) {
   const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx, cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by
   const X = (t: number) => ((ax * t + bx) * t + cx) * t, Y = (t: number) => ((ay * t + by) * t + cy) * t, dX = (t: number) => (3 * ax * t + 2 * bx) * t + cx
@@ -182,8 +182,8 @@ export function TextLayer() {
           // QA: window.__slotScrub = 0..1 pins the active beat's IN timeline (frames of the reveal on a slow rig)
           const scrub = (window as any).__slotScrub
           const x = typeof scrub === 'number' && s.dir > 0 ? clamp((scrub * (IN_DUR + STAGGER * (n - 1)) - i * STAGGER) / IN_DUR) : clamp((now - s.t0 - i * STAGGER) / (s.dir > 0 ? IN_DUR : OUT_DUR))
-          if (s.dir > 0) { v = reduced ? 1 : easeOut(x); o = reduced ? x : 1; if (x < 1) done = false }
-          else { v = reduced ? 1 : 1 + easeIn(x); o = reduced ? 1 - x : 1; if (x < 1) done = false }
+          if (s.dir > 0) { v = reduced ? 1 : easeOut(x); o = reduced ? easeIn(x) : 1; if (x < 1) done = false }
+          else { v = reduced ? 1 : 1 + easeIn(x); o = reduced ? 1 - easeIn(x) : 1; if (x < 1) done = false }
           const L = s.lines[i]
           if (L) {
             L.mat.uniforms.u_reveal.value = v; L.mat.uniforms.u_opacity.value = o

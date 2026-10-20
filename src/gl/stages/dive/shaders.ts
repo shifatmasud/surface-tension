@@ -1,3 +1,4 @@
+import { WL_EDGE } from '../../water/waterline'
 /**
  * Dive shaders — written fresh. Underwater optics by cheap, honest approximations:
  *  - Beer–Lambert absorption per channel (red dies first): light reaching depth d is exp(−K·d)
@@ -132,10 +133,13 @@ vec3 causticsAt(vec2 q, float d, float dist){
 `
 
 export const CLIP = /* glsl */ `
+${WL_EDGE}
 void splitClip(){
+  // W18-DIVE OVER-UNDER: u_split = the waterline's screen y (0 bottom … 1 top) while the lens crosses; the water
+  // world draws below it only (the air render shows above). The edge is shared with the lake and the post meniscus.
   if (u_split < -0.5) return;
   float x = gl_FragCoord.x / u_res.y;
-  float edge = u_split + 0.010 * sin(x * 7.0 + u_time * 1.3) + 0.006 * sin(x * 17.0 - u_time * 2.1) + 0.003 * sin(x * 41.0 + u_time * 3.0);
+  float edge = u_split + wlEdge(x, u_time);
   if (gl_FragCoord.y > edge * u_res.y) discard;
 }
 `
@@ -203,7 +207,10 @@ void main(){
       vec3 sky = skyAir(length(a) > 0.0 ? a : vec3(0.0, 1.0, 0.0));
       float tr = 1.0 - pow(1.0 - sqrt(max(k.g, 0.0)), 5.0);
       vec3 r = reflect(dir, n);
-      vec3 mirror = inscatter(r, dc + 12.0) * 0.55;
+      // W18-DIVE OVER-UNDER: at grazing angles (the view just under the line) total internal reflection mirrors the
+      // near-horizontal water, a silvery teal, not the deep (it read as a black band across the top of the frame)
+      float gz = smoothstep(0.0, 0.45, dir.y);
+      vec3 mirror = inscatter(r, dc + 12.0 * gz) * mix(0.95, 0.55, gz) + vec3(0.05, 0.11, 0.12) * (1.0 - gz) * exp(-K * dc);
       float dance = 0.78 + 0.42 * caustic(hp * 1.15);              // the window shimmers as the swell focuses light
       vec3 surf = sky * win * tr * mix(1.0, dance, clamp(4.0 / (t + 2.0), 0.0, 1.0)) + mirror * (1.0 - win * tr);
       vec3 tv = exp(-KV * t);

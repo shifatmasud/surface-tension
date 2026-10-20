@@ -31,6 +31,7 @@ export const props = {
   textDpr: 1,
   useMobileLayout: window.innerWidth <= 812,
   // scroll (Lenis is the source)
+  paintDpr: 1,
   scroll: 0, scrollVel: 0, scrollDelta: 0, scrollStrength: 0, scrollLimit: 1, scrollProgress: 0,
   // the look the post chain reads this frame, blended from section looks
   look: makeLook(),
