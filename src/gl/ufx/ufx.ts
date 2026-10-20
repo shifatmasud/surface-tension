@@ -71,11 +71,14 @@ class UfxSystem {
     this.camera.position.y = clip.ufxY
     for (const it of this.items) {
       let top = it.docTop - (it.fixed ? 0 : props.scroll)
-      if (it.live) { const L = it.live(); top = L.top; it.docLeft = L.left; it.w = L.w; it.h = L.h }
-      const inView = it.selfPlaced || (top < vh + 200 && top + it.h > -200)
-      // clipped sections: a mirrored item belongs to its section's block; the outgoing block's items live on in its
-      // captured frame, so the live render (the incoming card) must not draw them again
       if (it.section === undefined) it.section = it.el.closest('section')?.id ?? ''
+      // scrolling up through a boundary the upper (outgoing) section is the live render and its DOM carries the
+      // clip's drift transform; a live screen rect includes it, so take it out (the camera offset puts it back once)
+      const drift = clip.liveUpper && it.section === clip.outName ? clip.outTy : 0
+      if (it.live) { const L = it.live(); top = L.top - drift; it.docLeft = L.left; it.w = L.w; it.h = L.h }
+      const inView = it.selfPlaced || (top < vh + 200 && top + it.h > -200)
+      // clipped sections: a mirrored item belongs to its section's block; the still block's items live on in its
+      // captured frame, so the live render must not draw them again
       const owned = !it.section || clip.allowed(it.section)
       const on = this.enabled && inView && owned && (it.visibleWhen ? it.visibleWhen() : true)
       it.mesh.visible = on && (it.w > 0 || !!it.selfPlaced)
@@ -85,6 +88,7 @@ class UfxSystem {
         it.mesh.scale.set(it.w, it.h, 1)
       }
       it.onUpdate?.(it, top)
+      if (drift && it.selfPlaced) it.mesh.position.y += drift   // self-placed items read their transformed rect
     }
   }
 }

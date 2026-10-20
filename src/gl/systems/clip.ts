@@ -46,6 +46,9 @@ class Clip {
   liveUpper = false
   /** ufx (GL text) camera offset so text stays glued to its DOM box after the composite moves the live frame */
   ufxY = 0
+  /** the outgoing section whose DOM carries the drift transform, and that transform's y (css px) */
+  outName = ''
+  outTy = 0
   private dir = 1
   private lastScroll = NaN
   private travel = 0
@@ -134,8 +137,10 @@ class Clip {
     if (!el || !r) return
     if (this.styled && this.styled !== el) this.unstyle()
     this.styled = el
+    this.outName = name
     const vh = props.height
     const s = this.scale, ty = d - this.lag
+    this.outTy = ty
     const elTop = r.docTop - props.scroll
     const oScreen = vh / 2 - d                       // where the captured frame's centre point sits naturally now
     const oLocal = oScreen - elTop
@@ -149,7 +154,7 @@ class Clip {
   private unstyle() {
     const el = this.styled; if (!el) return
     el.style.transform = ''; el.style.transformOrigin = ''; el.style.clipPath = ''; el.style.filter = ''; el.style.opacity = ''
-    this.styled = null
+    this.styled = null; this.outName = ''; this.outTy = 0
   }
 }
 export const clip = new Clip()
