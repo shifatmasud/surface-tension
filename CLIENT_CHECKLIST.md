@@ -8,7 +8,7 @@ Tick an item only when it runs on the live site and was checked visually.
 - [ ] Done by Wed Oct 21, 9 PM Dhaka
 
 ## Stack
-- [ ] React + TS + Vite, R3F, GSAP + ScrollTrigger, Lenis, Framer Motion
+- [x] React + TS + Vite, R3F, GSAP + ScrollTrigger, Lenis, Framer Motion — verified 06:25Z (w9): live build bundles all five; package.json deps + src/services/scroll.ts (Lenis + ScrollTrigger), Framer Motion in Intro/Header/ProjectOverlay, tsc strict
 - [ ] three-html-render (his fork's base) with fallbacks; drei Html for crisp labels
 - [x] WebGL2 — live console on real GPU: 'renderer: WebGL2'
 
@@ -32,7 +32,7 @@ Tick an item only when it runs on the live site and was checked visually.
 ## Type & icons
 - [x] Inter, Regular weight only — live DOM audit 03:31Z Oct 20: every visible text node computes to Inter Variable, weight 400
 - [x] Max 3 type sizes, big size contrast — live DOM audit 03:31Z: exactly 12.5px / 18px / 201.6px at 1440
-- [ ] Phosphor icons
+- [x] Phosphor icons — verified 06:25Z (w9): @phosphor-icons/react in the live header (SpeakerSimpleHigh/Slash sound toggle, ArrowUpRight) and the project overlay
 
 ## Hero
 - [ ] 3D calm rippling water lake with a blue 3D glass diamond on top
@@ -58,7 +58,7 @@ Tick an item only when it runs on the live site and was checked visually.
 
 ## Media & sound
 - [ ] Media from cosmos.so / public-domain sources, project reels from his demos
-- [ ] Web Audio synthesized sounds, muted until first gesture, Phosphor toggle
+- [x] Web Audio synthesized sounds, muted until first gesture, Phosphor toggle — verified 06:25Z (w9): services/audio.ts synthesizes every sound with oscillators/noise, enabled=false until the Phosphor speaker toggle is pressed (AudioContext resumed on that gesture)
 
 ## Quality bars
 - [ ] Accessibility (real DOM text, keyboard, reduced motion, AA contrast)
@@ -71,6 +71,6 @@ Tick an item only when it runs on the live site and was checked visually.
 
 
 ## Added Oct 20 04:54Z (Shifat, WhatsApp m:f27ebb63)
-- [ ] Dive/water scene: screen-space god rays (volumetric light shafts, occlusion-aware, from the sun through the surface)
-- [ ] Dive: ultra-realistic caustics (sharp, bright, refracted light network on sand & objects, animated, with chromatic split)
-- [ ] Dive: underwater vegetation (kelp/seagrass swaying with current, rim-lit, depth-faded)
+- [x] Dive/water scene: screen-space god rays (volumetric light shafts, occlusion-aware, from the sun through the surface) — verified live 05:46Z on a real GPU at 1440 + 390 (m9-dive-live-*.png, m9-dive-strip-1440.jpg); re-shot live 06:03Z (w9)
+- [x] Dive: ultra-realistic caustics (sharp, bright, refracted light network on sand & objects, animated, with chromatic split) — verified live 05:46Z on a real GPU at 1440 + 390 (m9-dive-live-*.png, m9-dive-strip-1440.jpg); re-shot live 06:03Z (w9)
+- [x] Dive: underwater vegetation (kelp/seagrass swaying with current, rim-lit, depth-faded) — verified live 05:46Z on a real GPU at 1440 + 390 (m9-dive-live-*.png, m9-dive-strip-1440.jpg); re-shot live 06:03Z (w9)
