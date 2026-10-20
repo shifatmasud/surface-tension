@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { settings } from '../../../services/settings'
+import { quality } from '../../quality' // PERF HOOK
 
 /**
  * Dive — shared state and the camera path. The stage (GL) and the section (DOM) both read this.
@@ -33,9 +34,12 @@ export const diveRays = {
   sun: new THREE.Vector4(0.5, 1, 0, 1), // the pass writes: sun vanishing point in mask uv (xy), behind camera (z), mask aspect (w)
   scale: settings.TIER === 'high' ? 0.5 : settings.TIER === 'mid' ? 0.4 : 0.3,   // mask/blur resolution vs the render target
   samples: settings.TIER === 'high' ? 40 : settings.TIER === 'mid' ? 28 : 16,    // radial taps in the long pass
+  baseScale: settings.TIER === 'high' ? 0.5 : settings.TIER === 'mid' ? 0.4 : 0.3, // PERF HOOK: tier values; the governor scales them
   tint: new THREE.Color(0.42, 0.88, 1.0),
 }
 ;(window as any).__diveRays = diveRays
+// PERF HOOK: the god-ray mask/blur resolution follows the governor level (the tap count is compiled into the shader per tier)
+quality.on(() => { diveRays.scale = quality.rt(diveRays.baseScale) })
 
 /** Floor height — mirrored 1:1 in GLSL (shaders.ts FLOOR_H). A shelf at −11 that falls away past z ≈ 20. */
 export function floorH(x: number, z: number) {

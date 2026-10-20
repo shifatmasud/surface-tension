@@ -119,7 +119,9 @@ export interface LogoFrame {
 export interface LogoRenderer { render(f: LogoFrame): void; resize(px: number): void; dispose(): void; ok: boolean }
 
 export function createLogoRenderer(canvas: HTMLCanvasElement): LogoRenderer {
-  const attrs: WebGLContextAttributes = { antialias: true, alpha: true, premultipliedAlpha: true, depth: true, powerPreference: 'low-power', preserveDrawingBuffer: false }
+  // PERF HOOK (Shifat 10:21Z: no default/MSAA anti-aliasing on any context): the edges are smoothed by rendering the
+  // small logo canvas 1.5x supersampled instead (resize below), which the browser filters down — screen-space, no MSAA
+  const attrs: WebGLContextAttributes = { antialias: false, alpha: true, premultipliedAlpha: true, depth: true, powerPreference: 'low-power', preserveDrawingBuffer: false }
   const gl = (canvas.getContext('webgl2', attrs) || canvas.getContext('webgl', attrs)) as WebGLRenderingContext | null
   const dead: LogoRenderer = { render() {}, resize() {}, dispose() {}, ok: false }
   if (!gl) return dead
@@ -150,7 +152,7 @@ export function createLogoRenderer(canvas: HTMLCanvasElement): LogoRenderer {
   canvas.addEventListener('webglcontextlost', onLost)
   return {
     ok: true,
-    resize(px) { if (canvas.width !== px) { canvas.width = canvas.height = px } gl.viewport(0, 0, px, px) },
+    resize(px) { px = Math.min(1024, Math.round(px * 1.5)) /* PERF HOOK: 1.5x supersample */; if (canvas.width !== px) { canvas.width = canvas.height = px } gl.viewport(0, 0, px, px) },
     render(fr) {
       if (lost) return
       // M = Rx(tilt) * Ry(angle), column-major

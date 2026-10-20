@@ -129,7 +129,7 @@ export function DiveStage() {
     const floor = new THREE.ShaderMaterial({ vertexShader: floorVert, fragmentShader: floorFrag, uniforms: { ...u }, defines, transparent: true })
     const silt = new THREE.ShaderMaterial({
       vertexShader: siltVert, fragmentShader: siltFrag,
-      uniforms: { ...u, u_box: { value: low ? 9 : 11 }, u_pxScale: { value: 800 }, u_size: { value: 0.016 } },
+      uniforms: { ...u, u_box: { value: 11 }   /* PERF HOOK: same silt volume + count on every tier */, u_pxScale: { value: 800 }, u_size: { value: 0.016 } },
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     })
     const stars = new THREE.ShaderMaterial({
@@ -149,11 +149,13 @@ export function DiveStage() {
     const floor = new THREE.PlaneGeometry(90, 100, low ? 70 : 150, low ? 80 : 170)
     floor.rotateX(-Math.PI / 2)
     const rnd = (n: number) => { const a = new Float32Array(n * 3); for (let i = 0; i < a.length; i++) a[i] = Math.random(); return a }
-    const siltN = hi ? 1100 : low ? 380 : 750
+    // PERF HOOK (Shifat 10:21Z: same object count on every tier): silt, stars, kelp and grass counts are equal;
+    // phones keep cheaper geometry (fewer strip segments, a coarser floor)
+    const siltN = 1100
     const silt = new THREE.BufferGeometry()
     silt.setAttribute('position', new THREE.BufferAttribute(rnd(siltN), 3))
     silt.setAttribute('aRand', new THREE.BufferAttribute(rnd(siltN), 3))
-    const starN = low ? 140 : 220
+    const starN = 220
     const sp = new Float32Array(starN * 3)
     for (let i = 0; i < starN; i++) {
       const v = new THREE.Vector3().randomDirection()
@@ -162,7 +164,7 @@ export function DiveStage() {
     const stars = new THREE.BufferGeometry()
     stars.setAttribute('position', new THREE.BufferAttribute(sp, 3))
     stars.setAttribute('aRand', new THREE.BufferAttribute(rnd(starN), 3))
-    const f = plantForest(hi ? 320 : low ? 100 : 220, hi ? 6400 : low ? 1800 : 4000)
+    const f = plantForest(320, 6400)
     const kelp = strip(low ? 18 : 30, f.kelp.length / 4, f.kelp, f.kShape)
     const grass = strip(low ? 4 : 6, f.grass.length / 4, f.grass, f.gShape)
     const fore = strip(low ? 18 : 30, f.fore.length / 4, f.fore, f.fShape)

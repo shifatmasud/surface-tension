@@ -188,7 +188,9 @@ export const labGL = {
     card.poster = loader.load(p.poster, (t) => { done(); t.colorSpace = THREE.SRGBColorSpace; if (!card.video || card.video.paused) { card.mat.uniforms.u_map.value = t; card.mat.uniforms.u_mapSize.value.set((t.image as any).width, (t.image as any).height) } }, undefined, done)
     if (p.depth) loader.load(p.depth, (t) => { card.mat.uniforms.u_depth.value = t; card.mat.uniforms.u_hasDepth.value = 1 })
     const v = document.createElement('video')
-    v.src = p.media; v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'none'; v.crossOrigin = 'anonymous'
+    // PERF HOOK (Shifat 10:21Z: lower texture res on phones): phones play a 640×360 encode of the reel (-m.mp4): the
+    // per-frame video→texture upload is 2.25x smaller and the card is ~400 device px wide there anyway
+    v.src = settings.TIER === 'low' ? p.media.replace(/\.mp4$/, '-m.mp4') : p.media; v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'none'; v.crossOrigin = 'anonymous'
     v.setAttribute('aria-hidden', 'true')
     card.video = v
     card.vtex = new THREE.VideoTexture(v); card.vtex.colorSpace = THREE.SRGBColorSpace

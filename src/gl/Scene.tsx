@@ -19,6 +19,9 @@ import { BLUE_NOISE_URL } from '../content/bluenoise'
 import { htmlRender } from './html/htmlRender'
 import { preload, warmCompile } from '../services/preload'
 import { clip, BLOCKS } from './systems/clip'
+import { quality, paintState } from './quality' // PERF HOOK
+import { diveRays } from './stages/dive/diveState' // PERF HOOK
+import { input } from '../services/input' // PERF HOOK
 
 // PRELOAD: code-split per scene. The hero is in this chunk; each later stage is its own chunk, mounted and
 // shader-warmed when its block enters the ±1 window around the current block (LaterStages below).
@@ -45,7 +48,8 @@ function Renderer() {
 
   useEffect(() => {
     // keep the total-pixel cap as the window changes (ultrawide / 4K / external monitor)
-    const want = capDpr(size.width, size.height)
+    // PERF HOOK: the governor's DPR step (≤ the tier cap and the total-pixel cap)
+    const want = quality.dprFor(size.width, size.height)
     if (Math.abs(want - gl.getPixelRatio()) > 0.01) { setDpr(want); return }
     const dpr = gl.getPixelRatio()
     props.dpr = dpr
@@ -55,6 +59,9 @@ function Renderer() {
     shared.u_resolution.value.set(props.renderW, props.renderH)
     ufx.resize(size.width, size.height)
   }, [size, gl, sys, setDpr, storeDpr])
+
+  // PERF HOOK: a governor step changes the DPR; the effect above re-sizes the paint, the chain and the uniforms
+  useEffect(() => quality.on(() => setDpr(quality.dprFor(size.width, size.height))), [size, setDpr])
 
   useEffect(() => {
     // blue noise (generated offline with void-and-cluster, CC0 by construction)
@@ -67,7 +74,9 @@ function Renderer() {
     // The frame loop holds until they are linked, so no frame blocks on a link and the counter never freezes.
     const rt = sys.chain.composer.inputBuffer
     let n = 0
-    const done = () => { if (++n === 2) engine.warm = true }
+    // PERF HOOK: once the hero is linked, one curtain-hidden frame runs every post pass this tier can use (clip
+    // composite, god rays, trail, SMAA/FXAA), so none of them links at its first boundary mid-scroll
+    const done = () => { if (++n === 2) { engine.warm = true; sys.chain.warmAll = true } }
     taskManager.addAsync(() => warmCompile(gl, scene, camera, scene, rt).then(done))
     taskManager.addAsync(() => warmCompile(gl, ufx.under, ufx.camera, ufx.under, rt).then(done))
     setTimeout(() => { engine.warm = true }, 8000) // never hold the loop forever (a driver that never reports)
@@ -75,13 +84,27 @@ function Renderer() {
     engine.ready = true
   }, [gl, scene, camera, sys])
 
+  const paintIdle = useRef({ last: 0, asleep: false }) // PERF HOOK
   useFrame(() => {
     const dt = props.dt
     shared.u_time.value = props.time
     shared.u_dt.value = dt
     shared.u_blueNoiseOffset.value.set(Math.random(), Math.random())
     pool.update(camera, dt)
-    sys.paint.update(dt)       // paint renders before the scene: distortion and scene shaders see this frame
+    // PERF HOOK: the trail sim sleeps when nothing paints. On phones it only paints while a finger moves (or the page
+    // scrolls), so most frames ran the sim passes + a 9-tap full-screen pass on an empty texture. Every weight reaches
+    // exactly 0 within ~70 frames of the last stroke (8-bit floor), so after 120 frames (~2 s) with no input the targets
+    // are cleared to rest and both stop; the first move wakes them with no stray streak. __paintSleep: QA override.
+    {
+      const pi = paintIdle.current
+      if (props.scrollDelta !== 0 || input.hadMoved || input.isDown) pi.last = props.frame
+      const asleep = props.frame - pi.last > ((window as any).__paintSleep ?? 120)
+      if (asleep !== pi.asleep) {
+        pi.asleep = asleep; paintState.asleep = asleep
+        if (asleep) sys.paint.clear(); else (sys.paint as any).started = false
+      }
+      if (!asleep) sys.paint.update(dt)       // paint renders before the scene: distortion and scene shaders see this frame
+    }
     { const n = (window as any).__rippleSteps ?? 1; for (let i = 0; i < n; i++) sys.ripple.update(dt) }  // __rippleSteps: QA on slow remote GPUs
     const bg = props.look.bg
     ;(scene.background as THREE.Color).copy(bg)
@@ -149,6 +172,8 @@ function Warm({ name, children }: { name: string; children: ReactNode }) {
     const g = ref.current, rt = engine.chain?.composer.inputBuffer ?? null
     if (!g) return
     const t0 = performance.now()
+    // PERF HOOK: the dive's god-ray mask is its own scene (not under this group); warm it with the stage
+    if (name === 'dive' && diveRays.scene) void warmCompile(gl, diveRays.scene, camera, diveRays.scene, rt)
     warmCompile(gl, g, camera, scene, rt).then(() => {
       ;(window as any).__stages = { ...((window as any).__stages || {}), [name]: Math.round(performance.now() - t0) }
     })

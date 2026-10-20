@@ -52,9 +52,11 @@ type U = ReturnType<typeof makeUniforms>
 // ================================================================================================ grass
 function buildFluffyGrass(o: FoliageOptions, U: U) {
   const tier: Tier = o.low ? 'low' : o.tier
-  const count = tier === 'high' ? 100000 : tier === 'mid' ? 45000 : 8000
-  const segs = tier === 'high' ? 5 : 3
-  const range = tier === 'high' ? 30 : tier === 'mid' ? 22 : 18
+  // PERF HOOK (Shifat 10:21Z: same object count on every tier): every tier plants the same 100k blades over the same
+  // field with the same blade width; only the blade's geometry gets cheaper (5 / 3 / 2 segments = 27 / 15 / 9 verts)
+  const count = 100000
+  const segs = tier === 'high' ? 5 : tier === 'mid' ? 3 : 2
+  const range = 30
   // the blade: a tapered strip with a rounded tip (x across -0.5..0.5, y 0..1)
   const v: number[] = []
   const wAt = (y: number) => Math.pow(1 - y, 0.75) * (0.9 + 0.1 * Math.sin(y * 3))
@@ -69,7 +71,7 @@ function buildFluffyGrass(o: FoliageOptions, U: U) {
   const r = rng(1311)
   // the landing camera sits around (-0.6, 1, 7.4) looking down -z at the clearing: fill that wedge, denser near
   const camX = -0.6, camZ = 7.6, spread = o.portrait ? 0.36 : 0.72
-  const widthScale = tier === 'high' ? 1.15 : tier === 'mid' ? 1.6 : 2.1
+  const widthScale = 1.15 // PERF HOOK: one blade width for every tier (the count no longer differs)
   let i = 0
   while (i < count) {
     // one tuft (clump) of blades
@@ -273,14 +275,10 @@ function layout(o: FoliageOptions): Spot[] {
     add(-7.4, 1.6, 2.35, 'round'); add(-9.9, -1.8, 2.2, 'pine'); add(-6.2, -4.6, 1.6, 'round')
     add(8.4, 0.2, 2.15, 'round'); add(10.6, -3.6, 2.3, 'pine'); add(6.9, -6.8, 1.5, 'round')
   }
-  if (o.low) {
-    cluster(-14, -13, 3.5, 3, 1.4, 1.8); cluster(12.5, -11, 3, 3, 1.3, 1.7)
-    cluster(-30, -40, 7, 4, 1.5, 2.0, 0.5); cluster(27, -44, 8, 4, 1.5, 2.0, 0.5); cluster(-3, -64, 9, 3, 1.7, 2.1, 0.6)
-  } else {
-    cluster(-14, -13, 4, 5, 1.3, 1.8); cluster(12.5, -11, 3.5, 4, 1.2, 1.7); cluster(-8.5, -24, 3, 3, 1.1, 1.5)
-    cluster(-30, -40, 8, 8, 1.4, 2.0, 0.5); cluster(27, -44, 9, 8, 1.4, 2.0, 0.5); cluster(-3, -64, 10, 6, 1.6, 2.1, 0.6)
-    cluster(50, -70, 12, 6, 1.7, 2.3, 0.6); cluster(-55, -66, 12, 6, 1.7, 2.3, 0.6)
-  }
+  // PERF HOOK (same object count on every tier): phones plant the full tree set too; their crowns are cheaper (q below)
+  cluster(-14, -13, 4, 5, 1.3, 1.8); cluster(12.5, -11, 3.5, 4, 1.2, 1.7); cluster(-8.5, -24, 3, 3, 1.1, 1.5)
+  cluster(-30, -40, 8, 8, 1.4, 2.0, 0.5); cluster(27, -44, 9, 8, 1.4, 2.0, 0.5); cluster(-3, -64, 10, 6, 1.6, 2.1, 0.6)
+  cluster(50, -70, 12, 6, 1.7, 2.3, 0.6); cluster(-55, -66, 12, 6, 1.7, 2.3, 0.6)
   // keep the sky gap behind the crewmate clear
   return S.filter((t) => !(t.z < -2 && t.z > -90 && Math.abs(t.x - t.z * 0.05) < 3.4 + Math.max(0, -t.z - 20) * 0.1))
 }

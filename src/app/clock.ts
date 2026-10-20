@@ -9,6 +9,7 @@ import { clip } from '../gl/systems/clip'
 import { audio } from '../services/audio'
 import { settings } from '../services/settings'
 import { engine } from '../gl/engine'
+import { quality, stageWindow } from '../gl/quality' // PERF HOOK
 
 /**
  * The one clock (handbook ch.2 / ch.11.3). GSAP's ticker owns requestAnimationFrame; every system is
@@ -41,6 +42,10 @@ export function startClock() {
     // frame loop holds, so no frame blocks on a shader link and the counter keeps moving
     if (settings.USE_GL && (!engine.canvas || engine.warm)) advance(props.time)
     input.postUpdate()
+    // PERF HOOK: the governor judges real frame deltas once the intro is done and the page is visible
+    quality.judging = props.introDone && !props.overlayOpen && document.visibilityState === 'visible' && engine.warm
+    quality.frame(ms, now)
+    stageWindow.step()
     // rolling FPS probe for QA (window.__fps)
     fpsSamples.push(deltaMs); if (fpsSamples.length > 120) fpsSamples.shift()
     if (props.frame % 30 === 0) (window as any).__fps = Math.round(1000 / (fpsSamples.reduce((a, b) => a + b, 0) / fpsSamples.length))

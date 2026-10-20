@@ -52,7 +52,10 @@ export function JourneyStage(): JSX.Element {
   const group = useRef<THREE.Group>(null!)
   useEffect(() => {
     // warm the inner world's programs up front (its lights live in its own scene, so they compile exactly once)
-    try { gl.compile(S.inner, S.icam) } catch { /* compile is a warm-up only */ }
+    // PERF HOOK: compiled with the tablet target bound — the inner world only ever draws into it (linear, no tone
+    // mapping), and a compile against the screen built variants it never used, so it compiled again on first view
+    const prev = gl.getRenderTarget()
+    try { gl.setRenderTarget(S.rt); gl.compile(S.inner, S.icam) } catch { /* compile is a warm-up only */ } finally { gl.setRenderTarget(prev) }
     return () => S.dispose()
   }, [S, gl])
 
@@ -144,7 +147,7 @@ export function JourneyStage(): JSX.Element {
     const top = S.tmp2.set(B.crew.x, B.crew.y + CREW_HEIGHT, B.crew.z).project(S.bcam)
     proj.project(S.bcam)
     const start = { x: proj.x * S.sw / 2, y: proj.y * S.sh / 2, k: Math.max(0.6, (top.y - proj.y) * S.sh / 2 / (CREW_HEIGHT - CREW_CENTER_Y)) }
-    const O = outer(p, S.O, fit, start, SCREEN_Z, Math.max(...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sy]) => Math.hypot(sx * S.sw / 2 - start.x, sy * S.sh / 2 - start.y))))
+    const O = outer(p, S.O, fit, start, SCREEN_Z, farCorner(S.sw, S.sh, start.x, start.y))
     journey.pose.pos.copy(O.camPos).add(JOURNEY_ORIGIN)
     journey.pose.target.copy(O.camTarget).add(JOURNEY_ORIGIN)
     journey.pose.fov = O.fov
@@ -175,7 +178,7 @@ export function JourneyStage(): JSX.Element {
       S.crewOut.update({ pos: S.tmp, yaw: O.yaw, pitch: O.pitch, roll: O.roll, walk: 0, phase: 0, float: O.float, squash: 0, scale: O.crewScale }, dt, time, snap || p - T.BREAK < 0.004)
     }
     // ---- the glass: cracks, then the burst (built for the current impact point; rebuilt only if a resize moves it)
-    const far = Math.max(...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sy]) => Math.hypot(sx * S.sw / 2 - start.x, sy * S.sh / 2 - start.y)))
+    const far = farCorner(S.sw, S.sh, start.x, start.y)
     S.shards.visible = O.shardsVisible
     if (O.shardsVisible || p > 0.7) {
       const key = `${start.x.toFixed(1)},${start.y.toFixed(1)},${start.k.toFixed(1)}`
@@ -213,12 +216,18 @@ export function JourneyStage(): JSX.Element {
   )
 }
 
+/** PERF HOOK: the furthest screen corner from a point, without the per-frame array spread/map garbage */
+function farCorner(sw: number, sh: number, x: number, y: number) {
+  const hx = sw / 2, hy = sh / 2
+  return Math.max(Math.hypot(-hx - x, -hy - y), Math.hypot(hx - x, -hy - y), Math.hypot(-hx - x, hy - y), Math.hypot(hx - x, hy - y))
+}
+
 type Built = ReturnType<typeof build>
 function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   const sw = portrait ? 8.8 : 12.8, sh = portrait ? 12.8 : 8.8
   const long = low ? 512 : 1024 // the long side; the screen's aspect sets the other
   const rt = new THREE.WebGLRenderTarget(portrait ? Math.round(long * sw / sh) : long, portrait ? long : Math.round(long * sh / sw), {
-    type: THREE.HalfFloatType, samples: low ? 0 : 4, depthBuffer: true, generateMipmaps: false,
+    type: THREE.HalfFloatType, samples: 0 /* PERF HOOK: no MSAA anywhere (SMAA on the final frame covers the tablet) */, depthBuffer: true, generateMipmaps: false,
   })
   const envs = makeEnvs(gl)
 

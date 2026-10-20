@@ -7,6 +7,7 @@ import type { HeroPhysics } from '../stages/hero/HeroPhysics'
 const ray = new THREE.Raycaster()
 const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
 const hit = new THREE.Vector3()
+const _ndc = new THREE.Vector2() // PERF HOOK
 export const pool = {
   size: 22,
   physics: null as HeroPhysics | null,
@@ -15,7 +16,7 @@ export const pool = {
   update(camera: THREE.Camera, dt: number) {
     const p = this.pointer
     const usable = input.everMoved && camera.position.y > 0.2 && props.look.dive < 0.5 && !props.overlayOpen
-    ray.setFromCamera(new THREE.Vector2(input.mouseXY.x, input.mouseXY.y), camera)
+    ray.setFromCamera(_ndc.set(input.mouseXY.x, input.mouseXY.y), camera)  // PERF HOOK: scratch vector
     const ok = usable && ray.ray.intersectPlane(plane, hit)
     if (ok) {
       const nx = hit.x, nz = hit.z

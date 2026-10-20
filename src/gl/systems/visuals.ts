@@ -12,10 +12,12 @@ import { clip, BLOCKS } from './clip'
 export type Pose = { pos: THREE.Vector3; target: THREE.Vector3; fov: number }
 export type StageDef = { name: string; pose: () => Pose; look: Look; weight: number; ew?: number }
 
+const _pos = new THREE.Vector3(), _tgt = new THREE.Vector3() // PERF HOOK
 class Visuals {
   stages = new Map<string, StageDef>()
   private ownerKey = -1
   private tones: Record<number, string> = {}
+  private acc?: Look; private keys?: (keyof Look)[] // PERF HOOK
   register(name: string, pose: () => Pose, look: Partial<Record<keyof Look, any>>) {
     const s = { name, pose, look: makeLook(look), weight: 0 }
     this.stages.set(name, s); return s
@@ -35,10 +37,11 @@ class Visuals {
     for (const s of this.stages.values()) if (s.ew! > bw) { bw = s.ew!; best = s.name }
     props.stage = best
     if (total <= 0) return out
-    const pos = new THREE.Vector3(), tgt = new THREE.Vector3(); let fov = 0
-    const L = props.look, acc = makeLook({ bg: new THREE.Color(0, 0, 0), fogColor: new THREE.Color(0, 0, 0), tint: new THREE.Color(0, 0, 0) })
-    const keys = Object.keys(acc) as (keyof Look)[]
-    keys.forEach((k) => { if (typeof (acc as any)[k] === 'number') (acc as any)[k] = 0 })
+    // PERF HOOK: scratch accumulators (this ran 2 Vector3 + a Look + 3 Colors + a keys array per frame)
+    const pos = _pos.set(0, 0, 0), tgt = _tgt.set(0, 0, 0); let fov = 0
+    const L = props.look, acc = this.acc ??= makeLook({ bg: new THREE.Color(0, 0, 0), fogColor: new THREE.Color(0, 0, 0), tint: new THREE.Color(0, 0, 0) })
+    const keys = this.keys ??= Object.keys(acc) as (keyof Look)[]
+    for (const k of keys) { const v = (acc as any)[k]; if (typeof v === 'number') (acc as any)[k] = 0; else if (v instanceof THREE.Color) v.setRGB(0, 0, 0) }
     // poses blend only between neighbouring stages; a far-away stage (the journey) is a cut
     const bestPose = this.stages.get(best)!.pose()
     let pw = 0

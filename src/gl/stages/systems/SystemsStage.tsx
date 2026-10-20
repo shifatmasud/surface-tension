@@ -10,6 +10,8 @@ import { clamp, damp } from '../../../core/math'
 import { slab } from './geometry'
 import { createFloor, createBackdrop } from './shaders'
 import { sys, SYSTEMS_ORIGIN, TOKENS, type ControlId } from './state'
+import { quality } from '../../quality' // PERF HOOK
+const _cc = new THREE.Color(), _white = new THREE.Color(1, 1, 1) // PERF HOOK: scratch colours
 
 /** The backdrop + floor live on this layer too, so the glass can refract them from one cheap buffer. */
 export const SYS_LAYER = 5
@@ -55,7 +57,10 @@ export function SystemsStage() {
     return { rt, cam, scale: settings.TIER === 'high' ? 0.5 : 0.35 }
   }, [])
   useEffect(() => {
-    buf.rt.setSize(Math.max(4, Math.floor(size.width * props.dpr * buf.scale)), Math.max(4, Math.floor(size.height * props.dpr * buf.scale)))
+    // PERF HOOK: follows the governor (DPR step × render-target scale)
+    const fit = () => { const s = quality.rt(buf.scale), d = quality.dprFor(size.width, size.height); buf.rt.setSize(Math.max(4, Math.floor(size.width * d * s)), Math.max(4, Math.floor(size.height * d * s))) }
+    fit()
+    return quality.on(fit)
   }, [size, buf])
 
   const mats = useMemo(() => {
@@ -68,6 +73,14 @@ export function SystemsStage() {
     // cheap glass for phones: no transmission pass at all
     const lowMid = new THREE.MeshPhysicalMaterial({ color: '#f4f6fa', roughness: 0.55, transparent: true, opacity: 0.78, clearcoat: 1, clearcoatRoughness: 0.4 })
     const lowBase = new THREE.MeshPhysicalMaterial({ color: '#9db8ff', roughness: 0.15, transparent: true, opacity: 0.55, clearcoat: 1, clearcoatRoughness: 0.05, iridescence: 0.4 })
+    // PERF HOOK (his skill §3, "turn off clearcoat"): on phones the clearcoat/sheen/iridescence lobes go (each is a
+    // second specular evaluation per pixel); a slightly lower roughness keeps the glossy read of the pucks
+    if (settings.TIER === 'low') {
+      for (const m of [top, white, track, accent, grey, ...chips, lowMid, lowBase]) {
+        if (m.clearcoat > 0) { m.roughness *= 0.7; m.clearcoat = 0 }
+        m.sheen = 0; m.iridescence = 0
+      }
+    }
     return { top, white, track, accent, grey, chips, lowMid, lowBase }
   }, [])
   const glass = useRef<{ mid: any; base: any }>({ mid: null, base: null })
@@ -175,8 +188,8 @@ export function SystemsStage() {
     mats.top.color.copy(st.accent).multiplyScalar(0.62); mats.top.emissive.copy(st.accent); mats.top.emissiveIntensity = 0.02 + 0.17 * light
     mats.accent.color.copy(st.accent); mats.accent.emissive.copy(st.accent); mats.accent.emissiveIntensity = 0.05 + 0.2 * light
     mats.top.envMapIntensity = 0.45 + 0.4 * light
-    if (glass.current.base) { glass.current.base.attenuationColor?.copy?.(st.tmpC.copy(st.accent).lerp(new THREE.Color(1, 1, 1), 0.35)); glass.current.base.color?.copy?.(st.tmpC.copy(st.accent).lerp(new THREE.Color(1, 1, 1), 0.72)) }
-    if (!hi) mats.lowBase.color.copy(st.accent).lerp(new THREE.Color(1, 1, 1), 0.45)
+    if (glass.current.base) { glass.current.base.attenuationColor?.copy?.(st.tmpC.copy(st.accent).lerp(_white, 0.35)); glass.current.base.color?.copy?.(st.tmpC.copy(st.accent).lerp(_white, 0.72)) }
+    if (!hi) mats.lowBase.color.copy(st.accent).lerp(_white, 0.45)
     floor.uniforms.uAccent.value.copy(st.accent)
     floor.uniforms.uAccent2.value.copy(st.accent2)
     floor.uniforms.uLight.value = light
@@ -227,7 +240,7 @@ export function SystemsStage() {
       const bc = buf.cam
       bc.copy(c, false); bc.layers.set(SYS_LAYER)
       bc.updateMatrixWorld()
-      const prevRT = gl.getRenderTarget(), prevA = gl.getClearAlpha(), cc = new THREE.Color(); gl.getClearColor(cc)
+      const prevRT = gl.getRenderTarget(), prevA = gl.getClearAlpha(), cc = _cc; gl.getClearColor(cc)  // PERF HOOK: scratch colour
       const bg = scene.background
       scene.background = null
       gl.setRenderTarget(buf.rt); gl.setClearColor(props.look.bg, 1); gl.clear(true, true, false)

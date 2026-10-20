@@ -13,6 +13,7 @@ import { input } from '../../../services/input'
 import { Spring } from '../../../core/spring'
 import { engine } from '../../engine'
 import { dive } from '../dive/diveState'
+import { quality } from '../../quality' // PERF HOOK
 
 export const GEM_LAYER = 2
 export const gem = { pos: new THREE.Vector3(0, 0.45, 0), radius: 0.5, touch: 0 }
@@ -72,7 +73,10 @@ export function HeroStage() {
     floor.rotation.x = -Math.PI / 2; floor.position.y = -0.9; add(floor)
     const box = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 1.4), soft)
     box.position.set(-0.6, 3.2, -0.8); box.lookAt(0, 0, 0); add(box)
-    g.visible = settings.TIER !== 'low'
+    // PERF HOOK (same objects on every tier): the env-capture-only studio cards exist on phones too. They are drawn
+    // only into the gem's env capture (first 3 frames on phones), so they cost nothing per frame and the phone stone
+    // now gets the same dark/bright facet tiling as desktop.
+    g.visible = true
     return g
   }, [])
   const refl = useMemo(() => {
@@ -84,13 +88,18 @@ export function HeroStage() {
     return { rt, cam, proxy, scale: s, bias: new THREE.Matrix4().set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1) }
   }, [hi])
   useEffect(() => {
-    refl.rt.setSize(Math.max(2, Math.floor(size.width * props.dpr * refl.scale)), Math.max(2, Math.floor(size.height * props.dpr * refl.scale)))
+    // PERF HOOK: the reflection target follows the governor (DPR step × its render-target scale)
+    const fit = () => { const s = quality.rt(refl.scale), d = quality.dprFor(size.width, size.height); refl.rt.setSize(Math.max(2, Math.floor(size.width * d * s)), Math.max(2, Math.floor(size.height * d * s))) }
+    fit()
+    return quality.on(fit)
   }, [size, refl])
   useEffect(() => { wu.u_reflTex.value = refl.rt.texture; wu.u_reflOn.value = 1 }, [refl, wu])
 
   const st = useMemo(() => ({
     tiltX: new Spring(0, 1.1, 0.55, 0), tiltZ: new Spring(0, 1.1, 0.55, 0), lift: new Spring(0, 0.9, 0.45, 0),
     spin: 0, lastTouch: 0, phase: 0,
+    // PERF HOOK: scratch objects (no per-frame allocation → no GC pauses mid-scroll)
+    look: new THREE.Vector3(), cc: new THREE.Color(),
   }), [])
 
   useFrame((_, dt) => {
@@ -128,15 +137,15 @@ export function HeroStage() {
     const c = camera as THREE.PerspectiveCamera
     const rc = refl.cam
     rc.copy(c, false); rc.layers.set(GEM_LAYER)
-    const p = c.position, look = new THREE.Vector3(0, 0, -1).applyQuaternion(c.quaternion).add(p)
+    const p = c.position, look = st.look.set(0, 0, -1).applyQuaternion(c.quaternion).add(p)
     rc.position.set(p.x, -p.y, p.z)
-    rc.up.set(0, -1, 0).applyQuaternion(new THREE.Quaternion()).set(0, -1, 0)
+    rc.up.set(0, -1, 0)
     rc.lookAt(look.x, -look.y, look.z)
     rc.updateMatrixWorld(); rc.projectionMatrix.copy(c.projectionMatrix)
     wu.u_reflMatrix.value.copy(refl.bias).multiply(rc.projectionMatrix).multiply(rc.matrixWorldInverse)
     const mat = m.material as THREE.Material
     m.material = refl.proxy
-    const prevRT = gl.getRenderTarget(), prevClear = gl.getClearAlpha(), cc = new THREE.Color(); gl.getClearColor(cc)
+    const prevRT = gl.getRenderTarget(), prevClear = gl.getClearAlpha(), cc = st.cc; gl.getClearColor(cc)
     gl.setRenderTarget(refl.rt); gl.setClearColor(0x000000, 0); gl.clear(true, true, false)
     const bg = scene.background; scene.background = null
     gl.render(scene, rc)

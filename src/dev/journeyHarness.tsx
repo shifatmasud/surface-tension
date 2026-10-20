@@ -67,7 +67,7 @@ createRoot(document.getElementById('root')!).render(
   <Canvas
     dpr={1}
     frameloop={anim ? 'always' : 'never'}
-    gl={{ antialias: true, alpha: false, powerPreference: 'high-performance', stencil: false, preserveDrawingBuffer: true }}
+    gl={{ antialias: false /* PERF HOOK: no MSAA anywhere */, alpha: false, powerPreference: 'high-performance', stencil: false, preserveDrawingBuffer: true }}
     camera={{ fov: 35, near: 0.1, far: 200, position: [200, 0, 12] }}
     onCreated={({ gl, scene }) => {
       gl.toneMapping = THREE.ACESFilmicToneMapping

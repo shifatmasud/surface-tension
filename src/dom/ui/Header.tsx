@@ -17,13 +17,15 @@ function Wave({ on }: { on: boolean }) {
   useEffect(() => {
     const c = ref.current!; const ctx = c.getContext('2d')!
     const dpr = Math.min(devicePixelRatio, 2); c.width = 22 * dpr; c.height = 14 * dpr; ctx.scale(dpr, dpr)
-    let raf = 0, amp = 0
+    let raf = 0, amp = 0, n = 0, color = getComputedStyle(c).color
     const data = new Uint8Array(32)
     const draw = (t: number) => {
       amp += ((on ? 1 : 0.12) - amp) * 0.08
       ctx.clearRect(0, 0, 22, 14)
       if (audio.analyser && on) audio.analyser.getByteFrequencyData(data)
-      ctx.lineWidth = 1.4; ctx.lineCap = 'round'; ctx.strokeStyle = getComputedStyle(c).color
+      // PERF HOOK: getComputedStyle forced a style recalculation every frame; the colour is re-read every 8th frame
+      if ((++n & 7) === 0) color = getComputedStyle(c).color
+      ctx.lineWidth = 1.4; ctx.lineCap = 'round'; ctx.strokeStyle = color
       ctx.beginPath()
       for (let x = 0; x <= 22; x += 1) {
         const band = data[(x % 16) + 2] / 255
