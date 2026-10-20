@@ -10,6 +10,7 @@ import { Crewmate, CREW_HEIGHT, CREW_CENTER_Y, crewMaterials } from './crewmate'
 import { makeEnvs } from './env'
 import { buildForest, buildShadows, longShadowGeometry, longShadowMaterial } from './forest'
 import { buildGrass, buildSunFan, buildMist, buildMotes } from './forestFx'
+import { buildFoliage } from './foliage' // FOLIAGE HOOK (foliage helper): fluffy grass + trees
 import { skyMaterial, starMaterial, glintStarMaterial, screenMaterial, backdropMaterial, SUN_DIR } from './shaders'
 import { buildShatterGeometry, shatterMaterial, buildGlints } from './shatter'
 import { inner, outer, T, type Inner, type Outer } from './timeline'
@@ -101,6 +102,7 @@ export function JourneyStage(): JSX.Element {
     for (const m of S.mist.mats) { m.uniforms.u_time.value = time; m.uniforms.u_opacity.value = land }
     S.mist.group.visible = land > 0.01
     S.treeRim.value = 0.3 * ss(0.3, 0.6, I.atmos)
+    S.foliage.update(time, S.treeRim.value, I.crew) // FOLIAGE HOOK (foliage helper)
     S.motes.material.uniforms.u_time.value = time; S.motes.material.uniforms.u_opacity.value = land
     S.motes.points.visible = land > 0.01
     const h = Math.max(0, I.crew.y)
@@ -300,7 +302,9 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   const { group: forest, spots } = buildForest(low, forestMat, groundMat)
   const treeShadows = buildShadows(spots, SUN_DIR)
   forest.add(treeShadows.mesh)
-  const grass = buildGrass(low, settings.TIER as 'low' | 'mid' | 'high', SUN_DIR)
+  // FOLIAGE HOOK (foliage helper): fluffy grass, trees and meadow floor replace buildGrass and the old trees/shadows
+  const foliage = buildFoliage({ low, tier: settings.TIER as 'low' | 'mid' | 'high', portrait, sunDir: SUN_DIR, forest, shadows: treeShadows.mesh })
+  const grass = foliage.grass
   const fan = buildSunFan(SUN_DIR)
   const mist = buildMist(low)
   const motes = buildMotes(low, Math.min(gl.getPixelRatio(), 2) * (rt.width / 1024), SUN_DIR)
@@ -363,7 +367,7 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
     ;[innerScene, outerG].forEach((root) => root.traverse((o: any) => { if (o.geometry && !keep.has(o.geometry)) o.geometry.dispose?.(); if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m: any) => m.dispose()) }))
   }
   return {
-    sw, sh, rt, envs, inner: innerScene, grass, fan, mist, motes, treeRim, icam, bcam, sky, skyMat, stars, starMat, glintMat, forest, crewIn, innerMats, shadow, shadowMat, hemi, sun, rim, lightRig,
+    sw, sh, rt, envs, inner: innerScene, grass, foliage, fan, mist, motes, treeRim, icam, bcam, sky, skyMat, stars, starMat, glintMat, forest, crewIn, innerMats, shadow, shadowMat, hemi, sun, rim, lightRig,
     outer: outerG, backdrop, backdropMat, screenMat, crewOut, shards, shardMat, shardKey: '', tier, glints, c, I, IB, O, lastP: -1,
     tmp: new THREE.Vector3(), tmp2: new THREE.Vector3(), o3: new THREE.Object3D(), dispose,
   }

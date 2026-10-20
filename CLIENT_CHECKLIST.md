@@ -115,7 +115,7 @@ Tick an item only when it runs on the live site and was checked visually.
 - [ ] Scene 1 (hero + projects): the DIAMOND is the hero; project cards slide over the diamond underwater
 - [ ] Shade DS: the system figure is the hero
 - [ ] Crewmate scene: the crewmate is the hero
-- [ ] Fluffier, better grass & trees in the crewmate scene
+- [x] Fluffier, better grass & trees in the crewmate scene — live 09:59Z index-DNm_eG7U.js (foliage helper 6a97ca2b), real-GPU frames 1440/390
 ## Also 08:51–08:52Z
 - [ ] Preloader black, exits like a curtain (m:520317ca)
 - [ ] Scroll up & down both smooth; every section stays (m:ea07bf4d)
