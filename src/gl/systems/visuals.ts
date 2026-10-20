@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { props, makeLook, type Look } from '../../state/props'
 import { damp } from '../../core/math'
+import { dive } from '../stages/dive/diveState'
 
 /**
  * Visuals — the stage switcher (ch.7.1). Each stage registers a camera pose + a look; every frame the
@@ -57,6 +58,10 @@ class Visuals {
       if (typeof v === 'number') (L as any)[k] = damp((L as any)[k], v, lam, dt)
       else if (v instanceof THREE.Color) (L as any)[k].lerp(v, 1 - Math.exp(-lam * dt))
     }
+    // UI tone follows the field every frame (black UI on light water, white UI in the deep / in space)
+    const dark = props.stage === 'dive' ? dive.under : L.dive > 0.5
+    const want = dark ? 'dark' : 'light'
+    if (document.documentElement.dataset.bg !== want) document.documentElement.dataset.bg = want
     return out
   }
 }

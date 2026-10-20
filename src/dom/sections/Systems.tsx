@@ -39,7 +39,7 @@ export function Systems() {
       pose.fov = vfovFor(mix(26, 33, pr), 16, 52)
       // ultrawide (21:9): the short frame pushed the opened stack against the top edge — pull back and sit it lower
       const wide = Math.min(1, Math.max(0, (a - 1.9) / 0.5)) * (1 - Math.min(1, pr * 1.8))
-      const dist = mix(14.2, 9.8, pr) + sys.openVis * mix(2.6, 2.0, pr) - ex * 1.4 + wide * 1.0
+      const dist = mix(14.2, 9.8, pr) + sys.openVis * mix(6.2, 2.0, pr) - ex * 1.4 + wide * 1.0  // the opened staircase is taller: pull back so the top tile keeps headroom
       dir.set(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el))
       right.set(Math.cos(az), 0, -Math.sin(az))
       up.crossVectors(dir, right).normalize()
@@ -47,7 +47,7 @@ export function Systems() {
       const th = Math.tan((pose.fov * Math.PI) / 360) * dist, tw = th * a
       const sx = mix(a > 2 ? 0.26 : 0.18, 0, Math.min(1, pr * 1.8)), sy = mix(0.29 - wide * 0.2, 0.36, pr)  // tablets centre the star like phones
       pose.target.copy(C).addScaledVector(right, -sx * tw).addScaledVector(up, -sy * th)
-      pose.target.y += sys.openVis * 0.85 - ex * 0.35
+      pose.target.y += sys.openVis * mix(1.35, 0.85, pr) - ex * 0.35
       // scrolling out: the star leaves with the page instead of sitting still under the rising type
       pose.target.addScaledVector(up, -out * 2 * th)
       pose.pos.copy(pose.target).addScaledVector(dir, dist)

@@ -50,9 +50,7 @@ export function Dive() {
             pool.drop(x, z, 0.1 + Math.random() * 0.06, 0.02 + Math.random() * 0.015)
           }
         }
-        const dark = props.stage === 'dive' ? dive.under : props.look.dive > 0.5
-        const want = dark ? 'dark' : 'light'
-        if (document.documentElement.dataset.bg !== want) document.documentElement.dataset.bg = want
+        // UI tone (data-bg) is set every frame in visuals.resolve
         // the one display line: mask slide-up in, slide-up out
         const inn = ss(0.405, 0.455, dive.u), out = ss(0.555, 0.6, dive.u)
         const y = (1 - inn) * 105 - out * 105

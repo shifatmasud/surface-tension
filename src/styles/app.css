@@ -165,10 +165,10 @@ html.no-gl .poster { position: absolute; inset: 0; background-size: cover; backg
 html.lab-gl .lab .card__dom { opacity: 0; }
 .card:focus-visible::after { content: ''; position: absolute; left: 0; right: 0; bottom: -14px; height: 2px; background: var(--c-black); }
 .lab__foot { display: grid; grid-template-columns: repeat(var(--grid-cols), minmax(0, 1fr)); column-gap: var(--grid-gap); align-items: last baseline; padding: 0; }
-.lab__names { grid-column: 1 / span 9; display: grid; overflow: visible; clip-path: inset(0 -50vw 0 -50vw); line-height: .9; padding-bottom: .06em; } /* vertical mask only: the longest name ("Fluid Matter") may bleed into the gutter instead of being cut */
-.lab__name { grid-area: 1 / 1; font-size: var(--fs-display); letter-spacing: -0.065em; margin-left: -0.055em; color: var(--c-black); white-space: nowrap; transform: translateY(105%); transition: transform 1.1s var(--ease); }
+.lab__names { grid-column: 1 / span 9; display: grid; overflow: visible; clip-path: inset(0 -50vw 0 -50vw); line-height: .9; padding-bottom: calc(var(--fs-display) * .24); margin-bottom: calc(var(--fs-display) * -.18); } /* padding in display ems (this box's own em is body size), so descenders (g, y) clear the mask */ /* vertical mask only: the longest name ("Fluid Matter") may bleed into the gutter instead of being cut */
+.lab__name { grid-area: 1 / 1; font-size: var(--fs-display); letter-spacing: -0.065em; margin-left: -0.055em; color: var(--c-black); white-space: nowrap; transform: translateY(130%); transition: transform 1.1s var(--ease); }
 .lab__name.is-on { transform: none; }
-.lab__name.is-past { transform: translateY(-105%); }
+.lab__name.is-past { transform: translateY(-130%); }
 .lab__cap { grid-column: 10 / -1; margin: 0; font-size: var(--fs-small); line-height: 1.45; color: var(--c-black); max-width: 34ch; }
 .lab__cap span { color: var(--c-silver-3); }
 @media (max-width: 1000px) { .lab__names { grid-column: 1 / -1; } .lab__cap { grid-column: 4 / -1; margin-top: var(--s3); } }

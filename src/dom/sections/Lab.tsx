@@ -43,7 +43,11 @@ export function Lab() {
         // ancestor is positioned, which put the phone's first card ~90px off-centre at the section start)
         const r0 = first.getBoundingClientRect(), r1 = last.getBoundingClientRect()
         const c0 = r0.left + r0.width / 2 - applied, c1 = r1.left + r1.width / 2 - applied
-        const target = props.width / 2 - (c0 + (c1 - c0) * p)
+        // dwell: each card holds the centre for over half of its scroll and the track moves between them,
+        // so wherever the reader stops there is one centred star (never two half cards)
+        const nn = PROJECTS.length - 1, sIdx = p * nn, i0 = Math.min(nn - 1, Math.floor(sIdx)), fr = sIdx - i0
+        const tt = clamp((fr - 0.26) / 0.48), q = nn > 0 ? (i0 + tt * tt * (3 - 2 * tt)) / nn : 0
+        const target = props.width / 2 - (c0 + (c1 - c0) * q)
         x = primed ? damp(x, target, 8, dt) : target; primed = true
         el.style.transform = `translate3d(${x.toFixed(2)}px,0,0)`; applied = x
         props.labVel = (x - lastX) / Math.max(dt, 1e-3); lastX = x
