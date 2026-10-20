@@ -45,7 +45,7 @@ const LADDER: Record<string, number[]> = {
 const BOOST: Record<string, number[]> = {          // nearest first: BOOST[0] is level -1
   high: [1.75, 2.0],
   mid: [1.75, 2.0],
-  low: [1.5, 1.75, 2.0],
+  low: [1.5],                      // W20 (Shifat 22:27Z 'hero feels heavy on phone'): phones never go past 1.5
   none: [],
 }
 /** render-target scale per level (multiplies a stage's own base scale) and loop-count scale */
@@ -72,6 +72,13 @@ const SETTLE_MS = 250                // the frames right after a re-allocation (
 /** SHARP (eng review #25): ONE density ceiling for everything. The canvas (= the text layer, SharpText + the final
  *  upscale) never exceeds the device's own DPR (cap 3) nor ~9 Mpx of backing store; the scene never exceeds the text. */
 const CANVAS_PIXELS = 9.0e6
+/** W20 (Shifat 22:27Z on his phone: "Hero section feels heavy on phone but beautiful"): phones (tier low) render the
+ *  3D scene at no more than 1.5x and the canvas/text layer at no more than 2x, at rest too. Rest used to refine to the
+ *  native 3x (a 3x phone drew 4x the scene pixels of 1.5x and 2.25x the canvas pixels of 2x, every frame it sat still,
+ *  with the lake, the stone and the trail still animating). At the phone's viewing size 1.5x + SMAA reads the same;
+ *  text stays at 2x, the sharpest thing on screen. */
+const PHONE_SCENE_DPR = 1.5
+const PHONE_CANVAS_DPR = 2
 
 class Quality {
   readonly tier = tier
@@ -111,9 +118,11 @@ class Quality {
   stepAt(level: number) { return level < 0 ? this.boost[Math.min(this.boost.length, -level) - 1] : this.ladder[Math.min(this.maxLevel, level)] }
   /** the device's own density for this window: device DPR (cap 3) within the canvas pixel cap — the single ceiling */
   nativeFor(w: number, h: number) { return Math.max(1, Math.min(3, window.devicePixelRatio || 1, Math.sqrt(CANVAS_PIXELS / Math.max(1, w * h)))) }
-  private cap(w: number, h: number) { return Math.min(browser.dpr, this.nativeFor(w, h), Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h))) }
+  private cap(w: number, h: number) { return Math.min(browser.dpr, this.nativeFor(w, h), Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h)), tier === 'low' ? PHONE_SCENE_DPR : Infinity) }
   /** the rest target before the rest judge: native within 1.2x the scene pixel cap */
-  private restTarget(w: number, h: number) { return Math.min(this.nativeFor(w, h), Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h)) * 1.2) }
+  private restTarget(w: number, h: number) { return Math.min(this.nativeFor(w, h), Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h)) * 1.2, tier === 'low' ? PHONE_SCENE_DPR : Infinity) }
+  /** the canvas density a rest frame refines to: native, phones capped at PHONE_CANVAS_DPR */
+  private textCeil(w: number, h: number) { const n = this.nativeFor(w, h); return tier === 'low' ? Math.min(n, PHONE_CANVAS_DPR) : n }
   /** DPR for a window size: the level's step, clipped by the device DPR and the total-pixel cap, floored at 0.6.
    *  At rest: native (the device's own DPR, phones up to 3) within 1.2x the pixel cap, lowered by the rest judge.
    *  Never above the text density (eng review #25: text stays the sharpest thing on screen, at rest too). */
@@ -130,7 +139,8 @@ class Quality {
    *  still is as sharp as the screen. Desktop/tablet tiers: native always (≤ 2 on almost every desktop). */
   textDprFor(w: number, h: number, noRest = false) {
     const n = this.nativeFor(w, h)
-    if (tier !== 'low' || (this.rest && !noRest)) return n
+    if (tier !== 'low') return n
+    if (this.rest && !noRest) return this.textCeil(w, h)
     return Math.min(n, this.level >= this.maxLevel - 1 ? 1.5 : 2)
   }
   /** SHARP REST REFINEMENT (Shifat 15:39Z + the sharp lane): after ~300 ms with no scroll or pointer the canvas renders
@@ -171,7 +181,7 @@ class Quality {
     if (!this.rest && now - this.still > REST_AFTER_MS) {
       // nothing to refine: the moving DPR already is the rest target (native, or the pixel cap)
       const mv = this.dprFor(this.w, this.h, true)
-      if (Math.min(this.restTarget(this.w, this.h), this.restCap) <= mv + 0.01 && this.textDprFor(this.w, this.h, true) >= this.nativeFor(this.w, this.h) - 0.01) return
+      if (Math.min(this.restTarget(this.w, this.h), this.restCap) <= mv + 0.01 && this.textDprFor(this.w, this.h, true) >= this.textCeil(this.w, this.h) - 0.01) return
       this.setRest(true, now)
     }
   }

@@ -310,7 +310,10 @@ export function HeroStage() {
     // the first seconds and then every 90 frames in the hero on every tier (one cube pass, cheap at this rate)
     // and once the intro drops (the curtain lifts, the real hero frame starts) the env starts over: 3 captures, then every 20 frames
     if (props.introDrop && !env.dropped) { env.dropped = true; env.frame = 0 }
-    const reEnv = env.frame < 240 && env.frame % 20 === 0   // (the warm gate no-ops clear/viewport/mipmaps on its frames)
+    // W20 (phone hero 'feels heavy'): phones re-capture at 30, 90 and 180 frames after the drop (3 cube passes, still
+    // inside the first seconds where the studio can be unready) instead of every 20 frames (12 cube passes = 72 extra
+    // face renders while the hero is first on screen); other tiers unchanged
+    const reEnv = settings.TIER === 'low' ? (env.frame === 30 || env.frame === 90 || env.frame === 180) : (env.frame < 240 && env.frame % 20 === 0)   // (the warm gate no-ops clear/viewport/mipmaps on its frames)
     if (env.frame < 3 || reEnv || (camUnder && env.frame % (dive.abyss > 0.5 ? (hi ? 3 : 8) : 30) === 0) || (hi && env.frame % (deep ? 8 : 24) === 0 && props.stage !== 'contact')) {  // contact keeps the hero's studio env: a re-capture of the bright contact field washed the pavilion out
       m.visible = false; sheenMesh.current.visible = false
       env.cam.position.copy(gem.pos)
