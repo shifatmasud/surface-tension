@@ -134,3 +134,7 @@ Tick an item only when it runs on the live site and was checked visually.
 - [ ] P0 BUG: sections turn black & freeze when scrolling past; trail must stay alive persistently, no freeze (m:b3d9218f)
 
 - [x] Sections never turn black or freeze at boundaries: the block you scroll into renders live (both directions), stills refreshed every frame; cursor trail is one global always-live layer (Shifat 09:38Z) — live 09:51Z index-BasG7Y3D.js, real-GPU strips 1440/390
+- [ ] Logo lockup = mark + "Shifat" only, no dot after name (m:4ba63a11)
+- [ ] Best preloading strategy: better UX without sacrificing performance; before/after numbers (m:4ba63a11)
+- [ ] Virtual scroll like lusion.co for smooth scroll, desktop + phone (m:bc0a9be7)
+- [x] Logo lockup = flat mark + "Shifat" only, no dot after the name (nav, footer, OG) (Shifat 10:06Z) — live 10:11Z index-B05FrcGC.js, frames 1440/390

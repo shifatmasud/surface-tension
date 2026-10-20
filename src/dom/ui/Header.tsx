@@ -48,7 +48,7 @@ export function Header() {
   return (
     <>
       <header className="header">
-        <a className="wordmark" href="#hero" onClick={(e) => { e.preventDefault(); go('hero') }} aria-label="Shifat Masud — home" data-cursor><span className="wordmark__mark" aria-hidden="true"><Logo size="100%" /></span>shifat<i /></a>
+        <a className="wordmark" href="#hero" onClick={(e) => { e.preventDefault(); go('hero') }} aria-label="Shifat Masud — home" data-cursor><span className="wordmark__mark" aria-hidden="true"><Logo size="100%" /></span><span aria-hidden="true">Shifat</span></a>
         <nav className="pills" aria-label="Primary">
           <button className="pill" onClick={() => audio.toggle()} aria-pressed={sound} aria-label={sound ? 'Mute sound' : 'Turn sound on'} data-cursor onMouseEnter={() => audio.tick()}>
             {sound ? <SpeakerSimpleHigh size={16} weight="bold" /> : <SpeakerSimpleSlash size={16} weight="bold" />}

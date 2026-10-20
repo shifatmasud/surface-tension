@@ -132,7 +132,7 @@ export function Contact() {
             <div><h3>Local time</h3><span>{SITE.city}</span><br /><DhakaClock /></div>
           </div>
         </div>
-        <footer className="footer"><span className="footer__brand"><span className="footer__mark" aria-hidden="true"><Logo size="100%" /></span>© <Odometer value={new Date().getFullYear()} digits={4} /> {SITE.name}</span><span>Surface Tension — portfolio prototype</span></footer>
+        <footer className="footer"><span className="footer__brand"><span className="footer__lockup" aria-label="Shifat Masud"><span className="footer__mark" aria-hidden="true"><Logo size="100%" /></span><span aria-hidden="true">Shifat</span></span>© <Odometer value={new Date().getFullYear()} digits={4} /></span><span>Surface Tension — portfolio prototype</span></footer>
       </section>
       <div className="overscroll" ref={over} aria-hidden>
         <div className="overscroll__bar"><p className="overscroll__label">Keep scrolling — back to the surface</p><div className="overscroll__track"><div className="overscroll__fill" ref={bar} /></div></div>
