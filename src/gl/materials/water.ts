@@ -30,6 +30,7 @@ export function createWaterMaterial() {
     u_reflTex: { value: null as THREE.Texture | null },
     u_reflMatrix: { value: new THREE.Matrix4() },
     u_reflOn: { value: 0 },
+    u_gemReflK: { value: 0 },                                        // extra gem-reflection weight above Fresnel (tried 0.32/0.55 on 10-20: reads as a flat disc, off)
     u_bedDepth: { value: 1.6 },
     u_absorb: { value: new THREE.Vector3(0.9, 0.72, 0.6) },      // σ_a per metre (clear lake water, red first)
     u_scatter: { value: new THREE.Color('#dfe6ec') },                // in-scatter colour (deep teal)
@@ -68,7 +69,7 @@ export function createWaterMaterial() {
       ${SKY_PARS}
       uniform sampler2D u_rippleTexture; uniform vec2 u_rippleTexel; uniform float u_poolSize, u_rippleAmp, u_time, u_swell, u_rippleShade;
       uniform vec3 u_rippleGate;
-      uniform sampler2D u_reflTex; uniform float u_reflOn;
+      uniform sampler2D u_reflTex; uniform float u_reflOn; uniform float u_gemReflK;
       uniform float u_bedDepth; uniform vec3 u_absorb; uniform vec3 u_scatter; uniform vec3 u_bedColor;
       uniform vec4 u_gem; uniform vec3 u_gemTint; uniform float u_fogNear, u_fogFar;
       varying vec3 v_world; varying vec2 v_ruv; varying float v_rmask; varying vec4 v_refl;
@@ -146,6 +147,7 @@ export function createWaterMaterial() {
         #endif
         vec3 N = normalize(vec3(-g.x, 1.0, -g.y));
         vec3 col;
+        vec4 gemR = vec4(0.0);
         if (gl_FrontFacing) {
           float NoV = max(dot(N, V), 0.0);
           float F = 0.02 + 0.98 * pow(1.0 - NoV, 5.0);              // Schlick, IOR 1.333
@@ -158,6 +160,7 @@ export function createWaterMaterial() {
             pr += texture2DProj(u_reflTex, ruv + vec4(0.0, 0.006, 0.0, 0.0) * ruv.w) * 0.25;
             pr += texture2DProj(u_reflTex, ruv - vec4(0.0, 0.006, 0.0, 0.0) * ruv.w) * 0.25;
             refl = mix(refl, pr.rgb / max(pr.a, 1e-3), pr.a * 0.6);
+            gemR = vec4(pr.rgb / max(pr.a, 1e-3), pr.a);
           }
           // refraction to the bed (analytic ray-plane)
           vec3 T = refract(-V, N, 1.0 / 1.333);
@@ -206,6 +209,7 @@ export function createWaterMaterial() {
           vec2 gq = v_world.xz - u_gem.xz;
           float spill = exp(-dot(gq, gq) * 1.3) * 0.3 + exp(-dot(gq, gq) * 6.0) * 0.34;
           col = mix(col, col * u_gemTint * 1.5 + u_gemTint * 0.2, clamp(spill * u_gem.w, 0.0, 1.0));
+          col = mix(col, gemR.rgb, clamp(gemR.a * u_gemReflK, 0.0, 1.0));
           // aerial perspective toward the horizon
           float fog = smoothstep(u_fogNear, u_fogFar, dist);
           col = mix(col, u_skyHorizon, fog);
