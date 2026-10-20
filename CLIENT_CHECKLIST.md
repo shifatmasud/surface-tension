@@ -125,3 +125,5 @@ Tick an item only when it runs on the live site and was checked visually.
 - [ ] Preloader: 3D glossy plastic model of Shifat's official logo (shifat-logo.jpg), rotating horizontally (m:a4507002)
 - [ ] Project slide morphs into its detail card on click (shared-element), morphs back on close (m:03b7b243)
 - [ ] Flat SVG logo used for all branding: nav, footer, favicon, apple-touch, OG image (m:9f6a26dd)
+- [ ] Keep the current under-the-sea dive beat intact inside Scene 1 (god rays, kelp, bubbles, tool numbers), then the projects in the same shot (Shifat 09:11Z) — staged on shifat-v2-preview, not live
+- [ ] Project slide morphs into the detail card on click (shared-element FLIP/GL morph, 600–750 ms, reverse on close, dialog a11y, swipe-down on phones) (Shifat 09:16Z)
