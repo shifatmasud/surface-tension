@@ -36,6 +36,19 @@ class Clip {
   t = 0
   /** block index whose frame should be captured this frame (-1 = none) */
   capture = -1
+  /** during a boundary: the lower block (the card) and which block is the still frame */
+  lower = 0
+  still = -1
+  /** Shifat 09:38Z ("sections turn black & freeze when scrolling"): the block you scroll INTO renders live and the
+   *  block you are leaving is the still. Scrolling down = the card (lower block) is live; scrolling up = the upper
+   *  block is live and the card shows the lower block's last live frame. The still was the live render one frame
+   *  earlier (captured every frame), so it is never black and never stale. */
+  liveUpper = false
+  /** ufx (GL text) camera offset so text stays glued to its DOM box after the composite moves the live frame */
+  ufxY = 0
+  private dir = 1
+  private lastScroll = NaN
+  private travel = 0
   // composite parameters (CSS px)
   shift = 0; scale = 1; lag = 0; dark = 0; radius = 0; inset = 0; outRadius = 0
   private allowedSet = new Set<string>(BLOCKS[0])
@@ -55,6 +68,13 @@ class Clip {
     if (!this.enabled) return
     const vh = props.height, vw = props.width
     const N = BLOCKS.length
+    // scroll direction with hysteresis (Lenis settles with sub-pixel moves; a flip needs 24 px the other way)
+    if (!Number.isNaN(this.lastScroll)) {
+      const ds = props.scroll - this.lastScroll
+      if (Math.sign(ds) === this.dir || ds === 0) this.travel = 0
+      else { this.travel += Math.abs(ds); if (this.travel > 24) { this.dir = -this.dir; this.travel = 0 } }
+    }
+    this.lastScroll = props.scroll
     let owner = 0, b = -1, yTop = 0
     for (let i = 1; i < N; i++) {
       const tp = this.top(i)
@@ -62,19 +82,27 @@ class Clip {
       else if (tp < vh) { owner = i; b = i; yTop = tp; break }
       else break
     }
+    this.boundary = b > 0
+    this.liveUpper = this.boundary && this.dir < 0
+    if (this.liveUpper) owner = b - 1
     if (owner !== this.owner) {
       this.owner = owner; this.ownerKey++
       this.allowedSet = new Set(BLOCKS[owner])
     }
-    this.boundary = b > 0
     this.capture = -1
+    this.ufxY = 0
     if (!this.boundary) {
-      // arm: the next block is about to enter — keep the latest frame of this one
-      if (owner + 1 < N && this.top(owner + 1) < vh * 1.6) this.capture = owner
+      // arm: a neighbouring block is about to enter (either direction) — keep the latest frame of this one
+      if ((owner + 1 < N && this.top(owner + 1) < vh * 1.6) || (owner > 0 && this.top(owner) > -vh * 0.6)) this.capture = owner
+      this.still = -1
       this.shift = 0; this.scale = 1; this.lag = 0; this.dark = 0; this.radius = 0; this.inset = 0; this.outRadius = 0; this.t = 0
       this.unstyle()
       return
     }
+    // in a boundary the live block is captured every frame, so a direction flip always finds a fresh still
+    this.lower = b
+    this.capture = owner
+    this.still = this.liveUpper ? b : b - 1
     const d = vh - yTop, t = Math.min(1, Math.max(0, d / vh))
     this.yTop = yTop; this.t = t
     const R = Math.min(64, Math.max(18, vw * 0.035))
@@ -92,6 +120,9 @@ class Clip {
       this.inset = vw * 0.022 * (1 - smooth(0.2, 0.95, t))
       this.outRadius = 0
     }
+    // live frame of the upper block is moved up by the lag in the composite: render its text that much lower (+d)
+    // the live card is moved down by the shift: render its text that much higher (-shift)
+    this.ufxY = this.liveUpper ? d : -this.shift
     this.styleOutgoing(BLOCKS[b - 1][BLOCKS[b - 1].length - 1], d, yTop)
     if (this.reduced && this.styled) { this.styled.style.transform = ''; this.styled.style.clipPath = ''; this.styled.style.opacity = (1 - smooth(0.15, 0.85, t)).toFixed(3) }
   }

@@ -18,7 +18,8 @@ import { settings } from '../../services/settings'
  *   10   Bloom            (HQ: mipmap pyramid, 8 levels; LQ: small Kawase kernel)
  *   30   Grade            (Final: grade, vignette, fade, dither, waterline band)
  *   50   PreUfx           (DOM-mirrored layer that bends with the cursor paint)
- *   75   ScreenPaintDistortion
+ *   3100 ScreenPaintDistortion (after the clip composite: the cursor trail is one global, always-live layer that
+ *        never freezes in a section's still frame and never shifts with a card — Shifat 09:38Z)
  *   100  PostUfx          (crisp layer drawn over the distortion)
  *   500  SMAA
  *   2000 Sharpen         (only when the render scale is below native)
@@ -53,7 +54,7 @@ export class PostChain {
       { name: 'Bloom', order: 10, pass: new EffectPass(camera, this.bloom), needsRender: () => settings.USE_BLOOM && props.look.bloom > 0.001 },
       { name: 'Grade', order: 30, pass: new EffectPass(camera, this.grade), needsRender: () => true },
       { name: 'PreUfx', order: 50, pass: this.preUfx, needsRender: () => ufxUnder.children.some((c) => c.visible) },
-      { name: 'ScreenPaintDistortion', order: 75, pass: new EffectPass(camera, this.distortion), needsRender: () => props.look.paintAmount > 0 },
+      { name: 'ScreenPaintDistortion', order: 3100, pass: new EffectPass(camera, this.distortion), needsRender: () => props.look.paintAmount > 0 },
       { name: 'PostUfx', order: 100, pass: this.postUfx, needsRender: () => ufxOver.children.some((c) => c.visible) },
       { name: 'SMAA', order: 500, pass: new EffectPass(camera, smaa), needsRender: () => true },
       { name: 'Sharpen', order: 2000, pass: new EffectPass(camera, new SharpenEffect()), needsRender: () => renderScale() < 0.99 },

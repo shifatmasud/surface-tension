@@ -68,7 +68,7 @@ class UfxSystem {
     const vw = this.w, vh = this.h
     // clipped sections: the live frame is drawn shifted down inside the incoming card (inner parallax), so the
     // DOM-mirrored layer renders that much higher and lands exactly on its DOM boxes
-    this.camera.position.y = -clip.shift
+    this.camera.position.y = clip.ufxY
     for (const it of this.items) {
       let top = it.docTop - (it.fixed ? 0 : props.scroll)
       if (it.live) { const L = it.live(); top = L.top; it.docLeft = L.left; it.w = L.w; it.h = L.h }

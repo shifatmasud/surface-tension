@@ -75,8 +75,8 @@ class Visuals {
     const dark = props.stage === 'dive' ? dive.under : L.dive > 0.5
     let want = dark ? 'dark' : 'light'
     // during a boundary the header still sits over the outgoing block until the card reaches it
-    if (!clip.boundary) this.tones[clip.owner] = want
-    else if (clip.yTop > 64 && this.tones[clip.owner - 1]) want = this.tones[clip.owner - 1]
+    this.tones[clip.owner] = want
+    if (clip.boundary) { const under = clip.yTop > 64 ? clip.lower - 1 : clip.lower; if (this.tones[under]) want = this.tones[under] }
     if (document.documentElement.dataset.bg !== want) document.documentElement.dataset.bg = want
     return out
   }

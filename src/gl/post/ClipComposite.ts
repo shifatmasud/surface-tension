@@ -18,7 +18,7 @@ export class ClipCompositeEffect extends Effect {
   constructor() {
     super('ClipComposite', /* glsl */ `
       uniform sampler2D u_snap;
-      uniform float u_on, u_has, u_yTop, u_shift, u_scale, u_lag, u_dark, u_radius, u_inset, u_outRadius, u_px, u_xfade, u_t;
+      uniform float u_on, u_has, u_swap, u_yTop, u_shift, u_scale, u_lag, u_dark, u_radius, u_inset, u_outRadius, u_px, u_xfade, u_t;
       uniform vec2 u_view;
       uniform vec3 u_under;
       float sdRound(vec2 p, vec2 b, float r){ vec2 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r; }
@@ -33,7 +33,9 @@ export class ClipCompositeEffect extends Effect {
             sn = texture2D(u_snap, uv).rgb * 0.2;
             for (int i = 0; i < 8; i++) { float a = float(i) * 0.785398; sn += texture2D(u_snap, uv + vec2(cos(a), sin(a)) * rr).rgb * 0.1; }
           }
-          outputColor = vec4(mix(sn, inputColor.rgb, smoothstep(0.15, 0.85, u_t)), 1.0); return;
+          // u_swap: scrolling up, the live frame is the upper block (fading out) and the still is the lower one
+          float k = smoothstep(0.15, 0.85, u_t);
+          outputColor = vec4(u_swap > 0.5 ? mix(inputColor.rgb, sn, k) : mix(sn, inputColor.rgb, k), 1.0); return;
         }
         vec2 px = vec2(uv.x, 1.0 - uv.y) * u_view;                    // css px, origin top-left
         // card: from the boundary down past the bottom edge (only its top corners are ever seen)
@@ -41,7 +43,7 @@ export class ClipCompositeEffect extends Effect {
         vec2 c0 = vec2(u_inset, u_yTop), c1 = vec2(u_view.x - u_inset, u_view.y + r + 2.0);
         float sdC = sdRound(px - 0.5 * (c0 + c1), 0.5 * (c1 - c0), r);
         float inC = clamp(0.5 - sdC / u_px, 0.0, 1.0);
-        vec4 live = texture2D(inputBuffer, vec2(uv.x, uv.y + u_shift / u_view.y));
+        vec2 uvCard = vec2(uv.x, uv.y + u_shift / u_view.y);
         // outgoing: the captured frame, scaled about its lagging centre
         vec2 C = vec2(0.5 * u_view.x, 0.5 * u_view.y - u_lag);
         vec2 q = 0.5 * u_view + (px - C) / u_scale;                    // where this pixel was when captured
@@ -50,14 +52,23 @@ export class ClipCompositeEffect extends Effect {
         // the outgoing frame drifts up slower than the scroll (no scale, no dimming — Shifat 08:37Z); in the thin gutters
         // beside the card, below the frame's bottom edge, its last rows are mirrored so no empty band ever shows
         if (q.y > u_view.y) { q.y = 2.0 * u_view.y - q.y; inO = 1.0; }
-        vec3 snap = u_has > 0.5 ? texture2D(u_snap, vec2(q.x / u_view.x, 1.0 - q.y / u_view.y)).rgb : u_under * 1.6;
-        vec3 under = u_under;
-        vec3 outC = mix(under, snap * (1.0 - u_dark), inO);
-        outputColor = vec4(mix(outC, live.rgb, inC), 1.0);
+        vec2 uvOut = vec2(q.x / u_view.x, 1.0 - q.y / u_view.y);
+        // scrolling down: the card (lower block) is live, the upper block is its last live frame;
+        // scrolling up (u_swap): the upper block is live, the card holds the lower block's last live frame
+        vec3 cardC, upC;
+        if (u_swap > 0.5) {
+          cardC = u_has > 0.5 ? texture2D(u_snap, uvCard).rgb : texture2D(inputBuffer, uvOut).rgb;
+          upC = texture2D(inputBuffer, uvOut).rgb;
+        } else {
+          cardC = texture2D(inputBuffer, uvCard).rgb;
+          upC = u_has > 0.5 ? texture2D(u_snap, uvOut).rgb : texture2D(inputBuffer, uvCard).rgb;
+        }
+        vec3 outC = mix(u_under, upC * (1.0 - u_dark), inO);
+        outputColor = vec4(mix(outC, cardC, inC), 1.0);
       }`, {
       attributes: EffectAttribute.CONVOLUTION,
       uniforms: new Map<string, THREE.Uniform>([
-        ['u_snap', new THREE.Uniform(null)], ['u_on', new THREE.Uniform(0)], ['u_has', new THREE.Uniform(0)],
+        ['u_snap', new THREE.Uniform(null)], ['u_on', new THREE.Uniform(0)], ['u_has', new THREE.Uniform(0)], ['u_swap', new THREE.Uniform(0)],
         ['u_yTop', new THREE.Uniform(0)], ['u_shift', new THREE.Uniform(0)], ['u_scale', new THREE.Uniform(1)],
         ['u_lag', new THREE.Uniform(0)], ['u_dark', new THREE.Uniform(0)], ['u_radius', new THREE.Uniform(0)],
         ['u_inset', new THREE.Uniform(0)], ['u_outRadius', new THREE.Uniform(0)], ['u_px', new THREE.Uniform(1)], ['u_xfade', new THREE.Uniform(0)], ['u_t', new THREE.Uniform(0)],
@@ -89,7 +100,9 @@ export class ClipCompositeEffect extends Effect {
     const on = clip.boundary
     this.u('u_on').value = on ? 1 : 0
     if (!on) return
-    const s = this.slot(clip.owner - 1, false)
+    // the still block's slot holds its frame from when it was last the live render (copied every frame while live)
+    const s = clip.still >= 0 ? this.slot(clip.still, false) : undefined
+    this.u('u_swap').value = clip.liveUpper ? 1 : 0
     this.u('u_has').value = s ? 1 : 0
     this.u('u_snap').value = s ? s.rt.texture : null
     ;(this.u('u_view').value as THREE.Vector2).set(props.width, props.height)
