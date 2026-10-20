@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { props } from '../../state/props'
 import { browser } from '../../services/settings'
-import { vfovFor } from '../../core/frame'
+import { vfovFor, portrait } from '../../core/frame'
 import { smoothstep as ss } from '../../core/math'
 import { TAB_F } from '../stages/dive/diveState'
 
@@ -51,7 +51,13 @@ export function tabletPose(push: number, out: THREE.Object3D, time = props.time)
   const k1 = ss(0.0, 0.5, push)
   const W = FIXED_LENS.on ? 1 - push : 1
   const bob = 1 - ss(0.6, 1, push)
-  out.position.set(TAB_F.x, TAB_F.y - 3.4 * (1 - k1) + Math.sin(time * 0.9) * 0.05 * bob, TAB_F.z)
+  // W20 (root 22:43Z/22:55Z, r22 no text over busy 3D): on phones the Shade DS title block fills the lower screen, so a
+  // tablet rising from below crossed it. Phones bring it up out of the deep BEHIND the stone instead (along the lens
+  // axis, through the fog), rising only a little; wide screens keep the rise from below.
+  const pt = portrait(), up = 1 - k1
+  const pitch0 = THREE.MathUtils.degToRad(FIXED_LENS.pitchDeg)
+  out.position.set(TAB_F.x, TAB_F.y - (3.4 * (1 - pt) + 0.9 * pt) * up + Math.sin(time * 0.9) * 0.05 * bob, TAB_F.z)
+  if (pt > 0) { out.position.y += Math.sin(pitch0) * 6 * up * pt; out.position.z += Math.cos(pitch0) * 6 * up * pt }
   out.rotation.set(-0.18 * (1 - k1) + Math.sin(time * 0.7) * 0.02 * W, Math.PI + 0.1 * (1 - k1) + Math.sin(time * 0.5) * 0.025 * W, Math.sin(time * 0.6) * 0.015 * W)
   if (!FIXED_LENS.on || push <= 0.5 || !out.parent) return
   const kk = easeIO3(ss(0.5, 1, push))
