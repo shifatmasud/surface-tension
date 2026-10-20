@@ -157,9 +157,9 @@ void main(){
     float fr = 1.0 - abs(dot(normalize(vN), vV));
     vec3 film = 0.5 + 0.5 * cos(6.2832 * (fr * 1.4 + vHue + vec3(0.0, 0.33, 0.67)));     // thin-film iridescence
     col = mix(vec3(0.74, 0.44, 0.98), film, 0.08) * (0.06 + 0.8 * pow(fr, mix(2.4, 1.1, vCoc)));   // W19: defocus softens the rim
-    col += vec3(0.984, 0.812, 0.91) * smoothstep(mix(0.84, 0.55, vCoc), 0.99, vT) * 0.32 * (1.0 - 0.5 * vCoc);                        // the bright bell margin
+    col += vec3(0.984, 0.812, 0.91) * smoothstep(mix(0.84, 0.55, vCoc), 0.99, vT) * 0.44 * (1.0 - 0.5 * vCoc);                        // the bright bell margin
     col += vec3(0.78, 0.46, 0.98) * 0.16 * (1.0 - vT);                                       // a faint inner glow
-    col += lum * glow * (1.25 * smoothstep(mix(0.8, 0.5, vCoc), 1.0, vT)                    // the glowing margin ring (hot spot)
+    col += lum * glow * (1.45 * smoothstep(mix(0.8, 0.5, vCoc), 1.0, vT)                    // the glowing margin ring (hot spot)
                        + 0.32 * (1.0 - smoothstep(0.0, 0.55, vT)));                         // the lit core under the apex
   } else {
     col = vec3(0.86, 0.56, 0.98) * (1.0 - vT) * (vKind < 1.5 ? 0.45 : 0.28) * (1.0 - 0.55 * vCoc);

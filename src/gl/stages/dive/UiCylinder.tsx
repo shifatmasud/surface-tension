@@ -399,6 +399,9 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
     r.visible = on
     if (!on) { if (ia.hover >= 0 && !nb.active) { ia.hover = -1; cursorHover(false) } return }
     r.position.copy(SYS_C)
+    // W19 (key-frame review 21:0xZ: at 1440 the lower drum parts sat over the "Shade DS" title and lede): wide screens lift
+    // the drum so its bottom row clears the text slot (phones have their own framing below)
+    r.position.y += 1.0 * (1 - portrait())
     // phones: a tighter ring so no part crops at the screen edge as it turns
     // Scene 3 entry: as the camera pushes into the stone the ring opens outward to let it through
     const pw = dive.push * dive.push * (3 - 2 * dive.push)
