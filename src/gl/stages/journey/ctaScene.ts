@@ -334,8 +334,14 @@ export function buildCta(portrait: boolean) {
     // one line centred on the widest word, so "it" never jumps baseline or leaves fragments mid-swap.
     const wIt = A.layout(LEAD + ' ').w, wMax = Math.max(...WORDS.map((wd) => A.layout(wd).w))
     const w2 = wIt + wMax
-    push(1, 0, 1, LEAD, -w2 / 2 + A.layout(LEAD).w / 2)
-    WORDS.forEach((wd, i) => { const L = A.layout(wd); push(1, i, WORDS.length, wd, -w2 / 2 + wIt + L.w / 2) })
+    // W19 (Shifat 20:50Z m:a3a8c617, phone only): on a tall screen each "it <word>" pair is set as ONE line centred on the
+    // viewport axis and rolls as one piece (the short words left the pair visibly left of centre); wide screens unchanged
+    const tall = window.innerWidth <= 760 && window.innerHeight > window.innerWidth
+    if (tall) WORDS.forEach((wd, i) => { push(1, i, WORDS.length, LEAD + ' ' + wd) })
+    else {
+      push(1, 0, 1, LEAD, -w2 / 2 + A.layout(LEAD).w / 2)
+      WORDS.forEach((wd, i) => { const L = A.layout(wd); push(1, i, WORDS.length, wd, -w2 / 2 + wIt + L.w / 2) })
+    }
     const n = rows.length
     const geo = new Float32Array(n * 4), uv = new Float32Array(n * 4), role = new Float32Array(n * 4)
     rows.forEach((r, i) => { geo.set(r.slice(0, 4), i * 4); uv.set(r.slice(4, 8), i * 4); role.set(r.slice(8, 12), i * 4) })
@@ -361,7 +367,7 @@ export function buildCta(portrait: boolean) {
   ]
   const PLACE_TALL: [number, number, number, number][] = [
     // W19: four stickers, one per corner (the upper pair over the headline, the lower pair either side of the crewmate)
-    [-0.3, 0.335, 0.29, -9], [0.31, 0.325, 0.28, 8], [-0.375, -0.115, 0.24, 7], [0.375, -0.07, 0.24, -6],
+    [-0.3, 0.335, 0.29, -9], [0.31, 0.325, 0.28, 8], [-0.38, -0.12, 0.19, 7], [0.38, -0.08, 0.19, -6],   // W19 (20:50Z): the lower pair smaller and further out, clear of the crewmate
   ]
   let typeY = 0   // the headline's first baseline (tablet-local), set by layout()
   const lay: CtaLayout = { C: new THREE.Vector3(), D: 20, hw: 12, wv: 19, fov: 34, textZ: WALL_Z + 1.4, em: 1, crewZ: 6, crewY: 0, crewScale: 1, crewH: 1 }
@@ -409,7 +415,8 @@ export function buildCta(portrait: boolean) {
     // progress fixed at 1 in layout()), so nothing slaps in on arrival and the attribute is no longer uploaded per frame
     ix?.update(time, a, on)   // STICKERS HOOK
     const showType = built
-    type.visible = typeShadow.visible = showType
+    type.visible = showType
+    typeShadow.visible = showType && !portrait   // W19 (Shifat 20:50Z, phone): the soft cast shadow read as a doubled, ghosted headline at 390
     if (showType) {
       tU.u_time.value = time; tU.u_em.value = lay.em
       // TEXTROLL: in with the wall's arrival (a = journey.cta), out with the curtain (journey.ctaOut); reduced motion: in place

@@ -115,7 +115,7 @@ html.gl-cards .card__dom { visibility: hidden; }
 @media (max-width: 812px) { .systems__copy, .systems__tray { grid-column: 1 / -1; } }
 
 
-.journey { height: 420vh; }  /* SECTION CUT (Shifat 15:41Z): 600 → 420vh, every beat kept (progress is normalised) */
+.journey { height: 420vh; }  /* SECTION CUT (Shifat 15:41Z): 600 → 420vh, every beat kept (progress is normalised) */  /* SECTION CUT (Shifat 15:41Z): 600 → 420vh, every beat kept (progress is normalised) */
 .journey__inner { display: flex; align-items: flex-start; padding-top: 16vh; pointer-events: none; }
 .journey__cap { font-size: var(--fs-body); font-weight: 400; letter-spacing: -0.02em; color: #fff; opacity: .8; }
 

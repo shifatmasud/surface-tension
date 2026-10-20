@@ -104,3 +104,6 @@ html.no-gl .stickers { position: relative; inset: auto; height: 50vh; }
 .contact__inner { position: sticky; }
 .contact__cta { position: absolute; left: 50%; bottom: calc(clamp(28px, 6vh, 64px) + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); width: auto; z-index: 2; }
 @media (max-width: 760px) { .contact__cta { width: auto; max-width: calc(100vw - 40px); bottom: calc(clamp(24px, 5svh, 48px) + env(safe-area-inset-bottom, 0px)); } }
+
+/* W19 (Shifat 20:50Z m:a3a8c617, phone only): the CTA label stays on ONE line */
+@media (max-width: 760px) { .contact .big-btn { white-space: nowrap; min-width: max-content; } }
