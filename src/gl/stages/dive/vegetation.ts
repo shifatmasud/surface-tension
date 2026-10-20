@@ -90,7 +90,7 @@ void main(){
     aa += 0.05;                                         // out of focus: soft edges
 #endif
     float st = 0.022 * (1.0 - y * 0.5);
-    a = smoothstep(st + aa, st, abs(pw.x));
+    a = smoothstep(st + aa, st, abs(pw.x)) * (1.0 - smoothstep(0.93, 1.0, y));
     leaf = 0.85;                                         // the stipe is thick: no edge glow
     float sp = 0.34, Lf = 0.78;
     float k0 = floor(h / sp);
@@ -103,6 +103,10 @@ void main(){
       vec2 rel = pw - vec2(0.0, k * sp);
       float al = dot(rel, dir), pe = dot(rel, vec2(dir.y, -dir.x));
       float Lk = Lf * (0.75 + 0.25 * sin(k * 1.3)) * (1.0 - 0.4 * smoothstep(0.85, 1.0, y));
+      // W19 (rv-visual P0-2 'kelp sliced by hard lines'): a leaf near the crown used to run past the strip's top (y = 1)
+      // and was cut flat there; shorten it so its tip (which tapers to a point) always ends inside the strip, on every side
+      Lk = min(Lk, max(0.0, (vH - k * sp) / max(dir.y, 0.2) - 0.04));
+      Lk = min(Lk, max(0.0, (W - 0.1) / max(abs(dir.x), 0.2)));
       float u = clamp(al / Lk, 0.0, 1.0);
       float hw = 0.085 * pow(sin(3.14159 * u), 0.65) * (1.0 + 0.18 * sin(al * 38.0));
       float inl = smoothstep(hw + aa, hw - aa, abs(pe)) * step(0.0, al) * step(al, Lk);

@@ -153,7 +153,7 @@ export function ProjectOverlay() {
   const morphOut = () => {
     const cur = overlay.current, pn = panel.current, md = media.current, gl = glass.current
     const finish = () => {
-      if (cur) { labGL.hidden.delete(cur); cardEl(cur)?.classList.remove('is-lifted') }
+      if (cur) { labGL.restore(cur); cardEl(cur)?.classList.remove('is-lifted') }   // W19: poster back, reel re-armed (visual P0-1)
       setId(null); setShown(false); morphing.current = false; overlay.advance()
       back.current?.focus?.({ preventScroll: true } as any)
     }

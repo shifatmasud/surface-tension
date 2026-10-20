@@ -97,9 +97,10 @@ void main(){
   gl_FragColor = vec4(col, a * u_opacity);
 }`
 
-type Card = { id: string; el: HTMLElement; item: UfxItem; mat: THREE.ShaderMaterial; video?: HTMLVideoElement; vtex?: THREE.VideoTexture; poster?: THREE.Texture; focus: number; hover: number; tx: number; ty: number; lift: number; getHtml?: (() => THREE.Texture | null) | null }
+type Card = { id: string; el: HTMLElement; item: UfxItem; mat: THREE.ShaderMaterial; video?: HTMLVideoElement; vtex?: THREE.VideoTexture; poster?: THREE.Texture; focus: number; hover: number; tx: number; ty: number; lift: number; vt?: number; getHtml?: (() => THREE.Texture | null) | null }
 
 const loader = new THREE.TextureLoader()
+const RVFC = typeof HTMLVideoElement !== 'undefined' && 'requestVideoFrameCallback' in HTMLVideoElement.prototype
 const geo = new THREE.PlaneGeometry(1, 1, 32, 20)
 const viewW = { value: 1 }
 const bendX = { value: 0 }
@@ -178,7 +179,11 @@ export const labGL = {
             else if (!want && !card.video.paused) card.video.pause()
             // a paused video's texture never receives a frame (three uploads on video frames): show the reel only
             // while it is actually playing, the poster otherwise — this was the black-card bug on ultrawide
-            const playing = !card.video.paused && card.video.readyState >= 2 && card.video.currentTime > 0
+            // W19 (visual P0-1, the black card after a card closes): "playing" also needs a FRESH decoded frame (the
+            // video-frame callback that also feeds three's upload). A reel whose frames stalled — e.g. the browser parks the
+            // detached element while the detail card plays the same reel — falls back to its poster, never a black plate
+            const fresh = RVFC ? performance.now() - (card.vt ?? -1e9) < 2500 : card.video.currentTime > 0
+            const playing = !card.video.paused && card.video.readyState >= 2 && fresh
             if (card.vtex && playing) { u.u_map.value = card.vtex; u.u_mapSize.value.set(card.video.videoWidth, card.video.videoHeight) }
             else if (card.poster?.image && u.u_map.value !== card.poster) { u.u_map.value = card.poster; u.u_mapSize.value.set((card.poster.image as any).width, (card.poster.image as any).height) }
           }
@@ -209,12 +214,17 @@ export const labGL = {
     const done = () => preload.arrived()
     card.poster = loader.load(p.poster, (t) => { done(); t.colorSpace = THREE.SRGBColorSpace; if (!card.video || card.video.paused) { card.mat.uniforms.u_map.value = t; card.mat.uniforms.u_mapSize.value.set((t.image as any).width, (t.image as any).height) } }, undefined, done)
     if (p.depth) loader.load(p.depth, (t) => { card.mat.uniforms.u_depth.value = t; card.mat.uniforms.u_hasDepth.value = 1 })
+    this.makeVideo(card, p)
+  },
+  /** the card's own reel: a detached muted video + its texture (W19: also rebuilt from scratch when the detail card closes) */
+  makeVideo(card: Card, p: (typeof PROJECTS)[number]) {
     const v = document.createElement('video')
     // PERF HOOK (Shifat 10:21Z: lower texture res on phones): phones play a 640×360 encode of the reel (-m.mp4): the
     // per-frame video→texture upload is 2.25x smaller and the card is ~400 device px wide there anyway
     v.src = settings.TIER === 'low' ? p.media.replace(/\.mp4$/, '-m.mp4') : p.media; v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'none'; v.crossOrigin = 'anonymous'
     v.setAttribute('aria-hidden', 'true')
     card.video = v
+    if (RVFC) { const cb = () => { card.vt = performance.now(); (v as any).requestVideoFrameCallback(cb) }; (v as any).requestVideoFrameCallback(cb) }
     card.vtex = new THREE.VideoTexture(v); card.vtex.colorSpace = THREE.SRGBColorSpace
   },
   unmount() { this.cards.forEach((c) => { ufx.remove(c.item); c.video?.pause(); c.vtex?.dispose() }); this.cards = []; this.track = null },
@@ -229,6 +239,13 @@ export const labGL = {
     const k = settings.USE_GL && this.track ? (0.82 + 0.18 * c.focus) * dist / Math.max(1, dist - c.lift) : 1
     const w = r.width * k, h = r.height * k
     return { left: r.left + (r.width - w) / 2, top: r.top + (r.height - h) / 2, width: w, height: h, radius: 14 * k }
+  },
+  /** W19: the detail card closed — put this card back on its poster and make its reel prove a fresh frame again */
+  restore(id: string) {
+    const c = this.cards.find((x) => x.id === id); if (!c) return
+    this.hidden.delete(id); c.vt = undefined
+    const u = c.mat.uniforms
+    if (c.poster?.image) { u.u_map.value = c.poster; u.u_mapSize.value.set((c.poster.image as any).width, (c.poster.image as any).height) }
   },
   hover(id: string, on: boolean) { const c = this.cards.find((x) => x.id === id); if (c) c.hover = on ? 1 : 0 },
   update(vel: number, dt: number) {

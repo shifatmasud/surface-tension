@@ -25,7 +25,9 @@ export function Statement() {
   useSection(ref, (range) => {
     // the gem from directly above, close: its crown facets and the blue spill on the rings read as the star in the
     // upper third (a distinct shot from the hero's side view; it was a faint blue dot from 17 m behind a 0.55 fade)
-    const pose = { pos: new THREE.Vector3(0, 5.6, 1.8), target: new THREE.Vector3(0, 0, 0.6), fov: 38 }
+    // W19 (Shifat 17:13Z "Remove top down camera"): the statement holds the hero's last front-facing frame (−6°, low over
+    // the water, on the dive's side of the stone) instead of the old shot from directly above
+    const pose = { pos: new THREE.Vector3(0, 0.78, -4.3), target: new THREE.Vector3(0, 0.33, 0), fov: 38 }
         // phones: the same shot from further up, so the stone sits at ~60% of the width instead of filling it
     const base = { pos: pose.pos.clone(), target: pose.target.clone() }
     ;(window as any).__stPose = base // QA

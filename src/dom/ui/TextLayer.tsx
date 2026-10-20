@@ -83,7 +83,7 @@ type LineGL = { it: UfxItem; mat: THREE.ShaderMaterial; el: HTMLElement; role: '
 // Shifat 15:33Z ("looks cheap" → premium): one motion language for all copy. IN: each line rises from under its hard
 // mask on cubic-bezier(0.19, 1, 0.22, 1) over 1.0 s, 75 ms apart, with a 2.5° tilt that settles to 0; OUT: up and out
 // through the top of the mask, 0.6 s ease-in-out, a touch quicker. No opacity on the glyphs (reduced motion: fades).
-const OUT_DUR = 0.6, IN_DUR = 1.0, STAGGER = 0.075, IN_DELAY = 0.42   // the incoming beat waits until the outgoing lines have (nearly) cleared the shared masks
+const OUT_DUR = 0.45, IN_DUR = 1.0, STAGGER = 0.075, IN_DELAY = 0.42   // the incoming beat waits until the outgoing lines have (nearly) cleared the shared masks
 export function bezier(x1: number, y1: number, x2: number, y2: number) {
   const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx, cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by
   const X = (t: number) => ((ax * t + bx) * t + cx) * t, Y = (t: number) => ((ay * t + by) * t + cy) * t, dX = (t: number) => (3 * ax * t + 2 * bx) * t + cx
@@ -112,7 +112,7 @@ export function TextLayer() {
     // per beat: its lines (DOM + GL), and its animation state: dir +1 coming in / -1 going out, t0, live
     const st = beatsEl.map(() => ({ lines: [] as LineGL[], dom: [] as HTMLElement[], dir: 0, t0: -10, on: false }))
     let splits: SplitText[] = []
-    const ink = { title: new THREE.Color('#0a0a0b'), body: new THREE.Color('#5f646b'), eyebrow: new THREE.Color('#5f646b') }
+    const ink = { title: new THREE.Color('#0a0a0b'), body: new THREE.Color('#0a0a0b'), eyebrow: new THREE.Color('#5f646b') }
     const want = { title: new THREE.Color(), body: new THREE.Color(), eyebrow: new THREE.Color() }
     let dropped = false, dropAt = 1e9
     const onDrop = () => { dropped = true; dropAt = performance.now() / 1000 + 1.4 }
@@ -124,7 +124,7 @@ export function TextLayer() {
       st.forEach((s) => { s.lines.forEach((l) => { ufx.remove(l.it); (l.mat.uniforms.u_map.value as THREE.Texture).dispose(); l.mat.dispose() }); s.lines = []; s.dom = [] })
       splits.forEach((s) => s.revert()); splits = []
       beatsEl.forEach((b, bi) => {
-        b.style.visibility = 'hidden'; b.style.display = 'grid'
+        b.style.visibility = 'hidden'; b.style.display = 'flex'   // W19: the 17:12Z text-block rule is a flex row
         for (const el of Array.from(b.querySelectorAll<HTMLElement>('[data-role]'))) {
           const role = el.dataset.role as LineGL['role']
           const sp = new SplitText(el, { type: 'lines', linesClass: 'slot__line', aria: 'none' }); splits.push(sp)
@@ -153,11 +153,28 @@ export function TextLayer() {
       if (gl) host.classList.add('is-gl')
     }
     let active = -1, built = false
+    /** W19: take a beat off the screen this frame — every line under its mask, transparent */
+    const hideNow = (s: (typeof st)[number]) => {
+      s.on = false
+      for (const L of s.lines) { L.mat.uniforms.u_reveal.value = 0; L.mat.uniforms.u_opacity.value = 0 }
+      if (!gl) s.dom.forEach((d) => { d.style.transform = 'translate3d(0, 110%, 0)'; d.style.opacity = '0' })
+    }
     const set = (i: number) => {
       if (i === active) return
       const now = performance.now() / 1000
-      if (active >= 0) { const s = st[active]; s.dir = -1; s.t0 = now }
-      if (i >= 0) { const s = st[i]; s.dir = 1; s.t0 = now + (active >= 0 ? IN_DELAY : 0); s.on = true }
+      // W19 (Shifat 17:18Z "Ensure no leaking letters"): ONE beat on screen at a time.
+      // - an outgoing beat that had not finished revealing (a fast scroll / fling / reverse) is cleared at once: playing
+      //   its exit from 'in place' made the half-risen lines pop up whole for a frame
+      // - the incoming beat waits until every leaving line has fully cleared its mask (no two headlines together)
+      const lines = (s: (typeof st)[number]) => Math.max(s.lines.length, s.dom.length)
+      if (active >= 0) {
+        const s = st[active]
+        const revealed = s.dir > 0 && now >= s.t0 + IN_DUR + STAGGER * (lines(s) - 1)
+        if (revealed) { s.dir = -1; s.t0 = now } else hideNow(s)
+      }
+      let clearAt = now
+      for (const s of st) if (s.on && s.dir < 0) clearAt = Math.max(clearAt, s.t0 + OUT_DUR + STAGGER * (lines(s) - 1))
+      if (i >= 0) { const s = st[i]; hideNow(s); s.dir = 1; s.t0 = active >= 0 ? Math.max(now + 0.06, clearAt + 0.04) : now; s.on = true }
       beatsEl.forEach((b, k) => b.classList.toggle('is-active', k === i))
       active = i
       slotBox.top = i >= 0 ? beatsEl[i].getBoundingClientRect().top : 1e5
@@ -168,9 +185,14 @@ export function TextLayer() {
       const now = performance.now() / 1000
       set(current(dropped && now > dropAt))
       // ink follows the UI tone (black on the light water, white in the deep, in space and on the CTA wall)
-      const dark = document.documentElement.dataset.bg === 'dark'
-      want.title.set(dark ? '#ffffff' : '#0a0a0b'); want.body.set(dark ? '#b9bec5' : '#5f646b'); want.eyebrow.set(dark ? '#b9bec5' : '#5f646b')
-      const k = 1 - Math.exp(-8 * Math.min(props.dt, 0.1))
+      // W19 (rv-visual P0-3): during the over-under shot the copy sits BELOW the rising waterline (teal) while the header
+      // is still in the air: the slot flips to white once the line passes the middle of the active beat
+      const H = window.innerHeight
+      const lineOver = props.stage === 'dive' && dive.split >= 0 && dive.split * H > H - (slotBox.top + 60)
+      const dark = document.documentElement.dataset.bg === 'dark' || lineOver
+      want.title.set(dark ? '#ffffff' : '#0a0a0b'); want.body.set(dark ? '#f2f4f6' : '#0a0a0b'); want.eyebrow.set(dark ? '#d3d7dc' : '#5f646b')
+      // W19 (rv-visual P0-3): the flip is a snap (~0.1 s), never a readable mid-grey on teal
+      const k = 1 - Math.exp(-30 * Math.min(props.dt, 0.1))
       ink.title.lerp(want.title, k); ink.body.lerp(want.body, k); ink.eyebrow.lerp(want.eyebrow, k)
       for (let b = 0; b < st.length; b++) {
         const s = st[b]; if (!s.on) continue
@@ -192,7 +214,7 @@ export function TextLayer() {
           const d = s.dom[i]
           if (d && !gl) { d.style.transform = `translate3d(0, ${((1 - v) * 110).toFixed(1)}%, 0)`; d.style.opacity = o.toFixed(3) }
         }
-        if (s.dir < 0 && done) s.on = false
+        if (s.dir < 0 && done) { s.on = false; if (!gl) s.dom.forEach((d) => { d.style.opacity = '0' }) }   // W19 (P0-4): a cleared beat leaves no glyph tops in the mask
       }
     }
     gsap.ticker.add(tick)

@@ -373,14 +373,31 @@ export function Scene() {
         ;(window as any).__webgl2 = isGL2
         console.info(`[surface-tension] renderer: ${isGL2 ? 'WebGL2' : 'WebGL1'} · tier ${settings.TIER} · dpr ${gl.getPixelRatio()} · ${settings.GPU}`)
         engine.canvas = gl.domElement
-        // a lost context (GPU reset, memory pressure, background tab) gets one clean restore: reload once on restore,
-        // and fall back to the DOM-only page if it never comes back
-        gl.domElement.addEventListener('webglcontextlost', (e) => {
+        // W19 (eng P0-2 + visual P0-1): a lost context gets a restore on EVERY loss, not just the first one per session.
+        // lost → ask the driver for it back after 3 s (WEBGL_lose_context.restoreContext; most browsers restore on their
+        // own first); restored → reload once per 60 s window at the same scroll position (the stages' GPU objects are
+        // gone with the old context, a reload rebuilds every one of them); never restored in 12 s, or a second loss
+        // inside the window → the DOM-only page (html.no-gl), never a black canvas.
+        const el = gl.domElement
+        // back at the place the reader was when the context came back (one-shot)
+        const back = Number(sessionStorage.getItem('st-gl-scroll') || 0); sessionStorage.removeItem('st-gl-scroll')
+        if (back > 0) setTimeout(() => (window as any).__scroll?.scrollTo(back, { immediate: true }), 1800)
+        let lostT: ReturnType<typeof setTimeout> | undefined, deadT: ReturnType<typeof setTimeout> | undefined
+        const recent = () => Date.now() - Number(sessionStorage.getItem('st-gl-restored-at') || 0) < 60000
+        const giveUp = () => { document.documentElement.classList.remove('gl-lost'); document.documentElement.classList.add('no-gl') }
+        el.addEventListener('webglcontextlost', (e) => {
           e.preventDefault(); console.warn('[surface-tension] WebGL context lost')
           document.documentElement.classList.add('gl-lost')
+          if (recent()) { giveUp(); return }
+          lostT = setTimeout(() => { try { gl.getContext().getExtension('WEBGL_lose_context')?.restoreContext() } catch { /* not ours to restore */ } }, 3000)
+          deadT = setTimeout(giveUp, 12000)
         }, false)
-        gl.domElement.addEventListener('webglcontextrestored', () => {
-          if (!sessionStorage.getItem('st-gl-restored')) { sessionStorage.setItem('st-gl-restored', '1'); location.reload() }
+        el.addEventListener('webglcontextrestored', () => {
+          clearTimeout(lostT); clearTimeout(deadT)
+          if (recent()) { giveUp(); return }
+          sessionStorage.setItem('st-gl-restored-at', String(Date.now()))
+          sessionStorage.setItem('st-gl-scroll', String(Math.round(((window as any).__props?.scroll as number) || window.scrollY || 0)))
+          location.reload()
         }, false)
       }}
       style={{ position: 'fixed', inset: 0 }}

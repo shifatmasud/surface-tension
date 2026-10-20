@@ -20,7 +20,7 @@ import { CLIP } from './shaders'
  * THE SAME OBJECT COUNTS ON EVERY TIER (Shifat's rule): only geometry density (bell/strip segments) scales.
  * Five draw calls in total, all instanced / points. Kept subtle and out of the type slot (faded behind the copy).
  */
-const COUNTS = { jelly: 14, kelp: 18, rock: 40, bubbleStreams: 16, bubblesPerStream: 6, motes: 160 }
+const COUNTS = { jelly: 4, kelp: 18, rock: 40, bubbleStreams: 16, bubblesPerStream: 6, motes: 160 }
 export const FLOATER_COUNTS = COUNTS
 
 function rng(seed: number) { let s = seed >>> 0; return () => { s = (s + 0x6d2b79f5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296 } }
@@ -43,7 +43,7 @@ float floatFade(vec3 w, float edge, vec4 clip, float nearA, float nearB){
   float a = smoothstep(0.0, 0.1, edge);
   a *= 1.0 - smoothstep(-0.6, -0.08, w.y);               // only in the water
   a *= exp(-dist * 0.075);
-  a *= smoothstep(nearA, nearB, dist);                   // never a blur filling the lens
+  a *= smoothstep(nearA, nearB, dist);                   // never a blur filling the lens (W19: jelly/kelp 1.2→3 m, rocks 0.8→2.2 m)
   vec2 ndc = clip.xy / max(clip.w, 1e-3);
   float slot = (1.0 - smoothstep(-0.3, -0.05, ndc.y)) * (1.0 - smoothstep(0.5, 0.85, abs(ndc.x)));
   a *= 1.0 - 0.85 * slot;                                // stay quiet behind the copy (bottom of the frame)
@@ -65,17 +65,33 @@ ${COMMON}
 attribute vec3 aF;      // x: 0 bell / 1 filament / 2 oral arm, y: 0 apex … 1 rim (bell) or 0 root … 1 tip, z: strip side ±1
 attribute vec4 aSeed;   // xyz cell (0..1), w random
 attribute vec4 aSeed2;  // x size, y/z tilt, w film hue
-varying float vA, vKind, vT, vHue;
+varying float vA, vKind, vT, vHue, vCoc;
+uniform float u_keep;   // 1 while the work cards hold the frame (no jelly over a card)
+uniform vec3 u_camR, u_camU, u_camF; uniform vec2 u_lens;   // the main camera's basis and tan(half fov) x/y
 varying vec3 vN, vV;
 void main(){
   float t = u_time * u_mo;
-  float ph = aSeed.w * 37.0;
-  float cyc = t * (0.42 + aSeed.w * 0.3) + ph;
+  float ph = aSeed2.x * 37.0;
+  float cyc = t * (0.42 + aSeed2.x * 0.3) + ph;
   float pulse = pow(0.5 + 0.5 * sin(cyc * 6.2832), 3.0);                 // a quick contraction, a slow release
-  // a slow rise that surges on each stroke, and a lazy sideways wander
-  vec3 drift = vec3(0.25 * sin(t * 0.05 + ph), 0.045 * t + 0.06 * sin(cyc * 6.2832 - 1.2), 0.2 * cos(t * 0.04 + ph));
-  float edge;
-  vec3 c = wrapBox(aSeed.xyz, drift, edge);
+  // W19 (Shifat 17:15Z "Jelly must never overlap. Ensure they are less. Keep them to frame hero ok they can be depth
+  // blurred" + 17:16Z "Too close ones should be blurred too"): FOUR jellies, each anchored to its own framing slot in
+  // the lens (aSeed = ndc x, ndc y, depth m, bell radius as a share of the frame height), around the edges and corners
+  // so the subject in the centre and the text row at the bottom stay clear; the drift is small and bounded, so they
+  // never wander into each other, the subject or the copy. Size comes from the slot, so every screen frames the same.
+  // the MAIN lens's frame (uniforms, not this pass's view matrix): the env/neighbour/reflection passes draw the same
+  // four jellies at the same world spots instead of four more each
+  float tY = u_lens.y, tX = u_lens.x;
+  vec3 cR = u_camR, cU = u_camU, cF = u_camF;
+  float nx = aSeed.x + 0.025 * sin(t * 0.07 + ph), ny = aSeed.y + 0.035 * sin(t * 0.05 + ph * 1.7) + 0.012 * sin(cyc * 6.2832 - 1.2);
+  float dd = aSeed.z;
+  vec3 c = u_cam + cF * dd + cR * (nx * dd * tX) + cU * (ny * dd * tY);
+  float edge = 0.5;
+  // depth of field around the subject's plane (~6 m): nearer AND farther bells defocus; a defocused bell spreads its
+  // light (a little larger, dimmer, softer margin) — the near one blurs hardest
+  float F = 6.0;
+  float coc = clamp(abs(1.0 / dd - 1.0 / F) * F * 1.2, 0.0, 1.0);
+  vCoc = coc;
   vec3 p = position, n;
   if (aF.x < 0.5){
     float r = aF.y;
@@ -92,19 +108,22 @@ void main(){
   }
   mat3 R = rotAxis(vec3(aSeed2.y, 0.0, aSeed2.z) + vec3(1e-4), length(aSeed2.yz));
   p = R * p; n = R * n;
-  float sz = aSeed2.x;
+  float sz = aSeed.w * dd * tY * (1.0 + 0.25 * coc);
   vec3 w = c + p * sz;
   vec4 mv = viewMatrix * vec4(w, 1.0);
   if (aF.x > 0.5) mv.x += aF.z * sz * (aF.x < 1.5 ? 0.012 : 0.05) * (1.0 - 0.7 * aF.y);
   gl_Position = projectionMatrix * mv;
-  vA = floatFade(c, edge, gl_Position, 0.45, 1.3) * depthLight();
+  vA = floatFade(c, edge, gl_Position, 1.2, 3.0) * depthLight() * mix(1.0, 0.42, coc) * (1.0 - u_keep);
+  // safety net: a bell whose centre would ever reach the subject's zone in the middle of the frame fades out
+  vec2 cn = vec2(nx, ny);
+  vA *= smoothstep(0.0, 0.12, max(abs(cn.x) - 0.36, abs(cn.y) - 0.5));
   vN = normalize(mat3(viewMatrix) * n); vV = normalize(-mv.xyz);
   vKind = aF.x; vT = aF.y; vHue = aSeed2.w;
 }`
 const jellyFrag = /* glsl */ `
 uniform float u_time, u_split; uniform vec2 u_res;
 ${CLIP}
-varying float vA, vKind, vT, vHue;
+varying float vA, vKind, vT, vHue, vCoc;
 varying vec3 vN, vV;
 void main(){
   splitClip();
@@ -112,11 +131,11 @@ void main(){
   if (vKind < 0.5){
     float fr = 1.0 - abs(dot(normalize(vN), vV));
     vec3 film = 0.5 + 0.5 * cos(6.2832 * (fr * 1.4 + vHue + vec3(0.0, 0.33, 0.67)));     // thin-film iridescence
-    col = mix(vec3(0.55, 0.84, 0.92), film, 0.42) * (0.06 + 0.8 * pow(fr, 2.4));
-    col += vec3(0.78, 0.95, 1.0) * smoothstep(0.84, 0.99, vT) * 0.32;                        // the bright bell margin
+    col = mix(vec3(0.55, 0.84, 0.92), film, 0.42) * (0.06 + 0.8 * pow(fr, mix(2.4, 1.1, vCoc)));   // W19: defocus softens the rim
+    col += vec3(0.78, 0.95, 1.0) * smoothstep(mix(0.84, 0.55, vCoc), 0.99, vT) * 0.32 * (1.0 - 0.5 * vCoc);                        // the bright bell margin
     col += vec3(0.45, 0.75, 1.0) * 0.05 * (1.0 - vT);                                       // a faint inner glow
   } else {
-    col = vec3(0.6, 0.86, 0.95) * (1.0 - vT) * (vKind < 1.5 ? 0.45 : 0.28);
+    col = vec3(0.6, 0.86, 0.95) * (1.0 - vT) * (vKind < 1.5 ? 0.45 : 0.28) * (1.0 - 0.55 * vCoc);
   }
   gl_FragColor = vec4(col * vA * 0.85, 1.0);
 }`
@@ -138,7 +157,7 @@ void main(){
   vN = R * normalize(normal / aShape.xyz);
   vW = w;
   gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.0);
-  vA = floatFade(c, edge, gl_Position, 0.45, 1.3);
+  vA = floatFade(c, edge, gl_Position, 0.8, 2.2);
 }`
 const rockFrag = /* glsl */ `
 uniform float u_time, u_split, u_amb, u_abyss; uniform vec2 u_res; uniform vec3 u_cam;
@@ -178,7 +197,7 @@ void main(){
   vN = R * n;
   vEdge = abs(position.x) * 2.0;
   gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.0);
-  vA = floatFade(c, edge, gl_Position, 0.45, 1.3) * depthLight();
+  vA = floatFade(c, edge, gl_Position, 1.2, 3.0) * depthLight();
 }`
 const kelpFrag = /* glsl */ `
 uniform float u_time, u_split; uniform vec2 u_res;
@@ -301,9 +320,12 @@ export function Floaters({ u }: { u: U }) {
     // jellies
     const jelly = jellyGeometry(low ? 14 : hi ? 24 : 18, low ? 6 : hi ? 10 : 8, low ? 8 : 14)
     const js: number[] = [], js2: number[] = []
+    // W19: the four framing slots — ndc x, ndc y, depth (m), bell radius (share of the half-frame height). The subject
+    // sits in focus at ~6 m; one jelly shares its plane (sharp), one is near (blurred hardest), two are far (soft)
+    const SLOTS = [[-0.8, 0.48, 6.0, 0.1], [0.8, 0.3, 3.4, 0.12], [-0.52, 0.72, 10.5, 0.06], [0.56, 0.7, 13.0, 0.05]]
     for (let i = 0; i < COUNTS.jelly; i++) {
-      js.push(R(), R(), R(), R())
-      js2.push(0.16 + Math.pow(R(), 1.6) * 0.32, (R() - 0.5) * 0.5, (R() - 0.5) * 0.5, R())
+      js.push(...SLOTS[i % SLOTS.length])
+      js2.push(R(), (R() - 0.5) * 0.4, (R() - 0.5) * 0.4, R())
     }
     jelly.setAttribute('aSeed', new THREE.InstancedBufferAttribute(new Float32Array(js), 4))
     jelly.setAttribute('aSeed2', new THREE.InstancedBufferAttribute(new Float32Array(js2), 4))
@@ -353,22 +375,29 @@ export function Floaters({ u }: { u: U }) {
     return { jelly, rock, kelp, bubbles, motes }
   }, [low, hi])
 
+  const keep = useMemo(() => ({ value: 0 }), [])
+  const lens = useMemo(() => ({ u_camR: { value: new THREE.Vector3(1, 0, 0) }, u_camU: { value: new THREE.Vector3(0, 1, 0) }, u_camF: { value: new THREE.Vector3(0, 0, -1) }, u_lens: { value: new THREE.Vector2(1, 1) } }), [])   // W19: jellies step aside while the work cards hold the frame
   const mats = useMemo(() => {
     const base = { u_cam: u.u_cam, u_time: u.u_time, u_split: u.u_split, u_amb: u.u_amb, u_abyss: u.u_abyss, u_res: u.u_res, u_mo: mo }
     const box = (x: number, y: number, z: number) => ({ value: new THREE.Vector3(x, y, z) })
     const add = { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }
     return {
-      jelly: new THREE.ShaderMaterial({ vertexShader: jellyVert, fragmentShader: jellyFrag, uniforms: { ...base, u_box: box(12, 8, 15) }, side: THREE.DoubleSide, ...add }),
+      jelly: new THREE.ShaderMaterial({ vertexShader: jellyVert, fragmentShader: jellyFrag, uniforms: { ...base, u_box: box(12, 8, 15), u_keep: keep, ...lens }, side: THREE.DoubleSide, ...add }),
       rock: new THREE.ShaderMaterial({ vertexShader: rockVert, fragmentShader: rockFrag, uniforms: { ...base, u_box: box(8, 6, 10) }, transparent: true, depthWrite: false }),
       kelp: new THREE.ShaderMaterial({ vertexShader: kelpVert, fragmentShader: kelpFrag, uniforms: { ...base, u_box: box(12, 8, 15) }, side: THREE.DoubleSide, transparent: true, depthWrite: false }),
       bubbles: new THREE.ShaderMaterial({ vertexShader: bubbleVert, fragmentShader: bubbleFrag, uniforms: { ...base, u_box: box(8, 9, 10), u_pxScale: pxScale }, ...add }),
       motes: new THREE.ShaderMaterial({ vertexShader: moteVert, fragmentShader: moteFrag, uniforms: { ...base, u_box: box(6, 4.5, 7), u_pxScale: pxScale }, ...add }),
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [u, pxScale])
+  }, [u, pxScale, keep, lens])
 
   useFrame(() => {
     pxScale.value = props.renderH / (2 * Math.tan((camera.fov * Math.PI) / 360))
+    const want = props.lab > 0.001 && props.lab < 0.999 ? 1 : 0
+    const cam = camera as THREE.PerspectiveCamera
+    cam.matrixWorld.extractBasis(lens.u_camR.value, lens.u_camU.value, lens.u_camF.value); lens.u_camF.value.negate()
+    const ty = Math.tan((cam.fov * Math.PI) / 360); lens.u_lens.value.set(ty * cam.aspect, ty)
+    keep.value += (want - keep.value) * (1 - Math.exp(-4 * Math.min(props.dt, 0.1)))
   })
 
   const layer = (o: THREE.Object3D) => o.layers.set(DIVE_LAYER)

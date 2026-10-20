@@ -10,6 +10,10 @@ const GEO = new THREE.PlaneGeometry(1, 1, 1, 24)
 /** Rasterise one DOM line (its computed font) into an alpha texture. */
 export function rasterLine(el: HTMLElement, text: string, w: number, h: number) {
   const cs = getComputedStyle(el)
+  // W19: the GL copy follows CSS text-transform (Shifat 17:12Z capitalised headlines; the eyebrows' uppercase)
+  if (cs.textTransform === 'uppercase') text = text.toUpperCase()
+  else if (cs.textTransform === 'lowercase') text = text.toLowerCase()
+  else if (cs.textTransform === 'capitalize') text = text.replace(/(^|[\s\-(“"'])(\p{L})/gu, (_m, a: string, b: string) => a + b.toUpperCase())
   const dpr = Math.min(window.devicePixelRatio || 1, 3) // Shifat 14:01Z: big type rasterised at the device's own density (up to 3×)
   const c = document.createElement('canvas')
   const padX = Math.ceil(parseFloat(cs.fontSize) * 0.1)

@@ -59,21 +59,21 @@ export function floorH(x: number, z: number) {
   return -11 - 40 * s + 0.45 * Math.sin(x * 0.37 + z * 0.21) * Math.sin(z * 0.17 - x * 0.11)
 }
 
+/** tan(6°): the scene's fixed downward pitch (WORLD-MAP / PLAN-scene), the most the dive camera ever looks down */
+const MAX_DOWN = Math.tan((6 * Math.PI) / 180)
 type Key = { u: number; p: [number, number, number]; t: [number, number, number]; h: number }
 // u: section progress · p: camera · t: look-at · h: horizontal fov (deg) kept across aspect ratios
 const KEYS: Key[] = [
-  // STRUCTURE v2: the dive opens on the statement's view of the stone
-  { u: 0.00, p: [0, 5.6, 1.8],   t: [0, 0.0, 0.6],  h: 62 },  // the statement's frame: the stone on the lake from above
-  // W18-DIVE OVER-UNDER (Shifat 15:29Z + 15:30Z): a crane-down with a slow half arc around the stone (yaw +z → +x → −z,
-  // never through the zenith) that settles head-on at eye level, facing the dive (+z); then the lens sinks through the
-  // surface (Dive: split = 1 − camY / PORT), the waterline rising across the frame, and we follow the stone down
-  { u: 0.07, p: [2.31, 4.0, 2.76], t: [0, 0.1, 0.2], h: 60 },  // the arc begins, still looking down
-  { u: 0.13, p: [3.94, 2.1, -0.69], t: [0, 0.15, 0], h: 56 },  // three-quarter, dropping
-  { u: 0.19, p: [1.73, 0.95, -3.72], t: [0, 0.14, 0.1], h: 50 }, // almost head-on, low over the water
-  { u: 0.235, p: [0.3, 0.6, -3.95], t: [0, 0.1, 0.2], h: 48 },   // head-on at eye level: the waterline enters at the bottom
-  { u: 0.27, p: [0.1, 0.3, -3.85], t: [0, 0.05, 0.35], h: 48 },  // over-under: half air, half water, the stone straddling it
-  { u: 0.305, p: [0, 0.0, -3.7], t: [0, -0.05, 0.6], h: 50 },    // the line reaches the top of the frame
-  { u: 0.35, p: [0, -0.8, -3.2], t: [0, -0.75, 1.6], h: 56 },    // under: the stone hangs ahead in the light, starting to sink
+  // W19 (Shifat 17:13Z "Remove top down camera"; 16:33Z one front view + parallax): no crane-down and no arc any more.
+  // The lens starts where the hero's pin ends (low over the lake on the stone's −z side, facing +z at −6°) and simply
+  // sinks straight down through the surface while the stone settles into it ahead: the waterline rises bottom → top
+  // across the frame (Dive: split = 1 − camY / PORT), then we are under and follow the stone down
+  { u: 0.00, p: [0, 0.78, -4.3],  t: [0, 0.33, 0.0],  h: 50 },   // = hero B / statement: front view, the stone on the lake
+  { u: 0.10, p: [0, 0.62, -4.1],  t: [0, 0.19, 0.0],  h: 48 },   // still in the air: the waterline is about to enter
+  { u: 0.19, p: [0, 0.34, -3.95], t: [0, -0.08, 0.05], h: 48 },  // over-under: half air, half water, the stone straddling it
+  { u: 0.27, p: [0, 0.06, -3.85], t: [0, -0.35, 0.1], h: 48 },   // the line nears the top of the frame
+  { u: 0.305, p: [0, -0.2, -3.7], t: [0, -0.6, 0.4],  h: 50 },   // under
+  { u: 0.35, p: [0, -0.8, -3.2],  t: [0, -1.3, 1.6],  h: 56 },   // the stone hangs ahead in the light, starting to sink
   // (Shifat 09:11Z: the under-the-sea beat stays as it was — from here on the original glide)
   { u: 0.53, p: [0, -3.4, 9.2],  t: [0, 2.6, 16.4], h: 74 },  // hold on the light (title)
   { u: 0.66, p: [0, -5.2, 12.0], t: [0, -6.6, 21],  h: 70 },  // level out over the sand
@@ -115,6 +115,10 @@ export function divePath(u: number, pos: THREE.Vector3, target: THREE.Vector3) {
   curP.getPoint(k.t, pos); curT.getPoint(k.t, target)
   const fl = floorH(pos.x, pos.z) + 1.6
   if (pos.y < fl) pos.y = fl
+  // W19 (Shifat 17:13Z): never a look down steeper than the scene's fixed pitch — the old glide tipped 30–50° down
+  // over the drop-off; the aim is lifted to the fixed −6° (looking up into the light is untouched)
+  const dx = target.x - pos.x, dz = target.z - pos.z, hz = Math.hypot(dx, dz)
+  if (hz > 1e-3 && target.y - pos.y < -MAX_DOWN * hz) target.y = pos.y - MAX_DOWN * hz
   return k.h
 }
 

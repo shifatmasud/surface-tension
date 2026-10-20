@@ -192,6 +192,10 @@ html.no-gl .poster { position: absolute; inset: 0; background-size: cover; backg
 .card__label--tex { position: absolute; width: 640px; height: 400px; padding: 18px 20px; display: flex; align-items: flex-end; justify-content: space-between; font: 400 15px/1 var(--font); color: #fff; background: transparent; }
 html.lab-gl .lab .card__dom { opacity: 0; }
 .card:focus-visible::after { content: ''; position: absolute; left: 0; right: 0; bottom: -14px; height: 2px; background: var(--c-white); }
+/* W19 (visual P0-1 'card goes black after close'): focus returns to the slide's card on close, and the global
+   [tabindex]:focus-visible rule painted the whole card black (!important) over the GL reel; a card's focus is the white
+   rule under it, never a fill */
+.card:focus-visible, .card[tabindex]:focus-visible { background-color: transparent !important; color: inherit !important; text-decoration: none; }
 .lab__foot { display: grid; grid-template-columns: repeat(var(--grid-cols), minmax(0, 1fr)); column-gap: var(--grid-gap); align-items: last baseline; padding: 0; }
 .lab__names { grid-column: 1 / span 9; display: grid; overflow: visible; clip-path: inset(0 -50vw 0 -50vw); line-height: .9; padding-bottom: calc(var(--fs-display) * .24); margin-bottom: calc(var(--fs-display) * -.18); } /* padding in display ems (this box's own em is body size), so descenders (g, y) clear the mask */ /* vertical mask only: the longest name ("Fluid Matter") may bleed into the gutter instead of being cut */
 .lab__name { grid-area: 1 / 1; font-size: var(--fs-display); letter-spacing: -0.065em; margin-left: -0.055em; color: var(--c-white); white-space: nowrap; transform: translateY(108%) rotate(2.5deg); transform-origin: 0 100%; transition: transform var(--dur-in) var(--ease); }
@@ -317,10 +321,24 @@ html[data-bg='dark'] .slot { color: var(--c-white); }
 .slot__body { grid-column: 9 / -1; grid-row: 1; align-self: end; margin: 0 0 var(--s3); font-size: var(--fs-small); line-height: 1.45; max-width: 36ch; opacity: .8; }
 .slot__line { display: block; overflow: hidden; padding-bottom: .14em; margin-bottom: -.14em; }
 .slot__title .slot__line { padding-top: .04em; }
-.slot__in { display: inline-block; transform: translate3d(0, 110%, 0); will-change: transform; }
+.slot__in { display: inline-block; transform: translate3d(0, 110%, 0); will-change: transform; opacity: 0; }   /* W19 (P0-4): unrevealed lines never peek through the mask's descender room */
 .slot.is-gl .slot__beat { color: transparent; }
 @media (min-width: 641px) and (max-width: 1000px) { .slot__body { grid-column: 5 / -1; } }
 @media (max-width: 640px) { .slot { padding-bottom: var(--s4); } .slot__eyebrow { grid-column: 1 / -1; margin-bottom: var(--s2); } .slot__body { grid-column: 1 / -1; grid-row: 3; margin: var(--s2) 0 0; } }
+
+/* W19 — SHIFAT 17:12Z TEXT BLOCK RULE: every section's text block (headline + subheadline) is one flex row, headline left,
+   subheadline right, bottom-aligned, spread edge to edge on the grid; Inter 400, tight tracking and leading; capitalised
+   headline. Phones stack it (headline first). The eyebrow rides above the headline, out of the row. Ink stays the UI tone
+   (black on light, white under water / in space / on the wall); the masked line reveals are unchanged. */
+.slot__beat { display: flex; flex-direction: row; justify-content: space-between; align-items: flex-end; gap: 40px; background: none; }
+.slot__eyebrow { position: absolute; left: 0; bottom: 100%; margin: 0 0 var(--s3); }
+.slot__title { flex: 0 1 auto; margin: 0; font-size: 56px; line-height: 1.04; letter-spacing: -0.02em; text-align: left; text-transform: capitalize; font-weight: 400; }
+.slot__body { flex: 0 1 36ch; max-width: 36ch; margin: 0; font-size: 20px; line-height: 1.15; letter-spacing: -0.01em; text-align: left; font-weight: 400; opacity: 1; }
+@media (max-width: 640px) {
+  .slot__beat { flex-direction: column; align-items: flex-start; justify-content: flex-end; gap: 16px; }
+  .slot__title { font-size: clamp(34px, 10.4vw, 56px); }
+  .slot__body { flex: 0 0 auto; margin: 0; font-size: 17px; max-width: 34ch; }
+}
 /* the sections' own copy stays in the document for screen readers and search, out of sight: the slot draws it */
 html.slot-on :is(.hero__row, .statement__lines, .statement__cap, .dive__title, .dive__cap, .lab__foot, .systems__eyebrow, .systems__title, .systems__copy, .journey__beat) {
   position: absolute !important; width: 1px !important; height: 1px !important; overflow: hidden !important; clip: rect(0 0 0 0) !important; white-space: nowrap !important; margin: 0 !important; padding: 0 !important; opacity: 0 !important; }

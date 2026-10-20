@@ -82,15 +82,11 @@ export function CameraRig() {
       const ty = fine ? input.mouseXY.y : touching ? input.mouseXY.y : 0
       // stages with an exact composition (the journey's screen fills the viewport) take a smaller share
       O.k += ((props.overlayOpen ? 0 : props.stage === 'journey' ? 0.35 : 1) - O.k) * (1 - Math.exp(-3 * dt))
-      const yaw = O.yaw.step(-tx * 0.042 * O.k, dt)          // ±2.4°
-      const pitch = O.pitch.step(ty * 0.03 * O.k, dt)        // ±1.7°
-      const roll = O.roll.step(O.yaw.v * -0.12 * O.k, dt)    // the roll lags the pan, like a shoulder rig
-      O.t += dt
-      const fy = 0.0035 * Math.sin(O.t * 0.37) + 0.0018 * Math.sin(O.t * 0.91 + 1.3)   // ~0.1–0.3° float
-      const fx = 0.0028 * Math.sin(O.t * 0.29 + 0.7) + 0.0014 * Math.sin(O.t * 0.77)
-      camera.rotateY(yaw + fy); camera.rotateX(pitch + fx); camera.rotateZ(roll)
-      const breathe = f * (1 + 0.004 * Math.sin(O.t * 0.52))
-      if (Math.abs(camera.fov - breathe) > 1e-4) { camera.fov = breathe; camera.updateProjectionMatrix() }
+      // Shifat 16:33Z: one fixed front-facing camera; only a subtle eased pointer parallax (about ±1.5°)
+      const yaw = O.yaw.step(-tx * 0.026 * O.k, dt)          // ±1.5°
+      const pitch = O.pitch.step(ty * 0.018 * O.k, dt)       // ±1.0°
+      camera.rotateY(yaw); camera.rotateX(pitch)
+      if (Math.abs(camera.fov - f) > 1e-3) { camera.fov = f; camera.updateProjectionMatrix() }
     } else if (Math.abs(camera.fov - f) > 1e-3) { camera.fov = f; camera.updateProjectionMatrix() }
   }, -1)
   return null

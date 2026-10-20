@@ -31,8 +31,9 @@ export class ClipCompositeEffect extends Effect {
           vec3 sn = inputColor.rgb;
           if (u_has > 0.5) {
             vec2 rr = (2.0 + 10.0 * u_t * (1.0 - u_zoom)) / u_view;
-            // W18 push-through boundary: the outgoing frame keeps pushing in (scales about the centre) as it hands over
-            vec2 su = 0.5 + (uv - 0.5) / (1.0 + u_zoom * 0.35 * u_t * (1.0 - u_swap));
+            // W19 (tablet review P0-1): no zoom on the outgoing frame any more — the tablet's screen already converges on the
+            // journey's opening frame, so scaling it doubled the crewmate mid-hand-off; the push boundary keeps the 2 px soften only
+            vec2 su = uv;
             sn = texture2D(u_snap, su).rgb * 0.2;
             for (int i = 0; i < 8; i++) { float a = float(i) * 0.785398; sn += texture2D(u_snap, su + vec2(cos(a), sin(a)) * rr).rgb * 0.1; }
           }

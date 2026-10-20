@@ -13,8 +13,13 @@ import { vfovFor, portrait } from '../../core/frame'
 // first frame, optically centred (Shifat 11:05Z): the stone + its reflection read as one mass whose centre sits at
 // ~47 % of the frame height (true centre, a hair above). Only the aim moves: the lens looks a touch higher
 // (target -0.3 -> 0.11), so the stone drops from ~33 % to ~47 % without changing size or the type slot.
-const A = { pos: new THREE.Vector3(0, 2.8, 4.5), tgt: new THREE.Vector3(0, 0.11, 0) }
-const B = { pos: new THREE.Vector3(0, 10.5, 3.2), tgt: new THREE.Vector3(0, 0, -0.4) }
+// W19 (Shifat 17:13Z "Remove top down camera" + 16:33Z front view only): the lens now sits on the dive's side of the
+// stone (−z, facing +z, the direction the dive travels), so hero → dive is one front-facing move with no orbit and no
+// crane-up. A keeps the approved 11:05Z first frame (same distance, height and aim, seen from the other side); B no
+// longer cranes up to a top-down view: it settles low over the water, facing the stone at the scene's −6° pitch, which
+// is exactly where the dive's first key (diveState KEYS u = 0) starts.
+const A = { pos: new THREE.Vector3(0, 2.8, -4.5), tgt: new THREE.Vector3(0, 0.11, 0) }
+const B = { pos: new THREE.Vector3(0, 0.78, -4.3), tgt: new THREE.Vector3(0, 0.33, 0) }
 ;(window as any).__heroA = A // QA
 // portrait framing offsets (phones): closer and lower; the aim offset keeps the optical centre at ~46 % on phones too
 const HP = { z: 1.7, y: 0.9, ty: 0.06 } // stone ~62% of a phone's width: it breathes
@@ -32,7 +37,7 @@ export function Hero() {
       const pr = portrait()
       pose.pos.lerpVectors(A.pos, B.pos, t); pose.target.lerpVectors(A.tgt, B.tgt, t)
       // north-star frame: the stone optically centred, giant type on the bottom margin
-      pose.pos.z -= pr * HP.z * (1 - t); pose.pos.y -= pr * HP.y * (1 - t); pose.target.y -= pr * HP.ty * (1 - t)
+      pose.pos.z -= Math.sign(A.pos.z) * pr * HP.z * (1 - t); pose.pos.y -= pr * HP.y * (1 - t); pose.target.y -= pr * HP.ty * (1 - t)   // W19: phones come closer to the stone on either side
       pose.fov = mix(vfovFor(44, 22, 58), vfovFor(58), t)
       // ultrawide: the vertical fov hits its 22° floor and the stone grew past the header; back off along the view
       // line so it keeps its 16:10 share of the frame height
