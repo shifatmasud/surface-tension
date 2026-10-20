@@ -9,6 +9,7 @@ import { Odometer } from '../ui/Odometer'
 import { overlay } from '../ui/overlayState'
 import { audio } from '../../services/audio'
 import { labGL } from '../../gl/stages/lab/labGL'
+import './lab.css'
 
 /**
  * S3 — Lab. Pinned; vertical scroll slides the shelf sideways. North-star frame: the centred reel is

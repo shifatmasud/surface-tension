@@ -1,0 +1,5 @@
+/* Lab caption: on desktop it sits flush to the right margin (left-aligned text), so even the longest project name
+   ("Fluid Matter", ~4.9em) keeps a clear gutter before it instead of touching it. */
+@media (min-width: 1001px) {
+  .lab__cap { justify-self: end; max-width: 27ch; }
+}
