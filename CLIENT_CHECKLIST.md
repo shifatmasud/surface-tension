@@ -40,9 +40,9 @@ Tick an item only when it runs on the live site and was checked visually.
 - [ ] Water looks physically believable, not fake
 
 ## Cursor & interaction
-- [ ] Global cursor screen-paint fluid trail (Chapter 14)
-- [x] Accumulated iridescence on trail fringes, like the original — live 09:24Z index-Dqq_cqjq.js (trail v2), real-GPU frames 1440/390
-- [x] Cursor trail: own fluid trail v2, replaces the parity version — live 09:24Z index-Dqq_cqjq.js, real-GPU frames 1440/390
+- [x] Global cursor screen-paint fluid trail (Chapter 14): the original Lusion-parity trail — restored live 09:27Z index-iIuS-AU-.js (byte-identical to the pre-v2 bundle), real-GPU frames 1440/390
+- [x] Accumulated iridescence on trail fringes, like the original — parity trail, live index-iIuS-AU-.js
+- [~] RETIRED: own fluid trail v2 (was live 09:24–09:27Z, index-Dqq_cqjq.js). Shifat 09:23Z preferred the original; files removed from the repo and from v2 staging
 - [ ] Parallax & depth
 - [x] Mouse-move tilt — live real-GPU frames 04:25Z Oct 20 (pointer left vs right: camera parallax shifts the frame and the gem tilts toward the pointer)
 - [x] Odometer counters — live 04:25Z: intro 000→100 reel counter; lab index rolls as digit reels (DOM read 01→04 / 05 while scrolling)
@@ -127,3 +127,5 @@ Tick an item only when it runs on the live site and was checked visually.
 - [ ] Flat SVG logo used for all branding: nav, footer, favicon, apple-touch, OG image (m:9f6a26dd)
 - [ ] Keep the current under-the-sea dive beat intact inside Scene 1 (god rays, kelp, bubbles, tool numbers), then the projects in the same shot (Shifat 09:11Z) — staged on shifat-v2-preview, not live
 - [ ] Project slide morphs into the detail card on click (shared-element FLIP/GL morph, 600–750 ms, reverse on close, dialog a11y, swipe-down on phones) (Shifat 09:16Z)
+- [ ] Every element tells a beautiful story: one narrative thread, each element has a story job (m:26bef796)
+- [x] REVERT cursor trail to the original Lusion-parity trail (pre-v2, as live before 09:24Z) per Shifat 09:23Z m:a07a1540: 'Keep original lusion.co trail please. It was better'. Trail v2 is retired. — live 09:27Z index-iIuS-AU-.js (hash checked), GitHub 0670bd1..86c58ee, v2 tree reverted too; real-GPU frames 1440/390
