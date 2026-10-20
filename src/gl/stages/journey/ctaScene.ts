@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { props } from '../../../state/props'
 import { browser } from '../../../services/settings'
+import { journey } from './journeyState'
 import { createStickerInteraction, type StickerInteraction } from './stickerInteract'
 
 /**
@@ -21,7 +22,7 @@ const LOGOS: { id: string; label: string; shape: 'circle' | 'square'; bg: string
   // Simple Icons v16.35.0 paths (the brands' current marks; the OpenAI "blossom" is the current ChatGPT/OpenAI mark)
   { id: 'framer', label: 'Framer', shape: 'square', bg: '#ffffff', fg: '#000000', d: 'M4 0h16v8h-8zM4 8h8l8 8H4zM4 16h8v8z' },
   { id: 'figma', label: 'Figma', shape: 'square', bg: '#ffffff', fg: '#000', draw: figma },
-  { id: 'react', label: 'React', shape: 'circle', bg: '#20232a', fg: '#61dafb', d: 'REACT' },
+  // (Shifat 20:31Z m:f1f3a4f9 "Also remove react sticker": gone too)
   // (Shifat 20:30Z m:f9db1b48 "Remove vercel sticker": the Vercel sticker is gone)
   { id: 'openai', label: 'ChatGPT', shape: 'circle', bg: '#ffffff', fg: '#000000', d: 'OPENAI' },
   { id: 'notion', label: 'Notion', shape: 'square', bg: '#ffffff', fg: '#000000', d: 'NOTION' },
@@ -44,7 +45,7 @@ function figma(c: CanvasRenderingContext2D, s: number) {
   piece(0, 2, '#0ACF83', 0.5, 0, 0.5, 0.5)
 }
 
-/** the six stickers as one atlas (3 × 2 cells): a die-cut white vinyl margin round a printed face */
+/** the stickers (four since 20:31Z) as one atlas (3 × 2 cells): a die-cut white vinyl margin round a printed face */
 function stickerAtlas(paths: Record<string, string>) {
   const C = 384, cv = document.createElement('canvas'); cv.width = C * 3; cv.height = C * 2
   const c = cv.getContext('2d')!
@@ -184,7 +185,7 @@ const TX_VERT = /* glsl */ `
 attribute vec4 aGeo;     // x (em, centred per word), line (0/1), w (em), h (em)
 attribute vec4 aUv;      // atlas rect u0 v0 u1 v1
 attribute vec4 aRole;    // word index, letter index, copy (0 leaving / 1 arriving), words in this line
-uniform float u_time, u_em, u_gap, u_still, u_shadow, u_z, u_desc;
+uniform float u_time, u_em, u_gap, u_still, u_shadow, u_z, u_desc, u_enter;
 uniform vec2 u_off, u_c;
 varying vec2 vUv; varying float vY; varying float vOn; varying float vMov;
 const float PERIOD = 3.4, ROLL = 0.62, STAG = 0.045, TRAVEL = 1.25;
@@ -193,13 +194,20 @@ void main(){
   float n = aRole.w;
   float k = floor(u_time / PERIOD), lt = u_time - k * PERIOD;
   float cw = mod(k, n), nw = mod(k + 1.0, n);
-  float delay = aRole.y * STAG + aGeo.y * 0.14;
+  // TEXTROLL (Shifat 12:16 "line rolls instead of per chars"): a word rolls as ONE piece; only the lines stagger
+  float delay = aGeo.y * 0.14;
   float still = max(u_still, step(n, 1.5));                // a one-word line ("Let’s make") never rolls
+  still = max(still, step(0.001, abs(u_enter - 1.0)));      // TEXTROLL: the word cycle holds while the lines roll in / out
   float e = still > 0.5 ? 0.0 : ease((lt - (PERIOD - 1.25) - delay) / ROLL);
   float on, dy;
   if (aRole.z < 0.5) { on = step(abs(aRole.x - cw), 0.1); dy = e * TRAVEL; }
   else { on = step(abs(aRole.x - nw), 0.1) * (still > 0.5 ? 0.0 : 1.0); dy = (e - 1.0) * TRAVEL; }
   vOn = on; vMov = abs(dy) > 0.001 ? 1.0 : 0.0;   // STICKERS LANE: a rolling glyph gets the tighter slot top
+  // TEXTROLL (Shifat 19:39Z "always appear & disappear rolling up masked by each line"): u_enter 0 → 1 rolls each line up
+  // into its slot as the wall arrives, 1 → 2 rolls it up and out as the curtain lifts; scroll-driven, so reversible
+  float ein = clamp(u_enter * 1.16 - aGeo.y * 0.16, 0.0, 1.0), eout = clamp((u_enter - 1.0) * 1.16 - aGeo.y * 0.16, 0.0, 1.0);
+  dy += -(1.0 - (1.0 - pow(1.0 - ein, 3.0))) * TRAVEL + eout * eout * (3.0 - 2.0 * eout) * TRAVEL;
+  if (ein < 0.001 || eout > 0.999) on = 0.0; vOn = on;
   vec2 q = position.xy + 0.5;                              // 0..1 in the glyph box
   float baseY = -aGeo.y * u_gap;
   vec2 g = vec2(aGeo.x + q.x * aGeo.z, baseY - u_desc + q.y * aGeo.w + dy);
@@ -289,7 +297,7 @@ export function buildCta(portrait: boolean) {
   const stickers = new THREE.Mesh(sGeo, sMat); stickers.frustumCulled = false; stickers.renderOrder = -4
   const stickerShadows = new THREE.Mesh(sGeo, sShadowMat); stickerShadows.frustumCulled = false; stickerShadows.renderOrder = -5
   // type + its shadow
-  const tU = { u_atlas: { value: null as THREE.Texture | null }, u_time: { value: 0 }, u_em: { value: 1 }, u_gap: { value: 0.9 }, u_still: { value: browser.reducedMotion ? 1 : 0 }, u_off: { value: new THREE.Vector2() }, u_c: { value: new THREE.Vector2() }, u_desc: { value: 0.55 } }
+  const tU = { u_atlas: { value: null as THREE.Texture | null }, u_time: { value: 0 }, u_em: { value: 1 }, u_gap: { value: 0.9 }, u_still: { value: browser.reducedMotion ? 1 : 0 }, u_enter: { value: browser.reducedMotion ? 1 : 0 }, u_off: { value: new THREE.Vector2() }, u_c: { value: new THREE.Vector2() }, u_desc: { value: 0.55 } }
   const tMat = new THREE.ShaderMaterial({ vertexShader: TX_VERT, fragmentShader: TX_FRAG, toneMapped: false, fog: false, transparent: true, depthWrite: false,
     blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, uniforms: { ...tU, u_shadow: { value: 0 }, u_z: { value: 0 } } })
   const tShadowMat = new THREE.ShaderMaterial({ vertexShader: TX_VERT, fragmentShader: TX_FRAG, toneMapped: false, fog: false, transparent: true, depthWrite: false, uniforms: { ...tU, u_shadow: { value: 1 }, u_z: { value: WALL_Z + 0.012 }, u_off: { value: new THREE.Vector2() } } })
@@ -348,12 +356,12 @@ export function buildCta(portrait: boolean) {
   /** stickers placed in the final frame (fractions of the visible wall), framing the centre */
   const PLACE_WIDE: [number, number, number, number][] = [
     // fx, fy, size (× wall height), tilt (deg)
-    [-0.37, 0.31, 0.22, -9], [0.355, 0.30, 0.21, 8], [-0.425, -0.03, 0.2, 6],   // STICKERS LANE: Figma (2nd) clear of the header pills
-    [0.42, 0.0, 0.2, -7], [-0.345, -0.33, 0.21, 10], [0.36, -0.315, 0.2, -5],
+    // W19 (Shifat 20:30Z/20:31Z: Vercel and React stickers removed): four left, one per corner, balanced
+    [-0.37, 0.31, 0.22, -9], [0.355, 0.30, 0.21, 8], [-0.345, -0.33, 0.21, 10], [0.36, -0.315, 0.2, -5],
   ]
   const PLACE_TALL: [number, number, number, number][] = [
-    [-0.3, 0.335, 0.29, -9], [0.02, 0.37, 0.25, 6], [0.31, 0.325, 0.28, 8],
-    [-0.375, -0.115, 0.24, 7], [0.375, -0.07, 0.24, -6], [-0.35, -0.225, 0.22, -8],   // STICKERS LANE: Notion clear of the CTA row
+    // W19: four stickers, one per corner (the upper pair over the headline, the lower pair either side of the crewmate)
+    [-0.3, 0.335, 0.29, -9], [0.31, 0.325, 0.28, 8], [-0.375, -0.115, 0.24, 7], [0.375, -0.07, 0.24, -6],
   ]
   let typeY = 0   // the headline's first baseline (tablet-local), set by layout()
   const lay: CtaLayout = { C: new THREE.Vector3(), D: 20, hw: 12, wv: 19, fov: 34, textZ: WALL_Z + 1.4, em: 1, crewZ: 6, crewY: 0, crewScale: 1, crewH: 1 }
@@ -383,7 +391,7 @@ export function buildCta(portrait: boolean) {
     P.forEach((s, i) => { base.set([lay.C.x + s[0] * wv, lay.C.y + s[1] * hw, s[2] * (portrait ? wv : hw), THREE.MathUtils.degToRad(s[3])], i * 4); aSt.setXYZW(i, base[i * 4], base[i * 4 + 1], base[i * 4 + 2], base[i * 4 + 3]) })
     lay.crewH = crewHeight
     ix?.relayout()   // STICKERS HOOK
-    LOGOS.forEach((_, i) => aProg.setY(i, i === 1 || i === 4 ? 0.06 : 0)) // a lifted corner on two of them
+    LOGOS.forEach((_, i) => aProg.setY(i, i === 1 || i === 2 ? 0.06 : 0)) // a lifted corner on two of them
     LOGOS.forEach((_, i) => aProg.setZ(i, i * 0.37))
     LOGOS.forEach((_, i) => aProg.setX(i, 1)) // POLISH: on the wall from the start (no slap-in)
     aSt.needsUpdate = true; aProg.needsUpdate = true
@@ -404,6 +412,9 @@ export function buildCta(portrait: boolean) {
     type.visible = typeShadow.visible = showType
     if (showType) {
       tU.u_time.value = time; tU.u_em.value = lay.em
+      // TEXTROLL: in with the wall's arrival (a = journey.cta), out with the curtain (journey.ctaOut); reduced motion: in place
+      const ein = Math.min(1, Math.max(0, (a - 0.42) / 0.46)), eout = Math.min(1, Math.max(0, journey.ctaOut))
+      tU.u_enter.value = browser.reducedMotion ? (eout >= 1 ? 2 : 1) : ein + (ein >= 1 ? eout : 0)
       tU.u_c.value.set(lay.C.x, typeY)
       tMat.uniforms.u_z.value = lay.textZ
       // the soft shadow: the type projected along the light onto the wall

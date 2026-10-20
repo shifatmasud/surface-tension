@@ -92,3 +92,15 @@ html.no-gl .stickers { position: relative; inset: auto; height: 50vh; }
 .contact__cta { align-items: center; margin-inline: auto; text-align: center; }
 .contact .big-btn { height: 76px; padding: 0 12px 0 31px; gap: 21px; font-size: calc(var(--fs-body) * 1.18); max-width: 500px; }
 .contact .big-btn i { width: 54px; height: 54px; }
+
+/* W19 (Shifat 20:36Z m:9b6b0e2c "Big cta title text must be centered aligned"): the CTA headline is centred at every size
+   (the GL headline already centres each line; this is the DOM / reduced-motion / no-GL version) */
+.contact__title { text-align: center; justify-self: center; }
+.contact__title .contact__line { display: block; margin-inline: auto; }
+/* W19 (Shifat 20:37Z m:359aea9e "Cta button must stay fixed at cta bottom center section. No scroll away"): the button
+   is pinned to the bottom-centre of the CTA's own (sticky) frame, a fixed offset above its bottom edge (safe-area aware).
+   It never drifts while the CTA is on screen; when the scene slides up to uncover the footer it rides the CTA's bottom
+   edge, so it never sits over the footer's text */
+.contact__inner { position: sticky; }
+.contact__cta { position: absolute; left: 50%; bottom: calc(clamp(28px, 6vh, 64px) + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); width: auto; z-index: 2; }
+@media (max-width: 760px) { .contact__cta { width: auto; max-width: calc(100vw - 40px); bottom: calc(clamp(24px, 5svh, 48px) + env(safe-area-inset-bottom, 0px)); } }

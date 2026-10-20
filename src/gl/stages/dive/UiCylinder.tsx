@@ -10,6 +10,7 @@ import { dive, SYS_C, TAB_F } from './diveState'
 import { AtomField } from './Atom'
 import { TabletWindow } from '../journey/tabletWindow'; import { tabletPose } from '../../world/handoff' // TABLET HOOK: the live 3D window (journey/tabletWindow.ts) + the tablet's pose (world/handoff.ts)
 /** QA: ?atom holds the sequence at the atom, ?drum at the drum; window.__morph (0..1) pins it */
+const KEEP_EYE = new THREE.Vector3(0, 0, -1e3), KEEP_F = new THREE.Vector3(0, 0, 1), KEEP_V = new THREE.Vector3() // POLISH-2: the main lens, for the ring's keep-out
 const ss = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
 const QS = typeof location !== 'undefined' ? location.search : ''
 const HOLD = /[?&]atom/.test(QS) ? 0 : /[?&]drum/.test(QS) ? 1 : -1
@@ -441,6 +442,8 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
       else if (hit !== ia.hover) { ia.hover = hit; cursorHover(hit >= 0) }
     }
     if (ia.hover >= 0 && input.isTouch && props.time > ia.touchHold) ia.hover = -1
+    // POLISH-2 keep-out: the main lens (position + forward), read in the main pass only
+    if (!nb.active) { KEEP_EYE.copy(state.camera.position); state.camera.getWorldDirection(KEEP_F) }
     for (let i = 0; i < built.items.length; i++) {
       const it = built.items[i], S = st[i], A = it.g.userData.act as Record<string, any>
       S.h += ((i === ia.hover ? 1 : 0) - S.h) * (1 - Math.exp(-10 * dt))
@@ -448,7 +451,22 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
       S.turn += (S.turnT - S.turn) * (1 - Math.exp(-6 * dt))
       const lift = S.h * 0.32 - Math.sin(S.press * Math.PI) * 0.08
       const rr = R + lift
-      it.g.position.set(Math.sin(it.a) * rr, it.y + Math.sin(t * 0.6 + it.ph) * 0.05, Math.cos(it.a) * rr)
+      // POLISH-2 (Shifat 19:30Z "Camera mustn't go through hard objects"): a part that would sit in the lens's corridor
+      // (just behind to ~5 m ahead, within ~2.2 m of the axis, so nothing crosses the lens or the tablet coming to it) slides up (upper rows) or down (lower rows) by exactly
+      // what keeps it clear: sqrt(lat² + r²) − lat, a smooth path change, never a fade or a pop. Driven by the main
+      // camera (KEEP_EYE / KEEP_F), so every pass draws the part at the same place.
+      let dodge = 0
+      {
+        const wa = it.a + s.rotation.y
+        KEEP_V.set(SYS_C.x + Math.sin(wa) * rr - KEEP_EYE.x, SYS_C.y + it.y - KEEP_EYE.y, SYS_C.z + Math.cos(wa) * rr - KEEP_EYE.z)
+        const z = KEEP_V.dot(KEEP_F)
+        const rk = 2.2 * ss(-0.8, 0.2, z) * (1 - ss(4.0, 6.0, z)) * ss(0, 0.15, dive.push) // only on the push toward the tablet
+        if (rk > 0) {
+          const lat = Math.sqrt(Math.max(0, KEEP_V.lengthSq() - z * z))
+          dodge = (it.y >= 0 ? 1 : -1) * (Math.sqrt(lat * lat + rk * rk) - lat)
+        }
+      }
+      it.g.position.set(Math.sin(it.a) * rr, it.y + dodge + Math.sin(t * 0.6 + it.ph) * 0.05, Math.cos(it.a) * rr)
       // each part turns halfway toward the lens from its place on the drum (no edge-on slivers at the sides)
       let off = Math.PI - (it.a + s.rotation.y); off = Math.atan2(Math.sin(off), Math.cos(off))
       it.g.rotation.set(Math.sin(t * 0.5 + it.ph) * 0.04 * (1 - S.h), it.a + off * (0.55 + 0.45 * S.h) + S.turn, Math.sin(t * 0.4 + it.ph * 1.3) * 0.03 * (1 - S.h))

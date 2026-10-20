@@ -1,130 +1,62 @@
-import { Odometer } from './Odometer'
 import { useEffect, useRef, useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
-import { SpeakerSimpleHigh, SpeakerSimpleSlash, ArrowUpRight, X as XIcon, List } from '@phosphor-icons/react'
 import { audio } from '../../services/audio'
 import { scroll } from '../../services/scroll'
-import { SITE } from '../../content/site'
 import { Logo } from '../../assets/logo/Logo'
-import { HOUSE } from '../../core/house'
 
-const LINKS = [
-  // SECTION CUT (Shifat 15:41Z): Statement removed; Work is the dive's project slides (DOM id stays 'lab' for the card morph)
-  { id: 'hero', label: 'Surface' }, { id: 'dive', label: 'Dive' }, { id: 'lab', label: 'Work' },
-  { id: 'systems', label: 'Shade DS' }, { id: 'journey', label: 'Journey' }, { id: 'contact', label: 'Say hi' },
-]
-
+/**
+ * W19 (Shifat 20:33Z m:2349f78f "No need menu button in nav"): the Menu button and its overlay are gone. It is one page
+ * with one CTA. The nav is the wordmark (left) and the sound toggle.
+ * W19 (Shifat 20:34Z m:89379c2e "Volume button doesn't need volume icon just animate simple single wave line"): the
+ * toggle is ONE thin stroke. On, a gentle sine drifts; off, it eases to flat (reversible, no jump). Under reduced motion
+ * it is static (a still wave when on, flat when off).
+ */
 function Wave({ on }: { on: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null)
+  const onRef = useRef(on)
+  onRef.current = on
   useEffect(() => {
     const c = ref.current!; const ctx = c.getContext('2d')!
-    const dpr = Math.min(devicePixelRatio, 2); c.width = 22 * dpr; c.height = 14 * dpr; ctx.scale(dpr, dpr)
-    let raf = 0, amp = 0, n = 0, color = getComputedStyle(c).color
-    const data = new Uint8Array(32)
-    const draw = (t: number) => {
-      amp += ((on ? 1 : 0.12) - amp) * 0.08
-      ctx.clearRect(0, 0, 22, 14)
-      if (audio.analyser && on) audio.analyser.getByteFrequencyData(data)
-      // PERF HOOK: getComputedStyle forced a style recalculation every frame; the colour is re-read every 8th frame
+    const W = 22, H = 14
+    const dpr = Math.min(devicePixelRatio, 2); c.width = W * dpr; c.height = H * dpr; ctx.scale(dpr, dpr)
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
+    let raf = 0, amp = onRef.current ? 1 : 0, phase = 0, n = 0, last = performance.now(), color = getComputedStyle(c).color
+    const draw = (now: number) => {
+      const dt = Math.min(0.05, (now - last) / 1000); last = now
+      const target = onRef.current ? 1 : 0
+      amp = reduced ? target : amp + (target - amp) * (1 - Math.exp(-6 * dt))
+      if (!reduced) phase += dt * 3.2
       if ((++n & 7) === 0) color = getComputedStyle(c).color
-      ctx.lineWidth = 1.4; ctx.lineCap = 'round'; ctx.strokeStyle = color
+      ctx.clearRect(0, 0, W, H)
+      ctx.lineWidth = 1.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = color
       ctx.beginPath()
-      for (let x = 0; x <= 22; x += 1) {
-        const band = data[(x % 16) + 2] / 255
-        const y = 7 + Math.sin(x * 0.7 + t * 0.006) * (2 + band * 4) * amp
-        x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
+      for (let x = 1; x <= W - 1; x += 0.5) {
+        const env = Math.sin(Math.PI * (x - 1) / (W - 2))           // the ends rest on the centre line
+        const y = H / 2 + Math.sin(x * 0.62 - phase) * 3 * amp * env
+        x === 1 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
       }
       ctx.stroke()
+      // settled and still: stop drawing until the state changes
+      if (reduced || (target === 0 && amp < 0.002)) { raf = 0; return }
       raf = requestAnimationFrame(draw)
     }
     raf = requestAnimationFrame(draw)
-    return () => cancelAnimationFrame(raf)
+    return () => { if (raf) cancelAnimationFrame(raf) }
   }, [on])
   return <canvas ref={ref} className="wave" aria-hidden />
 }
 
-/** A11Y: everything focusable inside an element, in tab order */
-const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
-
 export function Header() {
-  const [open, setOpen] = useState(false)
   const [sound, setSound] = useState(false)
-  const menuBtn = useRef<HTMLButtonElement>(null)
-  const menuEl = useRef<HTMLElement>(null)
-  const returnTo = useRef<HTMLElement | null>(null)   // A11Y: where focus goes when the menu closes (the button, or the chosen section)
-  const wasOpen = useRef(false)
   useEffect(() => audio.onChange(setSound), [])
-  useEffect(() => { if (open) scroll.stop(); else scroll.start() }, [open])
-  // A11Y (menu button): focus moves into the menu on open, Tab/Shift+Tab stay inside (menu button + links), Esc closes,
-  // and focus returns to the button (or lands on the section a link chose) on close
-  useEffect(() => {
-    if (!open) {
-      if (wasOpen.current) { wasOpen.current = false; const t = returnTo.current ?? menuBtn.current; returnTo.current = null; if (t !== document.body) t?.focus({ preventScroll: true }) }
-      return
-    }
-    wasOpen.current = true
-    const raf = requestAnimationFrame(() => menuEl.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus({ preventScroll: true }))
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.preventDefault(); setOpen(false); return }
-      if (e.key !== 'Tab') return
-      const ring = [menuBtn.current, ...Array.from(menuEl.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])].filter(Boolean) as HTMLElement[]
-      if (!ring.length) return
-      const i = ring.indexOf(document.activeElement as HTMLElement)
-      e.preventDefault()
-      ring[(i < 0 ? 0 : i + (e.shiftKey ? ring.length - 1 : 1)) % ring.length].focus({ preventScroll: true })
-    }
-    document.addEventListener('keydown', onKey, true)
-    return () => { cancelAnimationFrame(raf); document.removeEventListener('keydown', onKey, true) }
-  }, [open])
-  const go = (id: string) => { setOpen(false); setTimeout(() => scroll.scrollTo('#' + id, { duration: 2 }), 60); audio.swell(true) }
-  /** A11Y (menu links): the same path as any same-page anchor and the skip link (scroll.ts toHash): the virtual scroll
-   *  eases to the section and the section takes focus, so keyboard and screen-reader users land where the eye goes.
-   *  The menu closes first (it holds the scroll), then the hash moves. */
-  const goMenu = (id: string) => {
-    returnTo.current = document.body   // the section takes focus, not the menu button
-    setOpen(false); audio.swell(true)
-    setTimeout(() => {
-      if (location.hash !== '#' + id) history.pushState(null, '', '#' + id)
-      window.dispatchEvent(new HashChangeEvent('hashchange'))
-    }, 60)
-  }
+  const go = (id: string) => { scroll.scrollTo('#' + id, { duration: 2 }); audio.swell(true) }
   return (
-    <>
-      <header className="header">
-        <a className="wordmark" href="#hero" onClick={(e) => { e.preventDefault(); go('hero') }} aria-label="Shifat Masud — home" data-cursor><span className="wordmark__mark" aria-hidden="true"><Logo size="100%" /></span><span aria-hidden="true">Shifat</span></a>
-        <nav className="pills" aria-label="Primary">
-          <button className="pill pill--quiet" onClick={() => audio.toggle()} aria-pressed={sound} aria-label={sound ? 'Mute sound' : 'Turn sound on'} data-cursor onMouseEnter={() => audio.tick()}>
-            {sound ? <SpeakerSimpleHigh size={16} weight="bold" /> : <SpeakerSimpleSlash size={16} weight="bold" />}
-            <Wave on={sound} />
-          </button>
-          {/* Shifat 18:19Z: ONE CTA on the whole page (the CTA section's); the header's "Say hi" pill is gone, "Say hi" stays in the menu */}
-          {/* A11Y (cut review: no way to open the 6-link menu): the B/W menu pill; it stays above the open panel as its close */}
-          <button ref={menuBtn} type="button" className="pill pill--quiet pill--menu" aria-expanded={open} aria-controls="menu" aria-label="Menu"
-            onClick={() => setOpen((o) => !o)} data-cursor onMouseEnter={() => audio.tick()}>
-            {open ? <XIcon size={16} weight="bold" aria-hidden="true" /> : <List size={16} weight="bold" aria-hidden="true" />}
-            <span className="pill__txt" aria-hidden="true">{open ? 'Close' : 'Menu'}</span>
-          </button>
-        </nav>
-      </header>
-      <AnimatePresence>
-        {open && (
-          <>
-            <motion.div className="menu-scrim" aria-hidden="true" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setOpen(false)} />
-            <motion.nav ref={menuEl} id="menu" className="menu" aria-label="Sections" initial={{ x: '108%' }} animate={{ x: 0 }} exit={{ x: '108%' }} transition={{ type: 'spring', stiffness: 120, damping: 20, mass: 0.9 }}>
-              <ol>
-                {LINKS.map((l, i) => (
-                  <li key={l.id}>
-                    <motion.a href={'#' + l.id} onClick={(e) => { e.preventDefault(); goMenu(l.id) }} initial={{ y: '110%' }} animate={{ y: 0 }} exit={{ y: '110%' }} transition={{ delay: 0.08 + i * 0.045, duration: 0.7, ease: HOUSE.IN }} onMouseEnter={() => audio.tick()}>
-                      <small aria-hidden="true"><Odometer value={i + 1} digits={2} delay={0.1 + i * 0.05} /></small>{l.label}
-                    </motion.a>
-                  </li>
-                ))}
-              </ol>
-              <footer><span>{SITE.city}</span><a href={SITE.github} target="_blank" rel="noreferrer">GitHub <ArrowUpRight size={12} aria-hidden="true" /></a></footer>
-            </motion.nav>
-          </>
-        )}
-      </AnimatePresence>
-    </>
+    <header className="header">
+      <a className="wordmark" href="#hero" onClick={(e) => { e.preventDefault(); go('hero') }} aria-label="Shifat Masud — home" data-cursor><span className="wordmark__mark" aria-hidden="true"><Logo size="100%" /></span><span aria-hidden="true">Shifat</span></a>
+      <nav className="pills" aria-label="Primary">
+        <button type="button" className="pill pill--quiet pill--sound" onClick={() => audio.toggle()} aria-pressed={sound} aria-label={sound ? 'Sound on' : 'Sound off'} data-cursor onMouseEnter={() => audio.tick()}>
+          <Wave on={sound} />
+        </button>
+      </nav>
+    </header>
   )
 }

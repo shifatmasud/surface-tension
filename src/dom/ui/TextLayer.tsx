@@ -124,7 +124,10 @@ export function TextLayer() {
     const gl = settings.USE_GL
     const beatsEl = Array.from(host.querySelectorAll<HTMLElement>('.slot__beat'))
     // per beat: its lines (DOM + GL), and its animation state: dir +1 coming in / -1 going out, t0, live
-    const st = beatsEl.map(() => ({ lines: [] as LineGL[], dom: [] as HTMLElement[], dir: 0, t0: -10, on: false }))
+    // TEXTROLL (Shifat 19:39Z "Text must always appear & disappear (even hero text contents) rolling up masked by each
+    // lines"): every line keeps its live reveal (v), so a beat that leaves mid-entrance rolls up and out FROM WHERE IT IS
+    // (ot0/from), and a beat that is re-entered mid-exit finishes leaving before it rolls back in. Nothing is cut.
+    const st = beatsEl.map(() => ({ lines: [] as LineGL[], dom: [] as HTMLElement[], dir: 0, t0: -10, on: false, ot0: -1, v: [] as number[], from: [] as number[] }))
     let splits: SplitText[] = []
     const ink = { title: new THREE.Color('#0a0a0b'), body: new THREE.Color('#0a0a0b'), eyebrow: new THREE.Color('#5f646b') }
     const want = { title: new THREE.Color(), body: new THREE.Color(), eyebrow: new THREE.Color() }
@@ -167,12 +170,6 @@ export function TextLayer() {
       if (gl) host.classList.add('is-gl')
     }
     let active = -1, built = false
-    /** W19: take a beat off the screen this frame — every line under its mask, transparent */
-    const hideNow = (s: (typeof st)[number]) => {
-      s.on = false
-      for (const L of s.lines) { L.mat.uniforms.u_reveal.value = 0; L.mat.uniforms.u_opacity.value = 0 }
-      if (!gl) s.dom.forEach((d) => { d.style.transform = 'translate3d(0, 110%, 0)'; d.style.opacity = '0' })
-    }
     const set = (i: number) => {
       if (i === active) return
       const now = performance.now() / 1000
@@ -181,14 +178,20 @@ export function TextLayer() {
       //   its exit from 'in place' made the half-risen lines pop up whole for a frame
       // - the incoming beat waits until every leaving line has fully cleared its mask (no two headlines together)
       const lines = (s: (typeof st)[number]) => Math.max(s.lines.length, s.dom.length)
+      // TEXTROLL: the outgoing beat always rolls up and out per line, each line from its current place (a line still
+      // under its mask stays there; a half-risen line keeps rising through the top; never a cut, never a pop)
       if (active >= 0) {
         const s = st[active]
-        const revealed = s.dir > 0 && now >= s.t0 + IN_DUR + STAGGER * (lines(s) - 1)
-        if (revealed) { s.dir = -1; s.t0 = now } else hideNow(s)
+        if (s.on) { s.from = Array.from({ length: lines(s) }, (_, k) => s.v[k] ?? 0); s.ot0 = now; s.dir = -1 }
       }
       let clearAt = now
-      for (const s of st) if (s.on && s.dir < 0) clearAt = Math.max(clearAt, s.t0 + OUT_DUR + STAGGER * (lines(s) - 1))
-      if (i >= 0) { const s = st[i]; hideNow(s); s.dir = 1; s.t0 = active >= 0 ? Math.max(now + 0.06, clearAt + 0.04) : now; s.on = true }
+      for (const s of st) if (s.on && s.dir < 0 && s.ot0 >= 0) clearAt = Math.max(clearAt, s.ot0 + (reduced ? 0 : OUT_DUR + STAGGER * (lines(s) - 1)))
+      if (i >= 0) {
+        const s = st[i]
+        // a beat re-entered while it is still leaving finishes its exit first (it never reverses or snaps back down)
+        if (!s.on) { s.ot0 = -1; s.v = []; s.from = [] }
+        s.dir = 1; s.t0 = active >= 0 ? Math.max(now + 0.06, clearAt + 0.04) : now; s.on = true
+      }
       beatsEl.forEach((b, k) => b.classList.toggle('is-active', k === i))
       active = i
       slotBox.top = i >= 0 ? beatsEl[i].getBoundingClientRect().top : 1e5
@@ -213,13 +216,23 @@ export function TextLayer() {
         const n = Math.max(s.lines.length, s.dom.length)
         let done = true
         for (let i = 0; i < n; i++) {
-          // reveal 0 under the mask → 1 in place → 2 gone through the top (UFX_TEXT_FRAG); reduced motion: opacity only
-          let v: number, o = 1
+          // reveal 0 under the mask → 1 in place → 2 gone through the top (UFX_TEXT_FRAG); reduced motion: instant
+          let v = 0, o = 1
           // QA: window.__slotScrub = 0..1 pins the active beat's IN timeline (frames of the reveal on a slow rig)
           const scrub = (window as any).__slotScrub
-          const x = typeof scrub === 'number' && s.dir > 0 ? clamp((scrub * (IN_DUR + STAGGER * (n - 1)) - i * STAGGER) / IN_DUR) : clamp((now - s.t0 - i * STAGGER) / (s.dir > 0 ? IN_DUR : OUT_DUR))
-          if (s.dir > 0) { v = reduced ? 1 : easeOut(x); o = reduced ? easeIn(x) : 1; if (x < 1) done = false }
-          else { v = reduced ? 1 : 1 + easeIn(x); o = reduced ? 1 - easeIn(x) : 1; if (x < 1) done = false }
+          const xin = s.dir > 0 ? (typeof scrub === 'number' ? (scrub * (IN_DUR + STAGGER * (n - 1)) - i * STAGGER) / IN_DUR : (now - s.t0 - i * STAGGER) / IN_DUR) : -1
+          if (s.dir > 0 && xin >= 0) {
+            v = reduced ? 1 : easeOut(clamp(xin)); if (xin < 1 && !reduced) done = false
+          } else if (s.ot0 >= 0) {
+            // rolling out (or still finishing an exit before a re-entry): from this line's own place up through the top
+            // QA: window.__slotOutScrub = 0..1 pins the leaving beat's OUT timeline
+            const oscrub = (window as any).__slotOutScrub
+            const f = s.from[i] ?? 0, xo = reduced ? 1 : clamp(((typeof oscrub === 'number' ? oscrub * (OUT_DUR + STAGGER * (n - 1)) : now - s.ot0) - i * STAGGER) / OUT_DUR)
+            v = f < 0.03 ? 0 : f >= 2 ? 2 : f + (2 - f) * easeIn(xo)
+            if (xo < 1) done = false
+            if (reduced && xo >= 1) o = 0
+          } else { v = 0; if (s.dir > 0) done = false }
+          s.v[i] = v
           const L = s.lines[i]
           if (L) {
             L.mat.uniforms.u_reveal.value = v; L.mat.uniforms.u_opacity.value = o
@@ -228,7 +241,8 @@ export function TextLayer() {
           const d = s.dom[i]
           if (d && !gl) { d.style.transform = `translate3d(0, ${((1 - v) * 110).toFixed(1)}%, 0)`; d.style.opacity = o.toFixed(3) }
         }
-        if (s.dir < 0 && done) { s.on = false; if (!gl) s.dom.forEach((d) => { d.style.opacity = '0' }) }   // W19 (P0-4): a cleared beat leaves no glyph tops in the mask
+        if (s.dir > 0 && done) s.ot0 = -1
+        if (s.dir < 0 && done) { s.on = false; s.ot0 = -1; for (const L of s.lines) L.mat.uniforms.u_opacity.value = 0; if (!gl) s.dom.forEach((d) => { d.style.opacity = '0' }) }   // W19 (P0-4): a cleared beat leaves no glyph tops in the mask
       }
     }
     gsap.ticker.add(tick)

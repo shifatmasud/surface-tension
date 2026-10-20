@@ -407,3 +407,22 @@ p, li, figcaption, .slot__body, .hero__sub, .dive__cap, .systems__lede, .systems
    The giant stage titles (hero, dive, systems, lab names, contact) already sit tighter (-0.065em / .86-.9) and keep it. */
 :root { --display-tracking: -0.035em; --display-leading: 1.02; }
 .slot__title, .overlay__title { letter-spacing: var(--display-tracking); line-height: var(--display-leading); }
+
+/* TEXTROLL (Shifat 19:39Z): one line, one mask (maskedRoll.ts lineRoll). The mask is padded so tight display type keeps
+   its ascenders and descenders; the negative margin gives the padding back, so nothing in the layout moves. */
+.mroll { display: block; overflow: hidden; padding-block: var(--mroll-pad, 0.2em); margin-block: calc(-1 * var(--mroll-pad, 0.2em));
+  /* W19 (Shifat 20:38Z "letter e is partly cutoff"): inline room for italic overhang / last-glyph bearing, given back (no shift) */
+  padding-inline: var(--mroll-pad-x, 0.1em); margin-inline: calc(-1 * var(--mroll-pad-x, 0.1em)); }
+.mroll > .mroll__in { display: block; will-change: transform; }
+.mroll.mroll--inline { display: inline-block; vertical-align: top; }
+.mroll--inline > .mroll__in { display: inline-block; }
+a.mroll--inline > .mroll__in { display: inline-flex; align-items: center; gap: inherit; }
+.site-footer__name > [data-roll-line] { display: block; color: inherit; }
+/* TEXTROLL: the header's words roll up into place once the preloader lifts (boot adds html.is-ready); Menu ↔ Close
+   swap with the line roller. Reduced motion: already in place. */
+.hdr-roll { --mroll-pad: 0.18em; }
+.hdr-roll > .mroll__in { transition: transform var(--dur-in, 1s) var(--ease, cubic-bezier(0.19, 1, 0.22, 1)) .25s; }
+html:not(.is-ready) .hdr-roll > .mroll__in { transform: translate3d(0, calc(100% + 0.36em), 0); transition: none; }
+.pill--menu .hdr-roll > .mroll__in { transition-delay: .33s; }
+@media (prefers-reduced-motion: reduce) { html:not(.is-ready) .hdr-roll > .mroll__in { transform: none; } }
+@media (max-width: 400px) { .pill--menu .pill__txt.hdr-roll { display: none; } }

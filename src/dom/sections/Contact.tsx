@@ -16,6 +16,7 @@ import './contact.css'
 import { Logo } from '../../assets/logo/Logo'
 import { ProjectLinks } from '../a11y/ProjectLinks'
 import { noOrphan } from '../a11y/noOrphans'
+import { lineRoll, type LineRoll } from '../ui/maskedRoll'
 
 /** W19: the fixed footer's height (50vh / 50svh since 19:06Z), cached by a ResizeObserver so the frame loop reads no layout */
 let footH = 0
@@ -67,12 +68,17 @@ export function Contact() {
     })
     const canvasEl = document.getElementById('canvas')
     let lastK = -1, fired = false
+    // TEXTROLL: the CTA label rolls up into its pill after the headline (scroll-driven, reversible)
+    const btnEl = ref.current?.querySelector<HTMLElement>('.big-btn__label')
+    let btnRoll: LineRoll | null = null
     return {
       name: 'contact',
       init() {
         // W18: the CTA type is drawn in GL on the wall (ctaScene.ts, the odometer); the DOM heading stays for AT
         if (settings.USE_GL) document.documentElement.classList.add('cta-gl')
+        if (btnEl && settings.USE_GL) btnRoll = lineRoll(btnEl, { split: false, pad: 0.25 })
       },
+      dispose() { btnRoll?.destroy(); btnRoll = null; journey.ctaOut = 0; footRoll(0) },
       update() {
         const vh = props.height
         const top = range.docTop - props.scroll
@@ -89,6 +95,12 @@ export function Contact() {
         if (k !== lastK && canvasEl) { lastK = k; canvasEl.style.transform = k > 0 ? `translate3d(0, ${-k}px, 0)` : '' }
         // once the footer is fully uncovered, keep scrolling: the flat bar fills and floats you back to the surface
         // W19: the bar fills over the second half of the footer's reveal and wraps as it lands (no empty band above a half-height footer)
+        // TEXTROLL: the CTA lines (GL, ctaScene) leave rolling up as the curtain lifts; the footer's lines
+        // roll up into place as it is uncovered (both scroll-driven, so scrolling back reverses them)
+        journey.ctaOut = clamp(k0 / (0.32 * fh))
+        // (the pill stays on screen above the footer, so its label stays: it only rolls in, never leaves an empty button)
+        btnRoll?.set(clamp((journey.cta - 0.62) / 0.34))
+        footRoll(clamp((k0 - 0.08 * fh) / (0.62 * fh)))
         // W19 (Shifat 19:49Z): the footer is fully in view at k0 = fh; it then HOLDS for the runway while the bar fills, and wraps at the end
         const f = clamp((k0 - fh - 2) / Math.max(1, runwayPx(vh, fh) - 6))
         props.overscroll = f
@@ -106,7 +118,7 @@ export function Contact() {
             <div className="contact__row">
               <div className="contact__cta">
                 <a className="big-btn" href={SITE.email ? `mailto:${SITE.email}` : SITE.x} target={SITE.email ? undefined : '_blank'} rel="noreferrer" data-cursor onMouseEnter={() => audio.tick()}>
-                  {SITE.email ? 'Write to me' : 'Say hi on X'} <i><ArrowUpRight size={20} weight="bold" /></i>
+                  <span className="big-btn__label">{SITE.email ? 'Write to me' : 'Say hi on X'}</span> <i><ArrowUpRight size={20} weight="bold" /></i>
                 </a>
                 {/* POLISH (Shifat 18:19Z/18:20Z "only one clean CTA button"): the message form and its send pill are gone */}
                 <ProjectLinks />
@@ -121,24 +133,40 @@ export function Contact() {
 }
 
 const footerBar = { el: null as HTMLDivElement | null }
+/** TEXTROLL: the footer's text blocks, each rolled per line (lineRoll), staggered left to right / top to bottom */
+const footRolls: LineRoll[] = []
+let footP = -1
+function footRoll(p: number) {
+  if (p === footP) return
+  footP = p
+  const n = footRolls.length
+  footRolls.forEach((r, i) => r.set(Math.min(1, Math.max(0, p * (1 + 0.1 * (n - 1)) - i * 0.1))))
+}
 /** The fixed footer the CTA uncovers (flat, minimal), with the flat back-to-the-surface bar. Portalled to <body> so it
  * sits under the canvas in the root stacking order (the CTA slides up over it like a curtain). */
 export function Footer() {
+  useEffect(() => {
+    if (!settings.USE_GL) return
+    const root = document.querySelector<HTMLElement>('.site-footer'); if (!root) return
+    for (const el of Array.from(root.querySelectorAll<HTMLElement>('[data-roll]'))) footRolls.push(lineRoll(el, { split: el.dataset.roll !== 'whole', pad: 0.22 }))
+    const p = footP; footP = -1; footRoll(Math.max(0, p))
+    return () => { footRolls.splice(0).forEach((r) => r.destroy()); footP = -1 }
+  }, [])
   return createPortal(
     <footer className="site-footer" aria-label="Footer">
       <div className="site-footer__top">
-        <p className="site-footer__name"><span className="site-footer__lockup" role="img" aria-label={SITE.name}><span className="site-footer__mark" aria-hidden="true"><Logo size="100%" /></span><span aria-hidden="true">Shifat</span></span><br /><span>{SITE.role}, {SITE.city}.</span></p>
-        <nav className="site-footer__links" aria-label="Elsewhere">
-          <a href={SITE.github} target="_blank" rel="noreferrer" data-cursor><GithubLogo size={16} /> GitHub</a>
-          <a href={SITE.x} target="_blank" rel="noreferrer" data-cursor><XLogo size={16} /> X / Twitter</a>
+        <p className="site-footer__name" data-roll="marked"><span data-roll-line=""><span className="site-footer__lockup" role="img" aria-label={SITE.name}><span className="site-footer__mark" aria-hidden="true"><Logo size="100%" /></span><span aria-hidden="true">Shifat</span></span></span><span data-roll-line=""><span>{SITE.role}, {SITE.city}.</span></span></p>
+        <nav className="site-footer__links" aria-label="Elsewhere" data-roll="marked">
+          <a href={SITE.github} target="_blank" rel="noreferrer" data-cursor data-roll-line="inline"><GithubLogo size={16} /> GitHub</a>
+          <a href={SITE.x} target="_blank" rel="noreferrer" data-cursor data-roll-line="inline"><XLogo size={16} /> X / Twitter</a>
         </nav>
-        <div className="site-footer__time"><span>Local time, {SITE.city}</span><DhakaClock /></div>
+        <div className="site-footer__time" data-roll="marked"><span data-roll-line="">Local time, {SITE.city}</span><span data-roll-line=""><DhakaClock /></span></div>
       </div>
-      <div className="overscroll__bar" aria-hidden="true"><p className="overscroll__label">{noOrphan('Keep scrolling — back to the surface')}</p><div className="overscroll__track"><div className="overscroll__fill" ref={(e) => { footerBar.el = e }} /></div></div>
-      <div className="site-footer__bottom">
-        <span>© <Odometer value={new Date().getFullYear()} digits={4} /> {SITE.name}. Surface Tension, portfolio prototype.</span>
+      <div className="overscroll__bar" aria-hidden="true"><p className="overscroll__label" data-roll="split">{noOrphan('Keep scrolling — back to the surface')}</p><div className="overscroll__track"><div className="overscroll__fill" ref={(e) => { footerBar.el = e }} /></div></div>
+      <div className="site-footer__bottom" data-roll="marked">
+        <span data-roll-line="inline">© <Odometer value={new Date().getFullYear()} digits={4} /> {SITE.name}. Surface Tension, portfolio prototype.</span>
         {/* POLISH (one CTA button): a plain text link, not a button */}
-        <a className="site-footer__top-link" href="#hero" data-cursor onClick={(e) => { e.preventDefault(); audio.swell(false); scroll.scrollTo(0, { duration: 3.2 }) }}>Back to the surface <ArrowUp size={14} weight="bold" /></a>
+        <a className="site-footer__top-link" href="#hero" data-cursor data-roll-line="inline" onClick={(e) => { e.preventDefault(); audio.swell(false); scroll.scrollTo(0, { duration: 3.2 }) }}>Back to the surface <ArrowUp size={14} weight="bold" /></a>
       </div>
     </footer>, document.body)
 }

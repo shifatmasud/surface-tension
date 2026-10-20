@@ -74,9 +74,15 @@ export function createRoller(el: HTMLElement, o: { mode: 'digits'; digits?: numb
       destroy() { cancelAnimationFrame(raf) },
     }
   }
+const LINE_PAD = '0.18em', LINE_PAD_X = '0.1em', LINE_OUT = 'calc(100% + 0.36em)'
   // line mode: one mask, the whole line moves
   el.style.display = el.style.display || 'block'
   el.style.overflow = 'hidden'; el.style.position = el.style.position || 'relative'
+  // TEXTROLL: the mask is padded (and the padding given back) so ascenders and descenders are never clipped
+  el.style.paddingBlock = LINE_PAD; el.style.marginBlock = `calc(-1 * ${LINE_PAD})`
+  // W19 (Shifat 20:38Z "letter e is partly cutoff"): inline padding too (given back the same way), so italic overhang and the
+  // last glyph's side bearing are never clipped by the mask
+  el.style.paddingInline = LINE_PAD_X; el.style.marginInline = `calc(-1 * ${LINE_PAD_X})`
   let cur = document.createElement('span'); cur.style.display = 'block'; cur.textContent = o.text ?? el.textContent ?? ''
   el.replaceChildren(cur)
   return {
@@ -86,14 +92,14 @@ export function createRoller(el: HTMLElement, o: { mode: 'digits'; digits?: numb
       const nu = document.createElement('span'); nu.style.display = 'block'; nu.textContent = text
       if (reduced()) { el.replaceChildren(nu); cur = nu; return }
       // the old line stays in flow (keeps the height) and leaves upwards; the new one rides in from below
-      nu.style.position = 'absolute'; nu.style.left = '0'; nu.style.right = '0'; nu.style.top = '0'; nu.style.transform = 'translate3d(0, 100%, 0)'
+      nu.style.position = 'absolute'; nu.style.left = '0'; nu.style.right = '0'; nu.style.top = LINE_PAD; nu.style.transform = `translate3d(0, ${LINE_OUT}, 0)`
       for (const c of [...el.children]) if (c !== cur) c.remove()
       el.appendChild(nu)
       const old = cur, t0 = performance.now()
       const step = (now: number) => {
         const k = Math.min(1, (now - t0) / (ROLL_DURATION * 1000)), e = ease(k)
-        old.style.transform = `translate3d(0, ${(-100 * e).toFixed(3)}%, 0)`
-        nu.style.transform = `translate3d(0, ${(100 * (1 - e)).toFixed(3)}%, 0)`
+        old.style.transform = `translate3d(0, calc(${(-e).toFixed(4)} * ${LINE_OUT}), 0)`
+        nu.style.transform = `translate3d(0, calc(${(1 - e).toFixed(4)} * ${LINE_OUT}), 0)`
         if (k < 1) { raf = requestAnimationFrame(step); return }
         nu.style.position = ''; nu.style.transform = ''; old.remove()
       }
@@ -101,5 +107,94 @@ export function createRoller(el: HTMLElement, o: { mode: 'digits'; digits?: numb
       raf = requestAnimationFrame(step)
     },
     destroy() { cancelAnimationFrame(raf) },
+  }
+}
+
+
+// ---------------------------------------------------------------- TEXTROLL: a whole text block, rolled per line
+/**
+ * TEXTROLL (Shifat 19:39Z "Text must always appear & disappear (even hero text contents) rolling up masked by each
+ * lines"). `lineRoll(el)` splits a block into its real lines (measured after layout, re-measured on resize), puts each
+ * line in its own overflow mask and drives it with ONE number:
+ *   0 = every line under its mask · 1 = in place · 2 = every line gone up through the top of its mask.
+ * Lines stagger by `stagger` (in units of the whole move). Scroll-driven callers pass a progress (reversible);
+ * `play(to)` eases there over ROLL_DURATION on the house curve for one-off moments. The mask is padded by `pad` em
+ * above and below (and the padding taken back with a negative margin, so layout never moves: CLS 0), which keeps tight
+ * display type's ascenders and descenders whole. Elements marked `[data-roll-line]` inside `el` are used as the lines
+ * as written (blocks holding icons or odometers), otherwise the block's text is split into lines. Reduced motion: no
+ * move, the text is simply there between 0.5 and 1.5. Screen readers read the original element (no clones are made).
+ */
+export type LineRoll = { set(p: number): void; play(to: number, delay?: number): void; get(): number; destroy(): void }
+const easeOutRoll = cssBezier(...ROLL_EASE)
+const easeInOutRoll = cssBezier(0.65, 0, 0.35, 1)
+export function lineRoll(el: HTMLElement, o: { stagger?: number; pad?: number; split?: boolean } = {}): LineRoll {
+  const stagger = o.stagger ?? 0.12, pad = o.pad ?? 0.2
+  let ins: HTMLElement[] = [], masks: HTMLElement[] = [], p = 0, raf = 0, rt = 0, original: Node[] | null = null, destroyed = false
+  const wrap = (mask: HTMLElement) => {
+    const inner = document.createElement('span'); inner.className = 'mroll__in'
+    while (mask.firstChild) inner.appendChild(mask.firstChild)
+    mask.appendChild(inner); mask.classList.add('mroll'); if (mask.dataset.rollLine === 'inline') mask.classList.add('mroll--inline'); mask.style.setProperty('--mroll-pad', pad + 'em')
+    masks.push(mask); ins.push(inner)
+  }
+  const unwrap = () => {
+    for (let k = 0; k < masks.length; k++) { const m = masks[k], i = ins[k]; while (i.firstChild) m.insertBefore(i.firstChild, i); i.remove(); m.classList.remove('mroll', 'mroll--inline') }
+    masks = []; ins = []
+    if (original) { el.replaceChildren(...original); original = null }
+  }
+  const build = () => {
+    unwrap()
+    const marked = Array.from(el.querySelectorAll<HTMLElement>('[data-roll-line]'))
+    if (marked.length) { marked.forEach(wrap) }
+    else if (o.split === false) { wrap(el) }
+    else {
+      // split the block's text into its laid-out lines: one block span per line, words kept whole
+      original = Array.from(el.childNodes)
+      const text = (el.textContent || '').replace(/[ \t\n\r]+/g, ' ').trim()   // (no-break spaces stay: noOrphans)
+      const words = text.split(' ')
+      el.replaceChildren()
+      const probe = words.map((w, k) => { const s = document.createElement('span'); s.textContent = w + (k < words.length - 1 ? ' ' : ''); el.appendChild(s); return s })
+      const rows: string[][] = []; let lastTop = -1e9
+      for (const s of probe) { const t = Math.round(s.getBoundingClientRect().top); if (Math.abs(t - lastTop) > 2) { rows.push([]); lastTop = t } rows[rows.length - 1].push(s.textContent || '') }
+      el.replaceChildren()
+      for (const r of rows) { const line = document.createElement('span'); line.style.display = 'block'; line.textContent = r.join('').replace(/[ \t\n\r]+$/, ''); el.appendChild(line); wrap(line) }
+      // the screen reader keeps the block's text once: the line spans carry it, nothing is duplicated
+    }
+    paint()
+  }
+  const paint = () => {
+    const n = ins.length; if (!n) return
+    const k = 1 + stagger * (n - 1)
+    for (let i = 0; i < n; i++) {
+      let y: number, vis = true
+      if (reduced()) { y = 0; vis = p > 0.5 && p < 1.5 }
+      else {
+        const xi = Math.min(1, Math.max(0, Math.min(p, 1) * k - i * stagger)), xo = Math.min(1, Math.max(0, Math.max(p - 1, 0) * k - i * stagger))
+        y = (1 - easeOutRoll(xi)) - easeInOutRoll(xo)   // +1 under the mask … 0 in place … −1 gone through the top
+        vis = xi > 0 && xo < 1
+      }
+      const s = ins[i].style
+      s.transform = y === 0 ? '' : `translate3d(0, calc(${y.toFixed(4)} * (100% + ${(2 * pad).toFixed(3)}em)), 0)`
+      s.visibility = vis ? '' : 'hidden'
+    }
+  }
+  const onResize = () => { clearTimeout(rt); rt = window.setTimeout(() => { if (!destroyed) build() }, 160) }
+  build()
+  if (typeof document !== 'undefined' && document.fonts) document.fonts.ready.then(() => { if (!destroyed) build() })
+  window.addEventListener('resize', onResize)
+  return {
+    set(next) { cancelAnimationFrame(raf); if (next === p) return; p = next; paint() },
+    get: () => p,
+    play(to, delay = 0) {
+      cancelAnimationFrame(raf)
+      if (reduced()) { p = to; paint(); return }
+      const from = p, t0 = performance.now() + delay * 1000, n = Math.max(1, ins.length), dur = ROLL_DURATION * (1 + stagger * (n - 1)) * Math.max(0.5, Math.abs(to - from))
+      const step = (now: number) => {
+        const x = Math.min(1, Math.max(0, (now - t0) / (dur * 1000)))
+        p = from + (to - from) * x; paint()   // the per-line curves above carry the easing
+        if (x < 1) raf = requestAnimationFrame(step)
+      }
+      raf = requestAnimationFrame(step)
+    },
+    destroy() { destroyed = true; cancelAnimationFrame(raf); clearTimeout(rt); window.removeEventListener('resize', onResize); unwrap() },
   }
 }

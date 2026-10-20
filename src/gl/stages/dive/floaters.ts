@@ -59,13 +59,31 @@ mat3 rotAxis(vec3 k, float a){
 }
 `
 
+
+// POLISH-2 (Shifat 19:30Z "Camera mustn't go through hard objects"): a lateral keep-out around the lens axis. A centre
+// ahead of (or just behind) the lens is moved sideways off the axis (sqrt(lr² + r²): smooth, never a jump), so rocks and
+// kelp pass beside the lens instead of through it; the near fade stays only as a softness, not as the fix.
+const KEEP = /* glsl */ `
+uniform vec3 u_kF;
+vec3 keepOut(vec3 c, float rMin, float seed){
+  vec3 v = c - u_cam;
+  float z = dot(v, u_kF);
+  vec3 lat = v - z * u_kF;
+  float lr = length(lat);
+  float r = rMin * smoothstep(-1.5, -0.3, z) * (1.0 - smoothstep(4.0, 7.0, z));
+  if (r <= 0.0) return c;
+  vec3 dir = lr > 1e-3 ? lat / lr : normalize(cross(u_kF, vec3(sin(seed), cos(seed), 0.3)));
+  return u_cam + z * u_kF + dir * sqrt(lr * lr + r * r);
+}
+`
+
 // ---------------------------------------------------------------- jellies
 const jellyVert = /* glsl */ `
 ${COMMON}
 attribute vec3 aF;      // x: 0 bell / 1 filament / 2 oral arm, y: 0 apex … 1 rim (bell) or 0 root … 1 tip, z: strip side ±1
 attribute vec4 aSeed;   // xyz cell (0..1), w random
 attribute vec4 aSeed2;  // x size, y/z tilt, w film hue
-varying float vA, vKind, vT, vHue, vCoc;
+varying float vA, vKind, vT, vHue, vCoc, vPulse;
 uniform float u_keep;   // 1 while the work cards hold the frame (no jelly over a card)
 uniform vec3 u_camR, u_camU, u_camF; uniform vec2 u_lens;   // the main camera's basis and tan(half fov) x/y
 varying vec3 vN, vV;
@@ -118,24 +136,35 @@ void main(){
   vec2 cn = vec2(nx, ny);
   vA *= smoothstep(0.0, 0.12, max(abs(cn.x) - 0.36, abs(cn.y) - 0.5));
   vN = normalize(mat3(viewMatrix) * n); vV = normalize(-mv.xyz);
-  vKind = aF.x; vT = aF.y; vHue = aSeed2.w;
+  vKind = aF.x; vT = aF.y; vHue = aSeed2.w; vPulse = pulse;
 }`
 const jellyFrag = /* glsl */ `
 uniform float u_time, u_split; uniform vec2 u_res;
 ${CLIP}
-varying float vA, vKind, vT, vHue, vCoc;
+varying float vA, vKind, vT, vHue, vCoc, vPulse;
 varying vec3 vN, vV;
 void main(){
   splitClip();
   vec3 col;
+  // POLISH-2 (Shifat 19:30Z "Ensure jellies are glowing"): a soft bioluminescent glow that breathes with each
+  // contraction. The bell margin and the tentacle roots run a little over 1.0 (HDR) so the bloom's hot-spot path
+  // picks them up as small glints; the bell body stays dim, and defocus (vCoc) spreads and lowers it, so they stay
+  // quiet edge ambience and lower in contrast than the type.
+  float glow = (0.55 + 0.45 * vPulse) * (1.0 - 0.45 * vCoc);
+  vec3 lum = vec3(0.42, 0.86, 1.0);
   if (vKind < 0.5){
     float fr = 1.0 - abs(dot(normalize(vN), vV));
     vec3 film = 0.5 + 0.5 * cos(6.2832 * (fr * 1.4 + vHue + vec3(0.0, 0.33, 0.67)));     // thin-film iridescence
     col = mix(vec3(0.55, 0.84, 0.92), film, 0.42) * (0.06 + 0.8 * pow(fr, mix(2.4, 1.1, vCoc)));   // W19: defocus softens the rim
     col += vec3(0.78, 0.95, 1.0) * smoothstep(mix(0.84, 0.55, vCoc), 0.99, vT) * 0.32 * (1.0 - 0.5 * vCoc);                        // the bright bell margin
     col += vec3(0.45, 0.75, 1.0) * 0.05 * (1.0 - vT);                                       // a faint inner glow
+    col += lum * glow * (1.7 * smoothstep(mix(0.8, 0.5, vCoc), 1.0, vT)                    // the glowing margin ring (hot spot)
+                       + 0.32 * (1.0 - smoothstep(0.0, 0.55, vT)));                         // the lit core under the apex
   } else {
     col = vec3(0.6, 0.86, 0.95) * (1.0 - vT) * (vKind < 1.5 ? 0.45 : 0.28) * (1.0 - 0.55 * vCoc);
+    // light running down the tentacles with the pulse, brightest at the roots
+    float run = 0.5 + 0.5 * sin(vT * 9.0 - u_time * 2.2 + vHue * 6.2832);
+    col += lum * glow * (1.0 - vT) * (1.0 - vT) * (vKind < 1.5 ? 1.1 : 0.7) * (0.6 + 0.4 * run);
   }
   gl_FragColor = vec4(col * vA * 0.85, 1.0);
 }`
@@ -143,6 +172,7 @@ void main(){
 // ---------------------------------------------------------------- rocks + debris
 const rockVert = /* glsl */ `
 ${COMMON}
+${KEEP}
 attribute vec4 aSeed;   // xyz cell, w random
 attribute vec4 aShape;  // xyz scale, w spin rate
 varying float vA; varying vec3 vN, vW;
@@ -151,7 +181,7 @@ void main(){
   float ph = aSeed.w * 51.0;
   vec3 drift = vec3(0.05 * sin(t * 0.06 + ph), -0.03 * t, 0.04 * cos(t * 0.05 + ph));
   float edge;
-  vec3 c = wrapBox(aSeed.xyz, drift, edge);
+  vec3 c = keepOut(wrapBox(aSeed.xyz, drift, edge), 1.3, ph);
   mat3 R = rotAxis(vec3(sin(ph), cos(ph * 1.3), sin(ph * 0.7)), t * aShape.w + ph);
   vec3 w = c + R * (position * aShape.xyz);
   vN = R * normalize(normal / aShape.xyz);
@@ -176,6 +206,7 @@ void main(){
 // ---------------------------------------------------------------- kelp ribbons
 const kelpVert = /* glsl */ `
 ${COMMON}
+${KEEP}
 attribute vec4 aSeed;   // xyz cell, w random
 attribute vec4 aShape;  // x length, y width, z spin, w phase
 varying float vA, vEdge; varying vec3 vN;
@@ -184,7 +215,7 @@ void main(){
   float ph = aShape.w;
   vec3 drift = vec3(0.12 * sin(t * 0.04 + ph), -0.012 * t + 0.08 * sin(t * 0.11 + ph), 0.1 * cos(t * 0.035 + ph));
   float edge;
-  vec3 c = wrapBox(aSeed.xyz, drift, edge);
+  vec3 c = keepOut(wrapBox(aSeed.xyz, drift, edge), 1.6 + 0.5 * aShape.x, ph);
   float v = position.y + 0.5;
   float L = aShape.x, W = aShape.y * (0.45 + 0.55 * sin(v * 3.1416));
   float tw = v * 2.6 + 0.5 * sin(t * 0.3 + ph);
@@ -383,8 +414,8 @@ export function Floaters({ u }: { u: U }) {
     const add = { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }
     return {
       jelly: new THREE.ShaderMaterial({ vertexShader: jellyVert, fragmentShader: jellyFrag, uniforms: { ...base, u_box: box(12, 8, 15), u_keep: keep, ...lens }, side: THREE.DoubleSide, ...add }),
-      rock: new THREE.ShaderMaterial({ vertexShader: rockVert, fragmentShader: rockFrag, uniforms: { ...base, u_box: box(8, 6, 10) }, transparent: true, depthWrite: false }),
-      kelp: new THREE.ShaderMaterial({ vertexShader: kelpVert, fragmentShader: kelpFrag, uniforms: { ...base, u_box: box(12, 8, 15) }, side: THREE.DoubleSide, transparent: true, depthWrite: false }),
+      rock: new THREE.ShaderMaterial({ vertexShader: rockVert, fragmentShader: rockFrag, uniforms: { ...base, u_box: box(8, 6, 10), u_kF: lens.u_camF }, transparent: true, depthWrite: false }),
+      kelp: new THREE.ShaderMaterial({ vertexShader: kelpVert, fragmentShader: kelpFrag, uniforms: { ...base, u_box: box(12, 8, 15), u_kF: lens.u_camF }, side: THREE.DoubleSide, transparent: true, depthWrite: false }),
       bubbles: new THREE.ShaderMaterial({ vertexShader: bubbleVert, fragmentShader: bubbleFrag, uniforms: { ...base, u_box: box(8, 9, 10), u_pxScale: pxScale }, ...add }),
       motes: new THREE.ShaderMaterial({ vertexShader: moteVert, fragmentShader: moteFrag, uniforms: { ...base, u_box: box(6, 4.5, 7), u_pxScale: pxScale }, ...add }),
     }

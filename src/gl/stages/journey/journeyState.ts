@@ -17,4 +17,6 @@ export const journey = {
   crewScale: 1,
   /** seconds the CTA has been on screen (idle sway of the crewmate) */
   ctaTime: 0,
+  /** TEXTROLL: 0 → 1 as the curtain lifts off the footer (written by the Contact section); the CTA lines roll up and out */
+  ctaOut: 0,
 }

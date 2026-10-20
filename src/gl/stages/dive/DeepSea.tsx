@@ -46,6 +46,12 @@ void main(){
     base.x += 0.25 * sin(t * 1.1 + aSeed.y * 23.0);
     base.z += 0.25 * cos(t * 0.9 + aSeed.y * 17.0);
     vec3 rel = mod(base - u_cam + u_box * 0.5, vec3(u_box)) - u_box * 0.5;
+    // POLISH-2 (Shifat 19:30Z "Camera mustn't go through"): a lateral keep-out around the lens axis, so no bubble ever
+    // swells across the near plane as a blurred blob; sqrt(lr² + r²) slides it aside smoothly (no pop)
+    vec3 kF = -vec3(viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2]);
+    float kz = dot(rel, kF); vec3 kl = rel - kz * kF; float klr = length(kl);
+    float kr = 0.9 * smoothstep(-0.8, -0.1, kz) * (1.0 - smoothstep(3.0, 5.0, kz));
+    if (kr > 0.0 && klr > 1e-4) rel = kz * kF + kl / klr * sqrt(klr * klr + kr * kr);
     c = u_cam + rel;
     vFade = 1.0 - smoothstep(u_box * 0.3, u_box * 0.5, length(rel));
   }
