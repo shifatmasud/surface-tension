@@ -41,8 +41,8 @@ Tick an item only when it runs on the live site and was checked visually.
 
 ## Cursor & interaction
 - [ ] Global cursor screen-paint fluid trail (Chapter 14)
-- [ ] Accumulated iridescence on trail fringes, like the original
-- [ ] Cursor trail 1:1 in look & behaviour with lusion.co (side-by-side verified; fresh code)
+- [x] Accumulated iridescence on trail fringes, like the original — live 09:24Z index-Dqq_cqjq.js (trail v2), real-GPU frames 1440/390
+- [x] Cursor trail: own fluid trail v2, replaces the parity version — live 09:24Z index-Dqq_cqjq.js, real-GPU frames 1440/390
 - [ ] Parallax & depth
 - [x] Mouse-move tilt — live real-GPU frames 04:25Z Oct 20 (pointer left vs right: camera parallax shifts the frame and the gem tilts toward the pointer)
 - [x] Odometer counters — live 04:25Z: intro 000→100 reel counter; lab index rolls as digit reels (DOM read 01→04 / 05 while scrolling)
@@ -121,3 +121,7 @@ Tick an item only when it runs on the live site and was checked visually.
 - [ ] Scroll up & down both smooth; every section stays (m:ea07bf4d)
 - [ ] Underwater caustics = glowing additive light (m:edf8656c) — module by 8c2362cf, hooked by builder
 - [x] Preloader black (#000, white odometer counter) and exits like a curtain: slides up (expo in-out, ~1.05 s) over the already-rendered hero; no white flash (inline black bg until lifted); reduced motion = quick fade (Shifat 08:51Z) — live 09:0xZ index-iIuS-AU-.js, real-GPU frame strips 1440/390
+- [ ] Keep the current under-the-sea section within Scene 1 (m:48ff42d0)
+- [ ] Preloader: 3D glossy plastic model of Shifat's official logo (shifat-logo.jpg), rotating horizontally (m:a4507002)
+- [ ] Project slide morphs into its detail card on click (shared-element), morphs back on close (m:03b7b243)
+- [ ] Flat SVG logo used for all branding: nav, footer, favicon, apple-touch, OG image (m:9f6a26dd)
