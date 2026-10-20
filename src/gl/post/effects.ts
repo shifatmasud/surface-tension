@@ -170,10 +170,13 @@ export class GradeEffect extends Effect {
           c *= 1.0 + uw * exp(d * 7.0) * 0.22 * pow(cs, 3.0);
           // the meniscus: a silvered underside (total internal reflection) just under the line, a crisp bright edge on
           // it and a thin cool halo above it
-          float sil = exp(-pow((d + 0.011) / 0.009, 2.0)) * min(1.0, u_wlK * 1.5);
+          float sq0 = (d + 0.011) / 0.009;
+          float sil = exp(-(sq0 * sq0)) * min(1.0, u_wlK * 1.5);
           c = mix(c, c * 0.7 + vec3(0.66, 0.82, 0.86) * 0.36, sil * 0.6);   // W18: lighter underside band
-          c += vec3(0.93, 0.98, 1.0) * exp(-pow(d / 0.0016, 2.0)) * 0.95;
-          c += vec3(0.55, 0.82, 0.95) * exp(-pow((d - 0.004) / 0.006, 2.0)) * 0.12;
+          float sq1 = d / 0.0016;
+          c += vec3(0.93, 0.98, 1.0) * exp(-(sq1 * sq1)) * 0.95;
+          float sq2 = (d - 0.004) / 0.006;
+          c += vec3(0.55, 0.82, 0.95) * exp(-(sq2 * sq2)) * 0.12;
           // droplets: a dark rim and a highlight up and to the left (the sky caught in each bead)
           vec3 dr = wlDrop(uv);
           float rim = smoothstep(0.55, 0.95, length(dr.xy));

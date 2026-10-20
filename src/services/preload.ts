@@ -12,7 +12,7 @@ import { props } from '../state/props'
  * A repeat visit (same browser) gets a short counter, and the hashed files come from the service-worker cache.
  */
 type BootInfo = { files(): number; shown: number; t0: number }
-const W = window as unknown as { __stboot?: BootInfo; requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }
+const W = window as unknown as { __stboot?: BootInfo; __stodo?: { v: number; adopted: boolean }; requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }
 
 const VISIT_KEY = 'st-visit'
 let repeat = false
@@ -30,7 +30,7 @@ export const preload = {
   /** byte-weighted progress of the boot JS (entry + vendor chunks + Scene), 0..1; 1 when the inline loader is absent (dev) */
   files(): number { try { return W.__stboot ? W.__stboot.files() : 1 } catch { return 1 } },
   /** the number the static shell counter already shows (the React counter never goes backwards from it) */
-  shown(): number { return W.__stboot?.shown ?? 0 },
+  shown(): number { return W.__stodo?.v ?? W.__stboot?.shown ?? 0 },
   /** run when the browser is idle (or after `timeout` ms at the latest) */
   idle(fn: () => void, timeout = 600) {
     if (W.requestIdleCallback) W.requestIdleCallback(fn, { timeout }); else setTimeout(fn, 32)
@@ -83,6 +83,73 @@ export function warmCompile(gl: THREE.WebGLRenderer, root: THREE.Object3D, camer
   return Promise.race([p.then(linkEach, linkEach), new Promise<void>((r) => setTimeout(r, 10000))])
 }
 ;(window as any).__preload = preload
+
+/**
+ * WARM GATE (PRELOAD, the desktop "sits at 32" stall). A program's link is cheap (≤ 27 ms each, measured); the expensive
+ * step is the driver building the real shader the first time a program DRAWS (measured: the one curtain-hidden frame that
+ * switched every post pass on, plus the gem/caustic variants of the real frame, took 4.6–5.2 s at 1440 on a GPU without
+ * KHR_parallel_shader_compile; the counter sat still for all of it). While the gate is open, the real frame code runs as
+ * usual behind the curtain, but each frame lets only `budget` programs that have never drawn make their first draw; every
+ * other draw of a not-yet-built program is skipped, and every draw goes into a 1×1 viewport (no clears, no mip builds),
+ * so a frame costs the shader builds it carries and almost nothing else. The counter advances with built/seen programs.
+ * The gate closes after a frame that skipped nothing: every program of the real frame has drawn, which is what the old
+ * full-size warm frame was for, so the warm-up ends there (counter → 100). Nothing is visible: the curtain is opaque.
+ */
+type GL2 = WebGL2RenderingContext
+export const warmGate = {
+  active: false,
+  seen: 0,
+  built: 0,
+  budget: 3,
+  /** 0..1 while open; 1 once closed (or never needed) */
+  get progress() { return this.active ? (this.seen ? this.built / this.seen : 0) : (this.closedAt ? 1 : 0) },
+  closedAt: 0,
+  openedAt: 0,
+  frames: 0,
+  _skipped: 0,
+  _allow: 0,
+  _last: 0,
+  _restore: null as null | (() => void),
+  open(renderer: THREE.WebGLRenderer) {
+    if (this.active || this.closedAt) return
+    const c = renderer.getContext() as GL2
+    const built = new WeakSet<WebGLProgram>(), seen = new WeakSet<WebGLProgram>()
+    let cur = c.getParameter(c.CURRENT_PROGRAM) as WebGLProgram | null
+    const g = this
+    const pass = () => {
+      if (!cur || built.has(cur)) return true
+      if (!seen.has(cur)) { seen.add(cur); g.seen++ }
+      if (g._allow > 0) { g._allow--; built.add(cur); g.built++; return true }
+      g._skipped++
+      return false
+    }
+    const o = { useProgram: c.useProgram, viewport: c.viewport, clear: c.clear, generateMipmap: c.generateMipmap, drawArrays: c.drawArrays, drawElements: c.drawElements, drawArraysInstanced: c.drawArraysInstanced, drawElementsInstanced: c.drawElementsInstanced, drawRangeElements: c.drawRangeElements }
+    const k = c as any
+    k.useProgram = function (p: WebGLProgram | null) { cur = p; return o.useProgram.call(c, p) }
+    k.viewport = function () { return o.viewport.call(c, 0, 0, 1, 1) }
+    k.clear = function () { /* gate: no fill work */ }
+    k.generateMipmap = function () { /* gate: no fill work */ }
+    for (const n of ['drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced', 'drawRangeElements'] as const) {
+      const f = o[n] as (...a: unknown[]) => void
+      k[n] = function (...a: unknown[]) { if (pass()) return f.apply(c, a) }
+    }
+    this._restore = () => { for (const n of Object.keys(o)) delete k[n]; renderer.resetState() }
+    this.active = true; this.openedAt = this._last = performance.now(); this._allow = this.budget
+  },
+  /** after the frame's last draw: true when the gate just closed (the next frame is the full-size warm frame) */
+  endFrame(): boolean {
+    if (!this.active) return false
+    const now = performance.now(), dt = now - this._last; this._last = now; this.frames++
+    const done = this._skipped === 0
+    if (done || now - this.openedAt > 15000) { this.close(); return true }
+    // adapt to the GPU: fast frames take more first draws, slow ones fewer (each frame stays well under ~0.5 s)
+    if (this.frames > 1) this.budget = dt < 60 ? Math.min(this.budget * 2, 32) : dt < 160 ? this.budget + 1 : dt > 420 ? Math.max(1, this.budget - 1) : this.budget
+    this._skipped = 0; this._allow = this.budget
+    return false
+  },
+  close() { if (!this.active) return; this.active = false; this.closedAt = performance.now(); this._restore?.(); this._restore = null },
+}
+;(window as any).__warmGate = warmGate
 
 // repeat visits: the service worker keeps the hashed boot files (and posters) so the next visit starts from cache.
 // Registered after the curtain, in an idle slot, so it never competes with the first load. ?nosw removes it (QA).

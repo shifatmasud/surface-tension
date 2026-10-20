@@ -418,9 +418,8 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
     // the stone; through the section the particles stream onto the flat parts, the parts' real materials fade in as
     // they settle and the particles dissolve; it ends as the drum. Scroll-driven, so scrolling up runs it backward.
     const qm = (window as any).__morph
-    // POLISH (Shifat 18:14Z "no 3D object spawned or animated in"): the parts are simply in the water, at full opacity;
-    // the particle atom no longer assembles them (?atom / __morph still pin the old sequence for QA)
-    const morph = typeof qm === 'number' ? qm : HOLD >= 0 ? HOLD : 1
+    // W19 (Shifat 19:3xZ: the particle → 3D UI formation was right in R4): POLISH's "no appear" freeze at morph = 1 reverted
+    const morph = typeof qm === 'number' ? qm : HOLD >= 0 ? HOLD : ss(0.06, 0.56, dive.sys)
     const pf = ss(0.62, 0.96, morph)
     const atom = built.atom
     atom.points.visible = pf < 0.995

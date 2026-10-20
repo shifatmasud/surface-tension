@@ -8,6 +8,7 @@ import { diveRays } from '../stages/dive/diveState'
 import { props, shared } from '../../state/props'
 import { settings } from '../../services/settings'
 import { quality, paintState } from '../quality' // PERF HOOK
+import { warmGate } from '../../services/preload'
 import { InlineSharpenEffect } from './perfEffects' // PERF HOOK
 import type { Look } from '../../state/props'
 import { ufx } from '../ufx/ufx'
@@ -241,7 +242,7 @@ void main(){
       // DIAG (preloader): this frame links every post program at once without parallel compile (4.8 s on live at 1440,
       // ANGLE/D3D11) and used to run AFTER the counter read 100. It now counts: the counter holds an honest ~85 % through
       // it and reaches 100 only after it. (Spreading it one pass per frame was measured: it doubled the total wait.)
-      this.warmDone = true
+      if (!warmGate.active) this.warmDone = true // PRELOAD: gated frames are not the warm frame
     }
     if (sig !== this.signature) {
       this.signature = sig

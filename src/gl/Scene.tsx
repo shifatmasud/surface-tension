@@ -17,7 +17,7 @@ import { engine } from './engine'
 import { taskManager } from '../services/loader'
 import { BLUE_NOISE_URL } from '../content/bluenoise'
 import { htmlRender } from './html/htmlRender'
-import { preload, warmCompile } from '../services/preload'
+import { preload, warmCompile, warmGate } from '../services/preload'
 import { clip, BLOCKS } from './systems/clip'
 import { quality, paintState } from './quality' // PERF HOOK
 import { diveRays } from './stages/dive/diveState' // PERF HOOK
@@ -114,7 +114,8 @@ function Renderer() {
     let n = 0
     // PERF HOOK: once the hero is linked, one curtain-hidden frame runs every post pass this tier can use (clip
     // composite, god rays, trail, SMAA/FXAA), so none of them links at its first boundary mid-scroll
-    const done = () => { if (++n === 2) { engine.warm = true; sys.chain.warmAll = true } }
+    // PRELOAD: then the warm gate (services/preload.ts) builds every program of the real frame a few per frame, counted
+    const done = () => { if (++n === 2) { engine.warm = true; warmGate.open(gl) } }
     taskManager.addAsync((r) => warmCompile(gl, scene, camera, scene, rt, r).then(done))
     taskManager.addAsync((r) => warmCompile(gl, ufx.under, ufx.camera, ufx.under, rt, r).then(done))
     setTimeout(() => { engine.warm = true }, 8000) // never hold the loop forever (a driver that never reports)
@@ -151,8 +152,13 @@ function Renderer() {
     htmlRender.update()
     // behind the opaque intro the full chain is wasted fill: draw every 3rd frame (still warms every program)
     // so the counter keeps moving on slow GPUs and huge windows; full rate from the drop on
-    if (!props.introDrop && props.frame % 3 !== 0) return
+    if (!props.introDrop && props.frame % 3 !== 0 && !warmGate.active) return
+    if (warmGate.active) sys.chain.warmAll = true // PRELOAD: every gated frame runs every pass this tier can use
     sys.chain.render(dt)
+    // PRELOAD: the gate closed: every program of the real frame (every post pass, the neighbour chain, the mirror/under
+    // targets) has drawn once, so the old full-size warm frame has nothing left to build (measured: it was 3.1 s of pure
+    // fill on a slow GPU with the counter parked). Reset the sims the gate starved; the warm-up is done (counter → 100)
+    if (warmGate.endFrame()) { sys.ripple.clear(); sys.paint.clear(); sys.chain.warmDone = true }
   }, 1)
   return null
 }

@@ -1,5 +1,5 @@
 import { loader, taskManager } from '../services/loader'
-import { preload } from '../services/preload'
+import { preload, warmGate } from '../services/preload'
 import { scroll } from '../services/scroll'
 import { input } from '../services/input'
 import { settings } from '../services/settings'
@@ -60,7 +60,10 @@ export const boot = {
   progress() {
     const js = preload.files(), font = loader.progress
     // DIAG: the GPU share is the hero's program links AND the post chain's warm-up frames (they used to run after 100 %)
-    const gpu = engine.ready ? taskManager.progress * 0.5 + (engine.chain?.warmDone ? 1 : 0) * 0.5 : 0
+    // PRELOAD: + the warm gate (services/preload.ts): each program of the first real frame built once, counted per
+    // program; 100 = every one of them has drawn (gate closed, chain.warmDone)
+    const warmed = engine.chain?.warmDone ? 1 : 0
+    const gpu = engine.ready ? taskManager.progress * 0.25 + Math.max(warmGate.progress, warmed) * 0.75 : 0
     const next = preload.next(engine.ready)
     return settings.USE_GL ? js * 0.5 + font * 0.05 + gpu * 0.3 + next * 0.15 : js * 0.9 + font * 0.1
   },

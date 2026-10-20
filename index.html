@@ -15,6 +15,8 @@
     <meta name="theme-color" content="#000000" />
     <!-- black from the very first paint until the preloader curtain has lifted (no white flash) -->
     <style>html, body { background: #000; } html.is-lifted, html.no-gl { background: #f7f7f8; } html.is-lifted body, html.no-gl body { background: transparent; } .shell-intro { position: fixed; inset: 0; z-index: 100; overflow: hidden; background: #000; color: #fff; }</style>
+    <!-- PRELOAD (Shifat 18:46Z "first number jumps & changes"): the counter's digits come from a 1.6 KB inline subset of Inter 400 (0–9 + tabular figures), so the very first paint is already in the final face and nothing swaps when the web font or React arrives -->
+    <style>@font-face { font-family: 'Inter Digits'; src: url(data:font/woff2;base64,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) format('woff2'); font-weight: 400; font-display: block; } .intro__count { font-family: 'Inter Digits', 'Inter Variable', Inter, system-ui, sans-serif; }</style>
     <link rel="icon" href="./brand/favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="./brand/favicon-32.png" sizes="32x32" type="image/png" />
     <link rel="apple-touch-icon" href="./brand/apple-touch-icon.png" />
@@ -38,9 +40,40 @@
     <!-- Chapter 1 / 10: static shell. Canvas behind, DOM UI in front. -->
     <div id="canvas" aria-hidden="true"></div>
     <div id="root"><!-- static first paint (replaced when React mounts): the intro frame, so text paints before the JS arrives -->
-      <div class="intro shell-intro" aria-hidden="true"><div class="intro__count">000</div><div class="intro__meta">Shifat Masud — portfolio prototype.<br />Warming up the water.</div></div>
+      <div class="intro shell-intro" aria-hidden="true"><div class="intro__count"><span class="odo"><span class="odo__col"><span class="odo__strip" style="transform: translate3d(0, -33.333%, 0)"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span></span></span><span class="odo__col"><span class="odo__strip" style="transform: translate3d(0, -33.333%, 0)"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span></span></span><span class="odo__col"><span class="odo__strip" style="transform: translate3d(0, -33.333%, 0)"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span></span></span></span></div><div class="intro__meta">Shifat Masud — portfolio prototype.<br />Warming up the water.</div></div>
       <section class="section hero"><div class="sticky hero__inner"><div class="hero__row"><h1 class="hero__title">Shifat<br />Masud</h1><p class="hero__sub">Design engineer &amp;<br />creative technologist, Dhaka.</p></div></div></section>
     </div>
+    <script>
+      // PRELOAD (Shifat 18:46Z): the counter rolls from the very first paint, before any of the JS bundle exists. 000 on the
+      // first frame, then a short creep (the page itself has arrived) and the real byte progress of the boot files (up to 50);
+      // the same odometer maths as dom/ui/Odometer.tsx. Intro.tsx adopts these exact nodes and this value (__stodo.v) and
+      // carries on from it, so the roll never restarts, swaps or jumps at the handoff.
+      (function () {
+        var W = window, O = W.__stodo = { v: 0, adopted: false }, el = document.querySelector('.shell-intro .intro__count')
+        if (!el) return
+        var S = el.querySelectorAll('.odo__strip'), t0 = 0, last = 0
+        function m(x) { return ((x % 10) + 10) % 10 }
+        function sm(x) { return x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x) }
+        // dom/ui/maskedRoll.ts rollPositions + paintReels: a column turns in step with the digits to its right passing
+        // 8 → 9 → 0 (the carry slides with them, never swaps)
+        function paint(v) { var n = S.length
+          for (var i = 0; i < n; i++) { var p = n - 1 - i, t
+            if (!p) t = v; else { var u = Math.pow(10, p), b = Math.floor(v / u); t = b + sm((v - b * u - (u - 2)) / 2) }
+            S[i].style.transform = 'translate3d(0, ' + (-(m(t) + 10) * 100 / 30).toFixed(3) + '%, 0)' } }
+        function tick(now) {
+          if (O.adopted) return
+          if (!t0) t0 = last = now
+          var dt = Math.min((now - last) / 1000, 0.5), B = W.__stboot, f = B ? B.files() : 0; last = now
+          var target = Math.min(0.5, Math.max(0.1 * (1 - Math.exp(-(now - t0) / 700)), f * 0.5))
+          var nx = O.v + (target - O.v) * (1 - Math.exp(-7 * dt))
+          O.v = Math.max(O.v, Math.min(nx, O.v + Math.max(0.012, dt * 0.6))) // ≤ ~1 digit a frame: it reads as a roll
+          if (B) B.shown = O.v
+          paint(O.v * 100)
+          if (now - t0 < 30000) requestAnimationFrame(tick)
+        }
+        requestAnimationFrame(tick)
+      })()
+    </script>
     <noscript><p style="padding:2rem;font-family:sans-serif">Shifat Masud — design engineer &amp; creative technologist. This page needs JavaScript for its WebGL experience.</p></noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>

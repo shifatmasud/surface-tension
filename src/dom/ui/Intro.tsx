@@ -1,11 +1,18 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { setOdometer } from './Odometer'
 import { boot } from '../../app/boot'
 import { mix } from '../../core/math'
+import { buildReels, paintReels, rollPositions } from './maskedRoll'
 import { HOUSE } from '../../core/house'
 import { preload } from '../../services/preload'
 import { logo3d } from '../../preloader/hook' // logo3d hook (helper 99499b45): drives the inline 3D logo
+
+/** the static shell's odometer (index.html), captured before React's first commit clears #root */
+const shellOdo = typeof document !== 'undefined' ? document.querySelector<HTMLElement>('.shell-intro .intro__count .odo') : null
+
+/** the counter's paint: dom/ui/maskedRoll.ts (Shifat 19:15Z, the masked roll is the page's signature move; this counter
+ *  is its reference). Positions are a pure function of the value, so the shell → app handoff repaints the same frame */
+function paintCounter(root: HTMLElement, v: number) { paintReels(root.querySelectorAll<HTMLElement>('.odo__strip'), rollPositions(v, 3)) }
 
 /** S0 — "Drop". A real progress counter (files + shader warm-up), then one droplet opens the page. */
 export function Intro() {
@@ -15,11 +22,20 @@ export function Intro() {
   const count = useRef<HTMLDivElement>(null)
   // DIAG: paint the reels before the first paint. Unpainted strips sit at their first glyph, so for the 2–3 frames
   // between mount and the first rAF the counter read "000" (the shell had just shown e.g. "019"): a visible drop to zero
-  useLayoutEffect(() => { if (count.current) setOdometer(count.current, preload.shown() * 100, 3) }, [])
+  // PRELOAD (Shifat 18:46Z "first number jumps & changes"): adopt the shell's own reels (index.html), which have been
+  // rolling since the first paint, instead of drawing new ones: same nodes, same value, same face, so the handoff is
+  // invisible. React never owns these nodes (the count div has no React children); no shell (dev): build the same reels
+  useLayoutEffect(() => {
+    const el = count.current; if (!el) return
+    if (!el.querySelector('.odo')) el.appendChild(shellOdo?.querySelector('.odo__strip') ? shellOdo : buildReels(3))
+    const so = (window as any).__stodo; if (so) so.adopted = true
+    paintCounter(el, preload.shown() * 100)
+  }, [])
   useEffect(() => {
     // PRELOAD: continue from the number the static shell counter already reached (never count backwards); a repeat
     // visit keeps the counter short (its files come from cache; the brand moment stays, the wait does not)
-    let raf = 0, eased = preload.shown(), t0 = performance.now(), last = t0, nearT = 0
+    const s0 = preload.shown()
+    let raf = 0, eased = s0, t0 = performance.now(), last = t0, nearT = 0
     const minDur = preload.repeat ? 350 : 1200
     const loop = (now: number) => {
       // real elapsed time (not a per-frame cap): during shader warm-up a frame can take seconds, and a capped dt
@@ -31,20 +47,24 @@ export function Intro() {
       let real = boot.progress()
       if (real >= 0.97) { if (!nearT) nearT = now } else nearT = 0
       if (now - t0 > 12000 || (nearT && now - nearT > 3000)) real = 1
-      const cap = Math.max(preload.shown(), Math.min(1, (now - t0) / minDur))
+      // PRELOAD: the time cap continues from the number the shell handed over (it used to restart at 0, so the counter
+      // parked on the shell's number for ~s0 × minDur, measured 430 ms at 1440)
+      const cap = s0 + (1 - s0) * Math.min(1, (now - t0) / minDur)
       const target = Math.min(real, cap)
       // DIAG: never backwards (the shell counter's number, a late-registered next-section asset or a re-weighted task
       // can lower the target), and a bounded step: after a frame the main thread spent linking shaders the eased step
       // was ~97 % of the gap at once (the counter jumped 32 → 98 in one frame on ANGLE/D3D11). 6 points per frame at
       // 60 fps; on a slow GPU (long frames) up to 30 points, so the roll never takes more than a few frames
       const next = mix(eased, target, 1 - Math.exp(-7 * dt))
-      eased = Math.max(eased, Math.min(next, eased + Math.max(0.06, dt * 0.6)))
-      if (target >= 1 && (eased > 0.995 || now - t0 > 12000)) eased = 1
-      if (count.current) setOdometer(count.current, eased * 100, 3)
+      // PRELOAD (Shifat 19:14Z, no snapping digits): at most ~1.2 points a frame at 60 fps, so the units reel never skips
+      // digits and every carry slides over 2+ frames; long frames (a slow GPU) still catch up by time (dt × 0.6)
+      eased = Math.max(eased, Math.min(next, eased + Math.max(0.012, dt * 0.6)))
+      if (target >= 1 && (eased > 0.999 || now - t0 > 12000)) eased = 1
+      if (count.current) paintCounter(count.current, eased * 100)
       logo3d.progress(eased) // logo3d hook
       // the curtain starts lifting with the first droplet, so the ring opens as the hero is revealed
       // QA: ?introhold parks the counter at 60 % until window.__introGo is set (frames of the panel + its logo)
-      if (/[?&]introhold/.test(location.search) && !(window as any).__introGo) { eased = Math.min(eased, 0.6); if (count.current) setOdometer(count.current, eased * 100, 3); raf = requestAnimationFrame(loop); return }
+      if (/[?&]introhold/.test(location.search) && !(window as any).__introGo) { eased = Math.min(eased, 0.6); if (count.current) paintCounter(count.current, eased * 100); raf = requestAnimationFrame(loop); return }
       if (eased >= 1) { logo3d.exit(); boot.drop(); setTimeout(() => setGone(true), 120); return }
       raf = requestAnimationFrame(loop)
     }
@@ -60,13 +80,7 @@ export function Intro() {
       transition={reduced ? { duration: 0.35, ease: HOUSE.INOUT } : { duration: /[?&]introslow/.test(location.search) ? 12 : 1.05, ease: [0.87, 0, 0.13, 1] }}
       onAnimationComplete={() => { if (gone) { setHidden(true); document.documentElement.classList.add('is-lifted') } }}
       style={{ pointerEvents: gone ? 'none' : undefined, visibility: hidden ? 'hidden' : undefined }}>
-      <div className="intro__count" ref={count} aria-label="Loading">
-        <span className="odo">
-          {[0, 1, 2].map((i) => (
-            <span className="odo__col" key={i}><span className="odo__strip">{Array.from({ length: 30 }, (_, k) => <span key={k}>{k % 10}</span>)}</span></span>
-          ))}
-        </span>
-      </div>
+      <div className="intro__count" ref={count} aria-label="Loading" />
       <div className="intro__meta">Shifat Masud — portfolio prototype.<br />Warming up the water.</div>
     </motion.div>
   )

@@ -3,3 +3,16 @@
 @media (min-width: 1001px) {
   .lab__cap { justify-self: end; max-width: 27ch; }
 }
+
+/* SLIDES (Shifat 17:49Z): the slides stand on a cylinder around the lens (labGL writes each card's CSS 3D transform,
+   the same arc the GL draws, so hover/click/focus land on the slide you see and the no-WebGL page shows the arc too).
+   Full colour on every card, no grey→colour ramp, no entrance or hover motion (REVIEW-visual #10). */
+.lab .lab__track { transform: none; }
+.lab .card { transform-origin: 50% 50%; backface-visibility: hidden; }
+.lab .card__media, .lab .card.is-active .card__media, .lab .card:hover .card__media { filter: none; transition: none; }
+/* phone: a slightly narrower slide, so its neighbours peek in at both edges and the arc reads */
+@media (max-width: 812px) {
+  html.slot-on .lab .lab__track .card, .lab .lab__track .card { width: min(72vw, (100vh - var(--lab-top, 0px) - var(--lab-bot, 0px) - 24px) * 1.6); }
+}
+/* Shifat 18:52Z, no duplicate labels: with the global text slot on, its "Work · 0n / 03" line is the one count */
+html.slot-on .lab .lab__count { display: none; }
