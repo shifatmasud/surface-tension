@@ -24,7 +24,8 @@ export function Statement() {
   useSection(ref, (range) => {
     // the gem from directly above, close: its crown facets and the blue spill on the rings read as the star in the
     // upper third (a distinct shot from the hero's side view; it was a faint blue dot from 17 m behind a 0.55 fade)
-    const pose = { pos: new THREE.Vector3(0, 7.5, 2.6), target: new THREE.Vector3(0, 0, 0.9), fov: 38 }
+    const pose = { pos: new THREE.Vector3(0, 5.6, 1.8), target: new THREE.Vector3(0, 0, 0.6), fov: 38 }
+    ;(window as any).__stPose = pose // QA
     const st = visuals.register('statement', () => pose, { fade: 0.18, vignette: 0.04, bloom: 0.1, contrast: 1.02, exposure: 1.1 })
     const handles: ReturnType<typeof ufxText>[] = []
     let lastStep = -1

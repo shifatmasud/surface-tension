@@ -68,3 +68,9 @@ Tick an item only when it runs on the live site and was checked visually.
 - [ ] Smooth scroll on all devices
 
 - [ ] Matches Shifat's favourite reference (docs/north-star-reference.jpg): airy off-white field, one vibrant glass 3D object as the star, huge black display type bottom-left, tiny two-line caption baseline-aligned bottom-right
+
+
+## Added Oct 20 04:54Z (Shifat, WhatsApp m:f27ebb63)
+- [ ] Dive/water scene: screen-space god rays (volumetric light shafts, occlusion-aware, from the sun through the surface)
+- [ ] Dive: ultra-realistic caustics (sharp, bright, refracted light network on sand & objects, animated, with chromatic split)
+- [ ] Dive: underwater vegetation (kelp/seagrass swaying with current, rim-lit, depth-faded)
