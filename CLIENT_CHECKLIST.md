@@ -136,7 +136,7 @@ Tick an item only when it runs on the live site and was checked visually.
 - [x] Sections never turn black or freeze at boundaries: the block you scroll into renders live (both directions), stills refreshed every frame; cursor trail is one global always-live layer (Shifat 09:38Z) — live 09:51Z index-BasG7Y3D.js, real-GPU strips 1440/390
 - [ ] Logo lockup = mark + "Shifat" only, no dot after name (m:4ba63a11)
 - [x] Best preloading strategy: better UX without sacrificing performance; before/after numbers (m:4ba63a11) — see 11:00Z entry below
-- [ ] Virtual scroll like lusion.co for smooth scroll, desktop + phone (m:bc0a9be7)
+- [x] Virtual scroll like lusion.co for smooth scroll, desktop + phone (m:bc0a9be7) — helper e79c43be engine (lusion ScrollPane physics: wheel clamp 200, ease k=12, touch inertia, keys, anchors, reduced-motion native); live 11:09Z index-BE1diZgH.js (hash checked), lenis removed
 - [x] Logo lockup = flat mark + "Shifat" only, no dot after the name (nav, footer, OG) (Shifat 10:06Z) — live 10:11Z index-B05FrcGC.js, frames 1440/390
 - [ ] STRUCTURE v3 (m:0e147193): blue refractive CUBE (exact diamond material) replaces diamond, hero in all 3 scenes; S2 Shade DS holographic HUD around cube; S3 tablet inside cube -> camera into cube -> into tablet -> starry sky + crewmate; CTA crewmate sole hero; footer plain white no 3D
 - [ ] S3: inside the tablet is the world (stars + crewmate); the crewmate shatters the tablet glass OUTWARD, breaking out into the CTA (m:91c25160)

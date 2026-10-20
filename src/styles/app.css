@@ -1,9 +1,10 @@
 @import './tokens.css';
 *, *::before, *::after { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
-html.lenis, html.lenis body { height: auto; }
-.lenis.lenis-smooth { scroll-behavior: auto !important; }
-.lenis.lenis-stopped { overflow: hidden; }
+/* VSCROLL HOOK: the virtual scroll (services/scroll.ts) owns every scroll step; no CSS smoothing, no rubber band */
+html.vscroll { scroll-behavior: auto !important; overscroll-behavior-y: none; }
+html.vscroll body { overscroll-behavior-y: none; }
+html.vs-stopped { overflow: hidden; }
 body { margin: 0; background: var(--c-paper); color: var(--c-fg); font-family: var(--font); font-size: var(--fs-body); line-height: 1.45; overflow-x: hidden; transition: color .8s var(--ease); font-feature-settings: 'ss01', 'cv11'; }
 html[data-bg='dark'] body { color: var(--c-white); }
 a { color: inherit; }
