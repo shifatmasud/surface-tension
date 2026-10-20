@@ -122,10 +122,15 @@ Tick an item only when it runs on the live site and was checked visually.
 - [ ] Underwater caustics = glowing additive light (m:edf8656c) — module by 8c2362cf, hooked by builder
 - [x] Preloader black (#000, white odometer counter) and exits like a curtain: slides up (expo in-out, ~1.05 s) over the already-rendered hero; no white flash (inline black bg until lifted); reduced motion = quick fade (Shifat 08:51Z) — live 09:0xZ index-iIuS-AU-.js, real-GPU frame strips 1440/390
 - [ ] Keep the current under-the-sea section within Scene 1 (m:48ff42d0)
-- [ ] Preloader: 3D glossy plastic model of Shifat's official logo (shifat-logo.jpg), rotating horizontally (m:a4507002)
+- [x] Preloader: 3D glossy plastic model of Shifat's official logo (shifat-logo.jpg), rotating horizontally (m:a4507002) — live 09:56Z index-8X47ha2V.js, real-GPU strips 1440/390 (spin + curtain exit, no white flash)
 - [ ] Project slide morphs into its detail card on click (shared-element), morphs back on close (m:03b7b243)
-- [ ] Flat SVG logo used for all branding: nav, footer, favicon, apple-touch, OG image (m:9f6a26dd)
+- [x] Flat SVG logo used for all branding: nav, footer, favicon, apple-touch, mask-icon, OG image (m:9f6a26dd) — live 09:56Z index-8X47ha2V.js
 - [ ] Keep the current under-the-sea dive beat intact inside Scene 1 (god rays, kelp, bubbles, tool numbers), then the projects in the same shot (Shifat 09:11Z) — staged on shifat-v2-preview, not live
 - [ ] Project slide morphs into the detail card on click (shared-element FLIP/GL morph, 600–750 ms, reverse on close, dialog a11y, swipe-down on phones) (Shifat 09:16Z)
 - [ ] Every element tells a beautiful story: one narrative thread, each element has a story job (m:26bef796)
 - [x] REVERT cursor trail to the original Lusion-parity trail (pre-v2, as live before 09:24Z) per Shifat 09:23Z m:a07a1540: 'Keep original lusion.co trail please. It was better'. Trail v2 is retired. — live 09:27Z index-iIuS-AU-.js (hash checked), GitHub 0670bd1..86c58ee, v2 tree reverted too; real-GPU frames 1440/390
+- [ ] Cursor trail = true match of the original from his decoded repo + handbook (study all consumers, not just ScreenPaint); current parity port 'seems lacking' (m:39084d5a)
+- [ ] Mobile parity on everything: every feature designed + QA'd at 390 touch as carefully as desktop (m:e5b00cb1)
+- [ ] P0 BUG: sections turn black & freeze when scrolling past; trail must stay alive persistently, no freeze (m:b3d9218f)
+
+- [x] Sections never turn black or freeze at boundaries: the block you scroll into renders live (both directions), stills refreshed every frame; cursor trail is one global always-live layer (Shifat 09:38Z) — live 09:51Z index-BasG7Y3D.js, real-GPU strips 1440/390

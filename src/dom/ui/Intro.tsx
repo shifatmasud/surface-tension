@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import { setOdometer } from './Odometer'
 import { boot } from '../../app/boot'
 import { mix } from '../../core/math'
+import { logo3d } from '../../preloader/hook' // logo3d hook (helper 99499b45): drives the inline 3D logo
 
 /** S0 — "Drop". A real progress counter (files + shader warm-up), then one droplet opens the page. */
 export function Intro() {
@@ -28,8 +29,9 @@ export function Intro() {
       eased = mix(eased, target, 1 - Math.exp(-7 * dt))
       if (target >= 1 && (eased > 0.995 || now - t0 > 12000)) eased = 1
       if (count.current) setOdometer(count.current, eased * 100, 3)
+      logo3d.progress(eased) // logo3d hook
       // the curtain starts lifting with the first droplet, so the ring opens as the hero is revealed
-      if (eased >= 1) { boot.drop(); setTimeout(() => setGone(true), 120); return }
+      if (eased >= 1) { logo3d.exit(); boot.drop(); setTimeout(() => setGone(true), 120); return }
       raf = requestAnimationFrame(loop)
     }
     raf = requestAnimationFrame(loop)

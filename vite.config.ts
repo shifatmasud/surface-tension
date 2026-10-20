@@ -1,6 +1,7 @@
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import glsl from 'vite-plugin-glsl'
+import logoInline from './scripts/logoInline.mjs' // logo3d hook (helper 99499b45): inline 3D preloader logo
 
 
 /** First paint: the stylesheet goes ahead of the JS module preloads (they contend for bandwidth on slow phones), and
@@ -47,7 +48,7 @@ const deferBoot = (): Plugin => ({
 
 // Chapter 1: one shell, code-split vendor chunks (three/R3F, motion, app)
 export default defineConfig({
-  plugins: [cssFirst(), deferBoot(), react(), glsl({ include: ['**/*.glsl', '**/*.vert', '**/*.frag'], compress: false })],
+  plugins: [logoInline(), cssFirst(), deferBoot(), react(), glsl({ include: ['**/*.glsl', '**/*.vert', '**/*.frag'], compress: false })],
   base: './',
   build: {
     outDir: 'site',

@@ -8,7 +8,11 @@ if (existsSync(src)) {
   let n = 0
   for (const f of readdirSync(src)) {
     if (!f.endsWith('.b64')) continue
-    const target = join(out, f.slice(0, -4))
+    // 'brand__icon.png.b64' -> public/brand/icon.png, 'root__og.png.b64' -> public/og.png, plain names -> public/media
+    const name = f.slice(0, -4), parts = name.split('__')
+    const dir = parts.length > 1 ? (parts[0] === 'root' ? 'public' : join('public', parts[0])) : out
+    mkdirSync(dir, { recursive: true })
+    const target = join(dir, parts[parts.length - 1])
     if (existsSync(target)) continue
     writeFileSync(target, Buffer.from(readFileSync(join(src, f), 'utf8'), 'base64')); n++
   }

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" fill="currentColor" role="img" aria-label="Shifat Masud">
+  <!-- Shifat Masud's mark, traced from his official logo: two identical 45-degree parallelograms (side = height = 100),
+       stacked so they meet at the centre point (100,100). Fits a square exactly. -->
+  <path d="M100 0H200L100 100H0Z M100 100H200L100 200H0Z"/>
+</svg>
