@@ -19,7 +19,11 @@ export interface UfxItem {
   /** extra per-frame hook (reveal progress, hover…) */
   onUpdate?: (it: UfxItem, screenY: number) => void
   fixed?: boolean
+  /** positioned by its own onUpdate (sticky / transformed parents): skip the doc-space placement */
+  selfPlaced?: boolean
   measure?: () => void
+  /** inside a sticky/transformed ancestor: read the live screen rect every frame instead of doc space */
+  live?: () => { top: number; left: number; w: number; h: number }
   visibleWhen?: () => boolean
 }
 
@@ -60,12 +64,16 @@ class UfxSystem {
   update() {
     const vw = this.w, vh = this.h
     for (const it of this.items) {
-      const top = it.docTop - (it.fixed ? 0 : props.scroll)
-      const on = this.enabled && top < vh + 200 && top + it.h > -200 && (it.visibleWhen ? it.visibleWhen() : true)
-      it.mesh.visible = on && it.w > 0
+      let top = it.docTop - (it.fixed ? 0 : props.scroll)
+      if (it.live) { const L = it.live(); top = L.top; it.docLeft = L.left; it.w = L.w; it.h = L.h }
+      const inView = it.selfPlaced || (top < vh + 200 && top + it.h > -200)
+      const on = this.enabled && inView && (it.visibleWhen ? it.visibleWhen() : true)
+      it.mesh.visible = on && (it.w > 0 || !!it.selfPlaced)
       if (!it.mesh.visible) continue
-      it.mesh.position.set(it.docLeft + it.w / 2 - vw / 2, -(top + it.h / 2 - vh / 2), 0)
-      it.mesh.scale.set(it.w, it.h, 1)
+      if (!it.selfPlaced) {
+        it.mesh.position.set(it.docLeft + it.w / 2 - vw / 2, -(top + it.h / 2 - vh / 2), 0)
+        it.mesh.scale.set(it.w, it.h, 1)
+      }
       it.onUpdate?.(it, top)
     }
   }

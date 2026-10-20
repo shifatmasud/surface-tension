@@ -58,7 +58,10 @@ class Input {
     if (this._pendingMoved) this.mousePixelXY.copy(this._pending)
     this.hadMoved = this._pendingMoved
     this._pendingMoved = false
-    this.mouseXY.set((this.mousePixelXY.x / props.width) * 2 - 1, 1 - (this.mousePixelXY.y / props.height) * 2)
+    // until a pointer has actually moved, the pointer is "centred" (not the top-left pixel 0,0 → -1,1, which used to
+    // swing every visitor's camera left and push the hero stone off-centre)
+    if (this.everMoved) this.mouseXY.set((this.mousePixelXY.x / props.width) * 2 - 1, 1 - (this.mousePixelXY.y / props.height) * 2)
+    else this.mouseXY.set(0, 0)
     this.deltaPixelXY.subVectors(this.mousePixelXY, this.prevMousePixelXY)
     this.deltaXY.subVectors(this.mouseXY, this.prevMouseXY)
   }

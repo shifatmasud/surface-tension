@@ -82,13 +82,19 @@ export class GradeEffect extends Effect {
       uniform float u_waterline;   // -1 hidden, 0..1 screen y of the waterline band
       uniform float u_aspect;
       ${BLUE_NOISE}
+      float wlHash(float n){ return fract(sin(n) * 43758.5453); }
+      float wlNoise(float x){ float i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f); return mix(wlHash(i), wlHash(i + 1.0), f) * 2.0 - 1.0; }
       void mainUv(inout vec2 uv){
-        // refraction band around the waterline (surface break): bend + slight chroma-free magnify
+        // refraction band around the waterline (surface break): bend + slight chroma-free magnify.
+        // the meniscus wobble is two octaves of value noise along x (aspect-scaled so ultrawide isn't stretched),
+        // not a regular sine scallop
         if (u_waterline > -0.5) {
           float d = uv.y - u_waterline;
           float band = exp(-d * d * 900.0);
-          uv.y += band * 0.018 * sin(uv.x * 22.0 + u_waterline * 30.0) + band * d * -0.6;
-          uv.x += band * 0.006 * sin(uv.y * 80.0);
+          float x = uv.x * u_aspect, s = u_waterline * 6.0;
+          float wob = wlNoise(x * 7.0 + s) * 0.65 + wlNoise(x * 19.0 - s * 1.7 + 11.0) * 0.35;
+          uv.y += band * 0.010 * wob + band * d * -0.6;
+          uv.x += band * 0.004 * wlNoise(uv.y * 60.0 + s * 3.0);
         }
       }
       void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor){
@@ -100,6 +106,9 @@ export class GradeEffect extends Effect {
         vec2 q = uv - 0.5; q.x *= mix(1.0, u_aspect, 0.5);
         float vig = smoothstep(0.85, 0.85 - u_vignetteSoft, length(q) * 1.15);
         c *= mix(1.0, vig, u_vignette);
+        // fade toward the section colour from a highlight-clipped copy: the HDR buffer carries speculars and caustics
+        // far above 1.0, and a 0.97 fade of a value of 20 still leaves a bright blotch (the lab's white patches)
+        c = mix(c, min(c, vec3(1.0)), smoothstep(0.0, 0.35, u_fade));
         c = mix(c, u_fadeColor, u_fade);
         if (u_waterline > -0.5) {
           float d = uv.y - u_waterline;

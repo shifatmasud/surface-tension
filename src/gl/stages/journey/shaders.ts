@@ -30,13 +30,26 @@ export function skyMaterial() {
       ${NOISE}
       void main(){
         vec3 d = normalize(vDir);
-        // ---- space: a calm graded gradient (indigo → violet) with ONE soft, low-contrast nebula wash
-        float n = fbm(d * 0.75 + vec3(0.0, 0.0, u_time * 0.002));
+        // ---- space: a deep graded field, one domain-warped nebula (magenta core, teal edges, dark dust lanes,
+        // a few bright filaments) kept low in contrast so the crewmate stays the star, plus a fine procedural star dust
         float g = smoothstep(-0.8, 0.9, d.y * 0.7 + d.x * 0.3);
-        vec3 space = mix(vec3(0.003, 0.004, 0.022), vec3(0.03, 0.014, 0.075), g);
-        float wash = smoothstep(0.3, 0.75, n) * pow(max(dot(d, normalize(vec3(0.7, 0.35, -0.62))), 0.0), 2.5);
-        space += mix(vec3(0.16, 0.04, 0.26), vec3(0.34, 0.06, 0.24), smoothstep(0.45, 0.7, n)) * wash * 0.6;
-        space += vec3(0.03, 0.2, 0.26) * pow(max(dot(d, normalize(vec3(0.85, 0.05, -0.5))), 0.0), 8.0) * 0.14;
+        vec3 space = mix(vec3(0.003, 0.004, 0.02), vec3(0.025, 0.012, 0.065), g);
+        vec3 q = d * 1.15 + vec3(0.0, 0.0, u_time * 0.0015);
+        vec3 wq = vec3(fbm(q * 1.2 + vec3(1.7, 9.2, 0.0)), fbm(q * 1.2 + vec3(8.3, 2.8, 4.1)), fbm(q * 1.2 + vec3(3.1, 5.4, 7.7)));
+        float n1 = fbm(q * 1.7 + wq * 1.6);
+        float n2 = fbm(q * 3.4 + wq * 2.2 - 4.0);
+        float region = pow(max(dot(d, normalize(vec3(0.7, 0.35, -0.62))), 0.0), 1.4);
+        float cloud = smoothstep(0.32, 0.78, n1) * region;
+        float dust = smoothstep(0.42, 0.7, n2);
+        vec3 neb = mix(vec3(0.12, 0.03, 0.24), vec3(0.5, 0.08, 0.34), smoothstep(0.42, 0.75, n1));
+        neb = mix(neb, vec3(0.04, 0.26, 0.34), smoothstep(0.5, 0.8, n2) * (1.0 - smoothstep(0.55, 0.8, n1)) * 0.7);
+        space += neb * cloud * 0.62 * (1.0 - dust * 0.55);
+        space += vec3(0.85, 0.55, 0.85) * pow(cloud * (1.0 - dust), 3.0) * 0.35;
+        space += vec3(0.03, 0.2, 0.26) * pow(max(dot(d, normalize(vec3(0.85, 0.05, -0.5))), 0.0), 8.0) * 0.12;
+        vec3 sc = d * 230.0, sid = floor(sc); float sh = h31(sid);
+        float sr = length(fract(sc) - 0.5 - (vec3(h31(sid + 1.3), h31(sid + 2.7), h31(sid + 4.1)) - 0.5) * 0.5);
+        float star = step(0.982, sh) * smoothstep(0.22, 0.0, sr) * (0.35 + 0.65 * h31(sid + 9.1));
+        space += mix(vec3(0.75, 0.82, 1.0), vec3(1.0, 0.85, 0.75), h31(sid + 5.5)) * star * (0.75 + 0.25 * sin(u_time * 1.7 + sh * 60.0)) * (1.0 - dust * 0.6);
         // ---- sky (morning): zenith blue → warm horizon, sun glow
         float y = d.y;
         float sd = max(dot(d, u_sun), 0.0);

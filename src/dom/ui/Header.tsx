@@ -55,10 +55,6 @@ export function Header() {
           <button className="pill" onClick={() => go('contact')} data-cursor onMouseEnter={() => audio.tick()}>
             <span className="roll"><span>Say hi</span><span>Say hi</span></span>
           </button>
-          <button className="pill pill--dark" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-controls="menu" data-cursor onMouseEnter={() => audio.tick()}>
-            {open ? <XIcon size={16} weight="bold" /> : <List size={16} weight="bold" />}
-            <span className="roll"><span>{open ? 'Close' : 'Menu'}</span><span>{open ? 'Close' : 'Menu'}</span></span>
-          </button>
         </nav>
       </header>
       <AnimatePresence>

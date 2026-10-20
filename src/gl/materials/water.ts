@@ -24,6 +24,8 @@ export function createWaterMaterial() {
     u_rippleTexel: shared.u_rippleTexel,
     u_poolSize: { value: 22 },
     u_rippleAmp: { value: 0.45 },
+    u_rippleShade: { value: 3.0 },
+    u_rippleGate: { value: new THREE.Vector3(0.0, -28.0, 0.12) }, // y<0: shade by curvature × −y (rings read, broad swells stay clean: no grey patches); y>0: gradient gated to |grad| x..y; z: max shade
     u_swell: { value: 1 },
     u_reflTex: { value: null as THREE.Texture | null },
     u_reflMatrix: { value: new THREE.Matrix4() },
@@ -33,7 +35,7 @@ export function createWaterMaterial() {
     u_scatter: { value: new THREE.Color('#dfe6ec') },                // in-scatter colour (deep teal)
     u_bedColor: { value: new THREE.Color('#e6e8ea') },               // pale sand
     u_gem: { value: new THREE.Vector4(0, 0.5, 0, 0) },               // xyz diamond centre, w = caustic strength
-    u_gemTint: { value: new THREE.Color('#3d74ff') },
+    u_gemTint: { value: new THREE.Color('#2f63ff') },
     u_fogNear: { value: 7 }, u_fogFar: { value: 26 },
   }
   const material = new THREE.ShaderMaterial({
@@ -41,7 +43,7 @@ export function createWaterMaterial() {
     defines: { HI: hi ? 1 : 0 },
     side: THREE.DoubleSide,
     vertexShader: /* glsl */ `
-      uniform sampler2D u_rippleTexture; uniform vec2 u_rippleTexel; uniform float u_poolSize, u_rippleAmp, u_time, u_swell;
+      uniform sampler2D u_rippleTexture; uniform vec2 u_rippleTexel; uniform float u_poolSize, u_rippleAmp, u_time, u_swell, u_rippleShade;
       uniform mat4 u_reflMatrix;
       varying vec3 v_world; varying vec2 v_ruv; varying float v_rmask; varying vec4 v_refl;
       float rh(vec2 uv){ return texture2D(u_rippleTexture, uv).r; }
@@ -64,7 +66,8 @@ export function createWaterMaterial() {
       }`,
     fragmentShader: /* glsl */ `
       ${SKY_PARS}
-      uniform sampler2D u_rippleTexture; uniform vec2 u_rippleTexel; uniform float u_poolSize, u_rippleAmp, u_time, u_swell;
+      uniform sampler2D u_rippleTexture; uniform vec2 u_rippleTexel; uniform float u_poolSize, u_rippleAmp, u_time, u_swell, u_rippleShade;
+      uniform vec3 u_rippleGate;
       uniform sampler2D u_reflTex; uniform float u_reflOn;
       uniform float u_bedDepth; uniform vec3 u_absorb; uniform vec3 u_scatter; uniform vec3 u_bedColor;
       uniform vec4 u_gem; uniform vec3 u_gemTint; uniform float u_fogNear, u_fogFar;
@@ -122,11 +125,16 @@ export function createWaterMaterial() {
         float dist = length(cameraPosition - v_world);
         // ---- normal ----
         vec2 g = swellGrad(v_world.xz);
+        vec2 rg = vec2(0.0); float rlap = 0.0;
         if (v_rmask > 0.0) {
           float hx = texture2D(u_rippleTexture, v_ruv + vec2(u_rippleTexel.x, 0.0)).r - texture2D(u_rippleTexture, v_ruv - vec2(u_rippleTexel.x, 0.0)).r;
           float hy = texture2D(u_rippleTexture, v_ruv + vec2(0.0, u_rippleTexel.y)).r - texture2D(u_rippleTexture, v_ruv - vec2(0.0, u_rippleTexel.y)).r;
           float cell = 2.0 * u_poolSize * u_rippleTexel.x;
-          g += vec2(hx, -hy) * u_rippleAmp * v_rmask / cell;
+          rg = vec2(hx, -hy) * u_rippleAmp * v_rmask / cell;
+          float h0 = texture2D(u_rippleTexture, v_ruv).r;
+          rlap = (texture2D(u_rippleTexture, v_ruv + vec2(u_rippleTexel.x, 0.0)).r + texture2D(u_rippleTexture, v_ruv - vec2(u_rippleTexel.x, 0.0)).r
+                + texture2D(u_rippleTexture, v_ruv + vec2(0.0, u_rippleTexel.y)).r + texture2D(u_rippleTexture, v_ruv - vec2(0.0, u_rippleTexel.y)).r - 4.0 * h0) * u_rippleAmp * v_rmask;
+          g += rg;
         }
         float detailFade = 1.0 - smoothstep(6.0, 26.0, dist);
         vec2 wind = vec2(0.32, 0.11) * u_time;
@@ -178,10 +186,25 @@ export function createWaterMaterial() {
           // sun glints: a tight lobe (sparkle) + a broad one (glitter path)
           vec3 H = normalize(u_sunDir + V);
           float NoH = max(dot(N, H), 0.0);
-          col += u_sunColor * (pow(NoH, 1600.0) * 60.0 + pow(NoH, 180.0) * 1.6) * F * 4.0;
+          // the glitter path belongs to grazing views; seen from above it breaks into white blotches on the detail
+          // normals (the statement's top-down shot), so it fades out as the view turns steep
+          float glitter = 1.0 - smoothstep(0.45, 0.85, NoV);
+          col += u_sunColor * (pow(NoH, 1600.0) * 60.0 + pow(NoH, 180.0) * 1.6) * F * 4.0 * glitter;
+          // ring read: on a near-uniform bright sky a ripple only shows where it bends something, so each ring gets a
+          // faint shaded flank (away from the key) and a lit lip (toward it), the sky-gradient reflection exaggerated;
+          // only the interactive sim drives it (swell and detail stay glassy)
+          float rlen = length(rg);
+          if (rlen > 1e-4) {
+            vec2 kd = normalize(u_sunDir.xz + vec2(1e-4, 0.0));
+            float rs;
+            if (u_rippleGate.y < 0.0) rs = clamp(rlap * -u_rippleGate.y, -u_rippleGate.z, u_rippleGate.z * 0.3); // curvature: rings read by their lit crests; a fresh drop's bowl only dims a touch (no grey discs)
+            else rs = clamp(dot(rg, kd) * u_rippleShade, -0.22, u_rippleGate.z) * (u_rippleGate.y > 0.0 ? smoothstep(u_rippleGate.x, u_rippleGate.y, rlen) : 1.0);
+            col *= 1.0 - rs;
+            col += u_sunColor * smoothstep(0.08, 0.5, rlen) * max(-rs, 0.0) * 0.6;
+          }
           // blue light spilled by the gem onto the water around it (soft, wide) + a tighter core
           vec2 gq = v_world.xz - u_gem.xz;
-          float spill = exp(-dot(gq, gq) * 0.9) * 0.45 + exp(-dot(gq, gq) * 4.0) * 0.4;
+          float spill = exp(-dot(gq, gq) * 1.3) * 0.3 + exp(-dot(gq, gq) * 6.0) * 0.34;
           col = mix(col, col * u_gemTint * 1.5 + u_gemTint * 0.2, clamp(spill * u_gem.w, 0.0, 1.0));
           // aerial perspective toward the horizon
           float fog = smoothstep(u_fogNear, u_fogFar, dist);

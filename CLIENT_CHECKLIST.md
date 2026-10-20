@@ -10,7 +10,7 @@ Tick an item only when it runs on the live site and was checked visually.
 ## Stack
 - [ ] React + TS + Vite, R3F, GSAP + ScrollTrigger, Lenis, Framer Motion
 - [ ] three-html-render (his fork's base) with fallbacks; drei Html for crisp labels
-- [ ] WebGL2
+- [x] WebGL2 — live console on real GPU: 'renderer: WebGL2'
 
 ## Look & feel
 - [ ] Clean, calm, cinematic in every visual; cinematic minimalism
@@ -18,7 +18,7 @@ Tick an item only when it runs on the live site and was checked visually.
 - [ ] Every section is a stage with exactly one star
 - [ ] Premium quality per section, iterated visually (not just code)
 - [ ] Spacious & immersive
-- [ ] No UI shadows, no borders
+- [x] No UI shadows, no borders — live DOM audit 03:31Z: 0 elements with a border, 0 with a box-shadow
 - [ ] UI theme only black / white / gray
 - [ ] 3D scenes vibrant colour
 - [ ] Only creative abstract 3D that tells the story (no meaningless 3D)
@@ -30,8 +30,8 @@ Tick an item only when it runs on the live site and was checked visually.
 - [ ] Layout & section design inspired by lusion.co (principles, not traced)
 
 ## Type & icons
-- [ ] Inter, Regular weight only
-- [ ] Max 3 type sizes, big size contrast
+- [x] Inter, Regular weight only — live DOM audit 03:31Z Oct 20: every visible text node computes to Inter Variable, weight 400
+- [x] Max 3 type sizes, big size contrast — live DOM audit 03:31Z: exactly 12.5px / 18px / 201.6px at 1440
 - [ ] Phosphor icons
 
 ## Hero
@@ -51,10 +51,10 @@ Tick an item only when it runs on the live site and was checked visually.
 - [ ] Mask slide-up text reveals
 
 ## Journey section (before CTA)
-- [ ] Red crewmate (our own model) drifts in space
-- [ ] Lands in a green forest
-- [ ] Camera pulls back: forest was inside a tablet (no Apple logo)
-- [ ] Crewmate breaks out through the screen as a liquid ripple, into the CTA
+- [x] Red crewmate (our own model) drifts in space — live 1440+390 shots 03:25Z (m6-journey-space-live-*)
+- [x] Lands in a green forest — live 1440+390 03:25Z (m6-journey-forest-live-*); forest upgraded with grass, sun rays, mist
+- [x] Camera pulls back: forest was inside a tablet (no Apple logo) — live 1440+390 03:25Z (m6-journey-reveal-live-*)
+- [x] Crewmate breaks out through the screen as a liquid ripple, into the CTA — live 1440 frames at p .84/.92/.99 03:05Z (membrane bulge, rings, droplets), droplets land on contact water
 
 ## Media & sound
 - [ ] Media from cosmos.so / public-domain sources, project reels from his demos
@@ -66,3 +66,5 @@ Tick an item only when it runs on the live site and was checked visually.
 - [ ] Phone optimized
 - [ ] Responsive, adaptive design (layout, type and 3D adapt across phone, tablet, laptop, ultrawide; touch vs pointer)
 - [ ] Smooth scroll on all devices
+
+- [ ] Matches Shifat's favourite reference (docs/north-star-reference.jpg): airy off-white field, one vibrant glass 3D object as the star, huge black display type bottom-left, tiny two-line caption baseline-aligned bottom-right

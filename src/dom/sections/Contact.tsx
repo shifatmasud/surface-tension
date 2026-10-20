@@ -4,11 +4,13 @@ import { useSection, weightFrom } from './useSection'
 import { visuals } from '../../gl/systems/visuals'
 import { props } from '../../state/props'
 import { clamp } from '../../core/math'
+import { vfovFor, portrait } from '../../core/frame'
 import { SITE } from '../../content/site'
 import { ArrowUpRight, GithubLogo, XLogo, PaperPlaneTilt } from '@phosphor-icons/react'
 import { ufxText } from '../../gl/ufx/UfxText'
 import { scroll } from '../../services/scroll'
 import { audio } from '../../services/audio'
+import { pool } from '../../gl/systems/pool'
 
 function DhakaClock() {
   const [t, setT] = useState('')
@@ -28,10 +30,37 @@ export function Contact() {
   const over = useRef<HTMLDivElement>(null)
   const [msg, setMsg] = useState('')
   useSection(ref, (range) => {
-    const pose = { pos: new THREE.Vector3(0, 7.2, 10.5), target: new THREE.Vector3(0, 0, 0.5), fov: 36 }
-    const st = visuals.register('contact', () => pose, { fade: 0.25, vignette: 0.15, bloom: 0.22 })
+    // bookend: the blue gem settles back onto the lake as the star of the upper ~60 % (it was a small blue blob
+    // sitting on the headline from the old far pose); droplets ring around it
+    const pose = { pos: new THREE.Vector3(), target: new THREE.Vector3(), fov: 36 }
+    const st = visuals.register('contact', () => {
+      const pr = portrait()
+      pose.pos.set(0, 2.4 - pr * 0.5, 5.0 - pr * 0.6)
+      pose.fov = vfovFor(46, 22, 60)
+      // aim so the gem sits ~28 % from the top at any aspect (ultrawide's narrow vertical fov would push a fixed
+      // aim off the top): down-angle to the gem plus the angle that puts it k of the half-height above centre
+      const half = (pose.fov * Math.PI) / 360, k = 0.62 - pr * 0.1
+      const dz = pose.pos.z, gemDown = Math.atan2(pose.pos.y - 0.33, dz)
+      const pitch = gemDown + Math.atan(k * Math.tan(half))
+      pose.target.set(0, pose.pos.y - Math.tan(pitch) * dz, 0)
+      return pose
+    }, { fade: 0.1, vignette: 0.05, bloom: 0.22, exposure: 1.1 })
     let h: ReturnType<typeof ufxText> | null = null
     let fired = false
+    // the crewmate's break-out droplets land on the bright water as the field turns light again
+    let landed = false
+    let dripT = 3
+    const land = () => {
+      const n = 7
+      for (let i = 0; i < n; i++) {
+        setTimeout(() => {
+          const a = (i / n) * Math.PI * 2 + Math.random() * 0.6, r = 0.9 + Math.random() * 1.6
+          const x = Math.cos(a) * r * 1.3, z = Math.sin(a) * r * 0.8 + 0.3
+          pool.drop(x, z, 0.12 + Math.random() * 0.06, 0.018 + Math.random() * 0.012)
+          if (i % 2 === 0) audio.plip(0.55, 0.8 + Math.random() * 0.5)
+        }, 90 + i * (110 + Math.random() * 90))
+      }
+    }
     return {
       name: 'contact',
       init() { document.fonts.ready.then(() => { if (title.current) h = ufxText(title.current, { color: '#0b0b0d', sheen: '#c9ccd2' }) }) },
@@ -40,6 +69,17 @@ export function Contact() {
         props.resurface = clamp(range.progress)
         const rv = clamp((props.scroll - (range.docTop - props.height * 0.8)) / (props.height * 0.7))
         h?.mats.forEach((m, i) => { m.uniforms.u_reveal.value = clamp(rv * 1.3 - i * 0.15) })
+        if (rv > 0.15 && !landed) { landed = true; land() } else if (rv <= 0.0 && landed) landed = false
+        // after the landing, the calm: a single late droplet now and then, near the gem, so the water stays alive
+        if (landed && st.weight > 0.5) {
+          dripT -= props.dt
+          if (dripT <= 0) {
+            dripT = 2.6 + Math.random() * 2.4
+            const a = Math.random() * Math.PI * 2, r = 0.7 + Math.random() * 1.4
+            pool.drop(Math.cos(a) * r * 1.3, Math.sin(a) * r * 0.8 + 0.3, 0.1 + Math.random() * 0.05, 0.02)
+            if (Math.random() < 0.5) audio.plip(0.35, 0.8 + Math.random() * 0.5)
+          }
+        }
         // overscroll back-to-top bar
         const o = over.current
         if (o) {
@@ -62,7 +102,7 @@ export function Contact() {
   return (
     <>
       <section id="contact" className="section contact" ref={ref} aria-label="Contact">
-        <h2 className="contact__title" ref={title}>Let’s make something that ripples.</h2>
+        <h2 className="contact__title" ref={title}>Let’s make<br />it ripple.</h2>
         <div className="contact__row">
           <div className="contact__cta">
             <a className="big-btn" href={SITE.email ? `mailto:${SITE.email}` : SITE.x} target={SITE.email ? undefined : '_blank'} rel="noreferrer" data-cursor onMouseEnter={() => audio.tick()}>

@@ -1,4 +1,5 @@
 import { props } from '../state/props'
+import { dive as diveState } from '../gl/stages/dive/diveState'
 /**
  * Web Audio — every sound synthesised (no files): a filtered-noise water bed, a sub drone that low-passes
  * under the dive, droplet "plips" from the cursor paint, hover ticks and section swells.
@@ -16,6 +17,7 @@ class AudioService {
   enabled = false
   analyser: AnalyserNode | null = null
   private plipClock = 0
+  private underK = 0
   private listeners = new Set<(on: boolean) => void>()
   onChange(f: (on: boolean) => void) { this.listeners.add(f); return () => { this.listeners.delete(f) } }
   private build() {
@@ -110,7 +112,10 @@ class AudioService {
   update(dt: number) {
     if (!this.ctx || !this.enabled) return
     const t = this.ctx.currentTime
-    const dive = props.look.dive
+    // muffle only once actually under: the dive section's above-water first third keeps the open air
+    const wantUnder = props.stage === 'dive' && !diveState.under ? 0 : props.look.dive
+    this.underK += (wantUnder - this.underK) * (1 - Math.exp(-3 * dt))
+    const dive = this.underK
     this.bedFilter.frequency.setTargetAtTime(700 - dive * 520 + props.scrollStrength * 400, t, 0.2)
     this.bedGain.gain.setTargetAtTime(0.1 * (1 - dive * 0.6) + props.scrollStrength * 0.05, t, 0.3)
     this.droneGain.gain.setTargetAtTime(dive * 0.12, t, 0.5)

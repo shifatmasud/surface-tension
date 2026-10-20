@@ -3,24 +3,28 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Environment, Lightformer } from '@react-three/drei'
 import { Suspense, useEffect, useMemo } from 'react'
 import { props, shared } from '../state/props'
-import { settings } from '../services/settings'
+import { settings, capDpr } from '../services/settings'
 import { fboHelper } from './core/fbo'
 import { ScreenPaint } from './systems/ScreenPaint'
 import { RippleSim } from './systems/RippleSim'
 import { PostChain } from './post/PostChain'
 import { CameraRig } from './systems/CameraRig'
 import { HeroStage } from './stages/hero/HeroStage'
+import { SystemsStage } from './stages/systems/SystemsStage'
 import { pool } from './systems/pool'
 import { ufx } from './ufx/ufx'
 import { UfxLayer } from './ufx/UfxLayer'
 import { DiveStage } from './stages/dive/DiveStage'
+import { JourneyStage } from './stages/journey/JourneyStage'
 import { engine } from './engine'
 import { taskManager } from '../services/loader'
 import { BLUE_NOISE_URL } from '../content/bluenoise'
+import { htmlRender } from './html/htmlRender'
 
 /** Owns the frame: paint → sim → (stages already updated) → post chain. Priority 1 = R3F stops auto-render. */
 function Renderer() {
-  const { gl, scene, camera, size } = useThree()
+  const { gl, scene, camera, size, setDpr } = useThree()
+  const storeDpr = useThree((s) => s.viewport.dpr)
   const sys = useMemo(() => {
     fboHelper.init(gl)
     const paint = new ScreenPaint()
@@ -32,6 +36,9 @@ function Renderer() {
   }, [gl, scene, camera])
 
   useEffect(() => {
+    // keep the total-pixel cap as the window changes (ultrawide / 4K / external monitor)
+    const want = capDpr(size.width, size.height)
+    if (Math.abs(want - gl.getPixelRatio()) > 0.01) { setDpr(want); return }
     const dpr = gl.getPixelRatio()
     props.dpr = dpr
     props.renderW = Math.floor(size.width * dpr); props.renderH = Math.floor(size.height * dpr)
@@ -39,7 +46,7 @@ function Renderer() {
     sys.chain.setSize(size.width, size.height)
     shared.u_resolution.value.set(props.renderW, props.renderH)
     ufx.resize(size.width, size.height)
-  }, [size, gl, sys])
+  }, [size, gl, sys, setDpr, storeDpr])
 
   useEffect(() => {
     // blue noise (generated offline with void-and-cluster, CC0 by construction)
@@ -50,6 +57,7 @@ function Renderer() {
     // GPU warm-up as loading tasks: compile every tracked material + the scene
     taskManager.add(() => gl.compile(scene, camera))
     taskManager.add(() => gl.compile(ufx.under, ufx.camera))
+    htmlRender.init(gl.domElement, ufx.camera, gl)
     engine.ready = true
   }, [gl, scene, camera])
 
@@ -60,11 +68,15 @@ function Renderer() {
     shared.u_blueNoiseOffset.value.set(Math.random(), Math.random())
     pool.update(camera, dt)
     sys.paint.update(dt)       // paint renders before the scene: distortion and scene shaders see this frame
-    sys.ripple.update(dt)
+    { const n = (window as any).__rippleSteps ?? 1; for (let i = 0; i < n; i++) sys.ripple.update(dt) }  // __rippleSteps: QA on slow remote GPUs
     const bg = props.look.bg
     ;(scene.background as THREE.Color).copy(bg)
     if (scene.fog) (scene.fog as THREE.Fog).color.copy(props.look.fogColor)
     ufx.update()
+    htmlRender.update()
+    // behind the opaque intro the full chain is wasted fill: draw every 3rd frame (still warms every program)
+    // so the counter keeps moving on slow GPUs and huge windows; full rate from the drop on
+    if (!props.introDrop && props.frame % 3 !== 0) return
     sys.chain.render(dt)
   }, 1)
   return null
@@ -106,6 +118,15 @@ export function Scene() {
         ;(window as any).__webgl2 = isGL2
         console.info(`[surface-tension] renderer: ${isGL2 ? 'WebGL2' : 'WebGL1'} · tier ${settings.TIER} · dpr ${gl.getPixelRatio()} · ${settings.GPU}`)
         engine.canvas = gl.domElement
+        // a lost context (GPU reset, memory pressure, background tab) gets one clean restore: reload once on restore,
+        // and fall back to the DOM-only page if it never comes back
+        gl.domElement.addEventListener('webglcontextlost', (e) => {
+          e.preventDefault(); console.warn('[surface-tension] WebGL context lost')
+          document.documentElement.classList.add('gl-lost')
+        }, false)
+        gl.domElement.addEventListener('webglcontextrestored', () => {
+          if (!sessionStorage.getItem('st-gl-restored')) { sessionStorage.setItem('st-gl-restored', '1'); location.reload() }
+        }, false)
       }}
       style={{ position: 'fixed', inset: 0 }}
     >
@@ -116,7 +137,9 @@ export function Scene() {
       <Suspense fallback={null}>
         <Env />
         <HeroStage />
+        <SystemsStage />
         <DiveStage />
+        <JourneyStage />
         <UfxLayer />
       </Suspense>
     </Canvas>

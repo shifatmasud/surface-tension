@@ -10,8 +10,12 @@ import gsap from 'gsap'
 import { vfovFor, portrait } from '../../core/frame'
 
 // A: eye level over the lake, the gem centred low in frame; B: a slow crane up until it is a point of blue
-const A = { pos: new THREE.Vector3(0, 3.3, 5.4), tgt: new THREE.Vector3(0, -0.15, 0) }
+const A = { pos: new THREE.Vector3(0, 2.8, 4.5), tgt: new THREE.Vector3(0, -0.3, 0) }
 const B = { pos: new THREE.Vector3(0, 10.5, 3.2), tgt: new THREE.Vector3(0, 0, -0.4) }
+;(window as any).__heroA = A // QA
+// portrait framing offsets (phones): closer and lower so the stone is the star of the upper frame
+const HP = { z: 2.45, y: 1.2, ty: 0.32 }
+;(window as any).__heroP = HP // QA
 const ease = (t: number) => t * t * (3 - 2 * t)
 
 /** S1 — Surface. Pinned for 150vh: scrubbing tilts the camera top-down and drifts the tiles apart. */
@@ -25,10 +29,10 @@ export function Hero() {
       const pr = portrait()
       pose.pos.lerpVectors(A.pos, B.pos, t); pose.target.lerpVectors(A.tgt, B.tgt, t)
       // north-star frame: the gem centred in the upper ~60 %, giant type on the bottom margin
-      pose.pos.z -= pr * 1.6 * (1 - t); pose.pos.y -= pr * 0.9 * (1 - t); pose.target.y -= pr * 0.55 * (1 - t)
+      pose.pos.z -= pr * HP.z * (1 - t); pose.pos.y -= pr * HP.y * (1 - t); pose.target.y -= pr * HP.ty * (1 - t)
       pose.fov = mix(vfovFor(44, 22, 58), vfovFor(58), t)
       return pose
-    }, { vignette: 0.0, bloom: 0.3, contrast: 1.0, saturation: 1.05 })
+    }, { vignette: 0.0, bloom: 0.3, contrast: 1.0, saturation: 1.05, exposure: 1.12 })
     let handle: ReturnType<typeof ufxText> | null = null
     let reveal = { v: 0 }
     // the gem is the star: the name surfaces only after it has settled

@@ -26,19 +26,35 @@ function detectWebGL2() {
 }
 const gl2 = detectWebGL2()
 
-const lowPower = /SwiftShader|llvmpipe|Software|Mali-4|Adreno \(TM\) [2-4]/i.test(gl2.renderer)
+const lowPower = /Mali-4|Adreno \(TM\) [2-4]/i.test(gl2.renderer)
+/** No GPU at all (a software rasteriser: VMs, disabled hardware acceleration, headless test browsers): the live scenes
+ * would run at 1–2 fps and block the main thread, so these visitors get the designed static (no-WebGL) page.
+ * ?forcegl keeps the WebGL path for QA. */
+export const softwareGL = /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gl2.renderer)
 
 export type Tier = 'high' | 'mid' | 'low' | 'none'
 function pickTier(): Tier {
   if (q.has('nogl') || !gl2.ok) return 'none'
+  if (softwareGL && !q.has('forcegl')) return 'none'
   if (browser.reducedMotion && !q.has('motion')) return 'none'
   if (q.has('hd')) return 'high'
   if (q.has('lowq')) return 'low'
-  if (browser.isMobile || window.innerWidth <= MOBILE_WIDTH) return 'low'
-  if (lowPower) return 'mid'
+  // a narrow window alone is not a phone: a desktop GPU loaded in a small window (or a remote browser that
+  // sizes its viewport after load) must not drop to the phone tier — require a coarse pointer too
+  if (browser.isMobile || (window.innerWidth <= MOBILE_WIDTH && matchMedia('(pointer: coarse)').matches)) return 'low'
+  if (lowPower) return 'low'
   return (navigator.hardwareConcurrency || 4) >= 8 ? 'high' : 'mid'
 }
 const tier = pickTier()
+
+/** Total render pixels are capped, not just the ratio: an ultrawide or 4K window at dpr 1.5 is 2–4x the fill of a
+ * laptop for the same picture. Keep w*h*dpr^2 under ~3.7M px (the post chain sharpens when below native). */
+export const MAX_RENDER_PIXELS = 3.7e6
+export function capDpr(w: number, h: number) {
+  const tierCap = tier === 'high' ? 1.5 : 1.25
+  const byPixels = Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h))
+  return Math.max(0.6, Math.min(browser.dpr, tierCap, byPixels))
+}
 
 export const settings = {
   GRID: q.has('grid'),
@@ -48,8 +64,8 @@ export const settings = {
   GPU: gl2.renderer,
   USE_GL: tier !== 'none',
   /** DPR caps from the plan's perf budget. */
-  DPR: tier === 'high' ? Math.min(browser.dpr, 1.5) : tier === 'mid' ? Math.min(browser.dpr, 1.25) : Math.min(browser.dpr, 1.25),
-  MAX_PIXELS: 2560 * 1440,
+  DPR: capDpr(window.innerWidth, window.innerHeight),
+  MAX_PIXELS: MAX_RENDER_PIXELS,
   RIPPLE_SIZE: tier === 'low' ? 128 : 256,
   BLOOM_HQ: tier === 'high',
   USE_BLOOM: tier !== 'low',

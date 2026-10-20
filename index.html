@@ -10,11 +10,28 @@
     <meta property="og:image" content="./og.png" />
     <meta name="theme-color" content="#e8e9eb" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <script>
+      // first-paint probe (mirrors services/settings.ts): visitors without a GPU or with reduced motion get the static page,
+      // so the shell can paint the hero itself instead of the WebGL intro
+      (function () { try {
+        var q = location.search, h = document.documentElement, no = /[?&]nogl/.test(q)
+        if (!no && matchMedia('(prefers-reduced-motion: reduce)').matches && !/[?&]motion/.test(q)) no = true
+        if (!no) { var c = document.createElement('canvas'), g = c.getContext('webgl2')
+          if (!g) no = true
+          else { var e = g.getExtension('WEBGL_debug_renderer_info'), r = e ? String(g.getParameter(e.UNMASKED_RENDERER_WEBGL)) : ''
+            if (/SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(r) && !/[?&]forcegl/.test(q)) no = true
+            var l = g.getExtension('WEBGL_lose_context'); if (l) l.loseContext() } }
+        if (no) h.classList.add('no-gl')
+      } catch (_) {} })()
+    </script>
   </head>
   <body>
     <!-- Chapter 1 / 10: static shell. Canvas behind, DOM UI in front. -->
     <div id="canvas"></div>
-    <div id="root"></div>
+    <div id="root"><!-- static first paint (replaced when React mounts): the intro frame, so text paints before the JS arrives -->
+      <div class="intro shell-intro" aria-hidden="true"><div class="intro__count">000</div><div class="intro__meta">Shifat Masud — portfolio prototype.<br />Warming up the water.</div></div>
+      <section class="section hero"><div class="sticky hero__inner"><div class="hero__row"><h1 class="hero__title">Shifat<br />Masud</h1><p class="hero__sub">Design engineer &amp;<br />creative technologist, Dhaka.</p></div></div></section>
+    </div>
     <noscript><p style="padding:2rem;font-family:sans-serif">Shifat Masud — design engineer &amp; creative technologist. This page needs JavaScript for its WebGL experience.</p></noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -32,11 +32,14 @@ export function crewGeometry(lowPoly = false) {
 export function crewMaterials(env: THREE.Texture | null) {
   const body = new THREE.MeshPhysicalMaterial({
     color: '#d61f26', roughness: 0.4, metalness: 0, clearcoat: 0.8, clearcoatRoughness: 0.22,
+    // a soft vinyl edge-sheen: the silhouette picks up a cool rim instead of reading as hard plastic
+    sheen: 0.35, sheenRoughness: 0.45, sheenColor: new THREE.Color('#ff9ac8'),
     envMap: env, envMapIntensity: 0.9, fog: false,
   })
   const visor = new THREE.MeshPhysicalMaterial({
-    color: '#c3d0d9', roughness: 0.05, metalness: 0.25, clearcoat: 1, clearcoatRoughness: 0.03,
-    envMap: env, envMapIntensity: 1.4, fog: false,
+    // the iconic pale-cyan visor: tinted glass with crisp studio highlights (was a flat grey)
+    color: '#8fc3e3', roughness: 0.04, metalness: 0.15, clearcoat: 1, clearcoatRoughness: 0.02,
+    envMap: env, envMapIntensity: 1.9, fog: false,
   })
   return { body, visor }
 }

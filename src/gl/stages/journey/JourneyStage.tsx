@@ -9,6 +9,7 @@ import { journey } from './journeyState'
 import { Crewmate, CREW_HEIGHT, CREW_CENTER_Y, crewMaterials } from './crewmate'
 import { makeEnvs } from './env'
 import { buildForest, buildShadows, longShadowGeometry, longShadowMaterial } from './forest'
+import { buildGrass, buildSunFan, buildMist, buildMotes } from './forestFx'
 import { skyMaterial, starMaterial, screenMaterial, dropletMaterial, backdropMaterial, SUN_DIR } from './shaders'
 import { inner, outer, T, type Inner, type Outer } from './timeline'
 import { journeyAudio, resetJourneyAudio } from './journeyAudio'
@@ -74,13 +75,30 @@ export function JourneyStage(): JSX.Element {
     S.crewIn.root.visible = I.visible
     S.crewIn.update({ pos: I.crew, yaw: I.yaw, pitch: I.pitch, roll: I.roll, walk: I.walk, phase: I.phase, float: I.float, squash: I.squash, scale: 1 }, dt, time, snap)
     S.icam.position.copy(I.cam); S.icam.lookAt(I.look)
-    if (Math.abs(S.icam.fov - I.fov) > 1e-3) { S.icam.fov = I.fov; S.icam.updateProjectionMatrix() }
+    // ultrawide: the screen covers the viewport, so its top and bottom crop away; widen the inner lens by the same
+    // amount so the 16:10 composition (feet, horizon, lead room) survives at 21:9
+    const wideK = portrait ? 1 : Math.max(1, (W / H) / 1.6)
+    const fovIn = (f: number) => THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(f) / 2) * wideK))
+    const fI = fovIn(I.fov)
+    if (Math.abs(S.icam.fov - fI) > 1e-3) { S.icam.fov = fI; S.icam.updateProjectionMatrix() }
     S.lightRig.position.copy(I.crew)
     S.sky.position.copy(S.icam.position); S.stars.position.copy(S.icam.position)
     S.skyMat.uniforms.u_atmos.value = I.atmos; S.skyMat.uniforms.u_time.value = time
     S.starMat.uniforms.u_opacity.value = I.stars; S.starMat.uniforms.u_time.value = time
     S.stars.visible = I.stars > 0.001
     S.forest.visible = I.atmos > 0.2
+    // forest air: grass sway, the sun fan behind the tree line, mist veils and pollen once we are near the ground
+    const land = ss(0.42, 0.52, p)
+    S.grass.material.uniforms.u_time.value = time
+    S.fan.material.uniforms.u_time.value = time; S.fan.material.uniforms.u_opacity.value = ss(0.3, 0.5, I.atmos) * mix(0.55, 1, land)
+    S.fan.mesh.visible = I.atmos > 0.3
+    S.fan.mesh.position.copy(S.icam.position).addScaledVector(SUN_DIR, 260); S.fan.mesh.position.y = Math.max(S.fan.mesh.position.y, 16)
+    S.fan.mesh.scale.setScalar(300); S.fan.mesh.lookAt(S.icam.position)
+    for (const m of S.mist.mats) { m.uniforms.u_time.value = time; m.uniforms.u_opacity.value = land }
+    S.mist.group.visible = land > 0.01
+    S.treeRim.value = 0.42 * ss(0.3, 0.6, I.atmos)
+    S.motes.material.uniforms.u_time.value = time; S.motes.material.uniforms.u_opacity.value = land
+    S.motes.points.visible = land > 0.01
     const h = Math.max(0, I.crew.y)
     // long shadow from the feet, cast towards the camera by the low sun behind the clearing
     S.shadow.position.set(I.crew.x, 0.04, I.crew.z - 0.25)
@@ -116,7 +134,7 @@ export function JourneyStage(): JSX.Element {
     // where the inner crewmate sits on the glass at the moment of the break (same pose, so the hand-off is seamless)
     const B = inner(T.BREAK, S.IB, portrait)
     const proj = S.tmp.set(B.crew.x, B.crew.y + CREW_CENTER_Y, B.crew.z)
-    S.bcam.position.copy(B.cam); S.bcam.fov = B.fov; S.bcam.updateProjectionMatrix(); S.bcam.lookAt(B.look); S.bcam.updateMatrixWorld()
+    S.bcam.position.copy(B.cam); S.bcam.fov = fovIn(B.fov); S.bcam.updateProjectionMatrix(); S.bcam.lookAt(B.look); S.bcam.updateMatrixWorld()
     const top = S.tmp2.set(B.crew.x, B.crew.y + CREW_HEIGHT, B.crew.z).project(S.bcam)
     proj.project(S.bcam)
     const start = { x: proj.x * S.sw / 2, y: proj.y * S.sh / 2, k: Math.max(0.6, (top.y - proj.y) * S.sh / 2 / (CREW_HEIGHT - CREW_CENTER_Y)) }
@@ -214,10 +232,30 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   const stars = new THREE.Points(sg, starMat); stars.frustumCulled = false; stars.renderOrder = -9
 
   // Lambert: matte foliage with no grazing sheen against the low sun (and cheaper on phones)
-  const forestMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })
-  const { group: forest, spots } = buildForest(low, forestMat)
+  const forestMat = new THREE.MeshLambertMaterial({ vertexColors: true })
+  // backlit canopy: the low sun sits behind the clearing, so every silhouette edge catches a warm rim
+  const treeRim = { value: 0 }, treeRimCol = { value: new THREE.Color('#ffc58a') }
+  forestMat.onBeforeCompile = (sh) => {
+    sh.uniforms.u_rim = treeRim; sh.uniforms.u_rimCol = treeRimCol
+    sh.fragmentShader = 'uniform float u_rim; uniform vec3 u_rimCol;\n' + sh.fragmentShader.replace('#include <opaque_fragment>',
+      'float rimF = pow(1.0 - abs(dot(normal, normalize(vViewPosition))), 4.5);\n  outgoingLight += u_rimCol * rimF * u_rim;\n' +
+      // leaf translucency: with the low sun behind the canopy, light scatters through the foliage edges (tinted by
+      // the leaf colour, so trunks barely glow) — the soft gold-green backlight of a stylised forest
+      '  #if NUM_DIR_LIGHTS > 0\n  { vec3 Lv = directionalLights[0].direction; vec3 Vv = normalize(vViewPosition);\n' +
+      '    float back = pow(clamp(dot(-Lv, Vv), 0.0, 1.0), 3.0);\n    float edge = 0.35 + 0.65 * pow(1.0 - abs(dot(normal, Vv)), 1.5);\n' +
+      '    float wrap = clamp(dot(normal, Lv) * 0.5 + 0.5, 0.0, 1.0);\n' +
+      '    outgoingLight += diffuseColor.rgb * u_rimCol * (back * edge * 0.9 + wrap * 0.1) * u_rim; }\n  #endif\n  #include <opaque_fragment>')
+  }
+  // the ground is smooth (the grass carries the texture); the trees are soft stylised foliage (forest.ts)
+  const groundMat = new THREE.MeshLambertMaterial({ vertexColors: true })
+  const { group: forest, spots } = buildForest(low, forestMat, groundMat)
   const treeShadows = buildShadows(spots, SUN_DIR)
   forest.add(treeShadows.mesh)
+  const grass = buildGrass(low, settings.TIER as 'low' | 'mid' | 'high', SUN_DIR)
+  const fan = buildSunFan(SUN_DIR)
+  const mist = buildMist(low)
+  const motes = buildMotes(low, Math.min(gl.getPixelRatio(), 2) * (rt.width / 1024), SUN_DIR)
+  forest.add(grass.mesh, mist.group, motes.points)
   const innerMats = crewMaterials(envs.space)
   innerMats.visor.envMap = envs.page // the visor always catches two soft studio highlights: it reads as glass in every beat
   const crewIn = new Crewmate(innerMats, low)
@@ -228,7 +266,7 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   const rim = new THREE.DirectionalLight('#5fe3ff', 2.4); rim.position.set(-6, 3, -7)  // rim: cool in space, the low sun in the forest
   // lights ride with the crewmate so the key is always composed the same way
   const lightRig = new THREE.Group(); lightRig.add(sun, rim, sun.target, rim.target)
-  innerScene.add(sky, stars, forest, shadow, crewIn.root, hemi, lightRig)
+  innerScene.add(sky, stars, fan.mesh, forest, shadow, crewIn.root, hemi, lightRig)
 
   // ===== outer world: the tablet + the crewmate that breaks out
   const outerG = new THREE.Group()
@@ -273,7 +311,7 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
 
   const c = {
     hSpace: new THREE.Color('#7a5cff'), hSky: new THREE.Color('#8a9cc0'), gSpace: new THREE.Color('#071a22'), gForest: new THREE.Color('#2f7a30'),
-    kSpace: new THREE.Color('#ffd2c4'), kSun: new THREE.Color('#ffe6cc'), rSpace: new THREE.Color('#5fd8ff'), rSun: new THREE.Color('#ffb062'), fogDusk: new THREE.Color('#3a2a4a'), fogDay: new THREE.Color('#a99a80'),
+    kSpace: new THREE.Color('#ffd2c4'), kSun: new THREE.Color('#ffe6cc'), rSpace: new THREE.Color('#5fd8ff'), rSun: new THREE.Color('#ffb062'), fogDusk: new THREE.Color('#3a2a4a'), fogDay: new THREE.Color('#a9c3bd'),
   }
   const I: Inner = { crew: new THREE.Vector3(), yaw: 0, pitch: 0, roll: 0, walk: 0, phase: 0, float: 0, squash: 0, visible: true, cam: new THREE.Vector3(), look: new THREE.Vector3(), fov: 40, atmos: 0, stars: 1, shadow: 0 }
   const IB: Inner = { ...I, crew: new THREE.Vector3(), cam: new THREE.Vector3(), look: new THREE.Vector3() }
@@ -285,7 +323,7 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
     ;[innerScene, outerG].forEach((root) => root.traverse((o: any) => { if (o.geometry && !keep.has(o.geometry)) o.geometry.dispose?.(); if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m: any) => m.dispose()) }))
   }
   return {
-    sw, sh, rt, envs, inner: innerScene, icam, bcam, sky, skyMat, stars, starMat, forest, crewIn, innerMats, shadow, shadowMat, hemi, sun, rim, lightRig,
+    sw, sh, rt, envs, inner: innerScene, grass, fan, mist, motes, treeRim, icam, bcam, sky, skyMat, stars, starMat, forest, crewIn, innerMats, shadow, shadowMat, hemi, sun, rim, lightRig,
     outer: outerG, backdrop, backdropMat, screenMat, crewOut, drops, dropData, c, I, IB, O, lastP: -1,
     tmp: new THREE.Vector3(), tmp2: new THREE.Vector3(), o3: new THREE.Object3D(), dispose,
   }

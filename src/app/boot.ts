@@ -24,7 +24,7 @@ export const boot = {
   async preRun() {
     this.phase = 'preRun'
     document.documentElement.classList.remove('no-js')
-    if (!settings.USE_GL) document.documentElement.classList.add('no-gl')
+    document.documentElement.classList.toggle('no-gl', !settings.USE_GL) // the index.html probe may have set it early
     const f = loader.add(interUrl, { type: 'font', weight: 2 }) as any
     f.family = 'Inter Variable'; f.descriptors = { weight: '100 900', display: 'block' }
     try { await f.load() } catch (e) { console.warn('font', e) }

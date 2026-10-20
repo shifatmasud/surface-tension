@@ -27,10 +27,22 @@ class Visuals {
     const L = props.look, acc = makeLook({ bg: new THREE.Color(0, 0, 0), fogColor: new THREE.Color(0, 0, 0), tint: new THREE.Color(0, 0, 0) })
     const keys = Object.keys(acc) as (keyof Look)[]
     keys.forEach((k) => { if (typeof (acc as any)[k] === 'number') (acc as any)[k] = 0 })
+    // poses blend only between neighbouring stages; a far-away stage (the journey) is a cut
+    const bestPose = this.stages.get(best)!.pose()
+    let pw = 0
+    for (const s of this.stages.values()) {
+      if (s.weight <= 0) continue
+      const p = s.pose()
+      if (p.pos.distanceTo(bestPose.pos) > 30) continue
+      pw += s.weight
+    }
     for (const s of this.stages.values()) {
       if (s.weight <= 0) continue
       const w = s.weight / total, p = s.pose()
-      pos.addScaledVector(p.pos, w); tgt.addScaledVector(p.target, w); fov += p.fov * w
+      if (p.pos.distanceTo(bestPose.pos) <= 30) {
+        const wp = s.weight / pw
+        pos.addScaledVector(p.pos, wp); tgt.addScaledVector(p.target, wp); fov += p.fov * wp
+      }
       for (const k of keys) {
         const v = (s.look as any)[k]
         if (typeof v === 'number') (acc as any)[k] += v * w
@@ -49,3 +61,4 @@ class Visuals {
   }
 }
 export const visuals = new Visuals()
+;(window as any).__visuals = visuals

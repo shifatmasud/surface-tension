@@ -29,7 +29,7 @@
   --fs-small: 12.5px;
 }
 @media (max-width: 1000px) { :root { --grid-cols: 8; } }
-@media (max-width: 812px) { :root { --grid-cols: 6; --pad-x: 20px; --fs-display: clamp(64px, 19vw, 120px); --fs-body: 17px; } }
+@media (max-width: 812px) { :root { --grid-cols: 6; --pad-x: 20px; --fs-display: clamp(56px, 16vw, 120px); --fs-body: 17px; } }
 @media (max-width: 380px) { :root { --pad-x: 16px; } }
 @media (min-aspect-ratio: 21/9) { :root { --pad-x: 9vw; } }
 html[data-bg='dark'] { --c-fg: var(--c-white); --c-bg: #050506; }

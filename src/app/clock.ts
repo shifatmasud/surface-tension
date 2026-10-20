@@ -21,7 +21,7 @@ export function startClock() {
   started = true
   gsap.ticker.lagSmoothing(0)
   gsap.ticker.add((time, deltaMs) => {
-    const dt = Math.min(deltaMs / 1000, 1 / 20)
+    const dt = Math.min(deltaMs / 1000, (window as any).__dtCap ?? 1 / 20)  // __dtCap: QA on slow remote GPUs (camera damping converges)
     props.dt = dt; props.time += dt; props.frame++
     taskManager.update()
     input.update()
