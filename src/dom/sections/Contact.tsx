@@ -37,9 +37,13 @@ export function Contact() {
       const pr = portrait()
       pose.pos.set(0, 2.4 - pr * 0.5, 5.0 - pr * 0.6)
       pose.fov = vfovFor(46, 22, 60)
+      // the stone keeps the same share of the frame height at any aspect: on ultrawide (narrow vertical fov) the
+      // camera backs off along the same line instead of letting the gem crop off the top
+      const back = Math.max(1, 30 / pose.fov)
+      pose.pos.y = 0.33 + (pose.pos.y - 0.33) * back; pose.pos.z *= back
       // aim so the gem sits ~28 % from the top at any aspect (ultrawide's narrow vertical fov would push a fixed
       // aim off the top): down-angle to the gem plus the angle that puts it k of the half-height above centre
-      const half = (pose.fov * Math.PI) / 360, k = 0.62 - pr * 0.1
+      const half = (pose.fov * Math.PI) / 360, k = 0.56 - pr * 0.08
       const dz = pose.pos.z, gemDown = Math.atan2(pose.pos.y - 0.33, dz)
       const pitch = gemDown + Math.atan(k * Math.tan(half))
       pose.target.set(0, pose.pos.y - Math.tan(pitch) * dz, 0)

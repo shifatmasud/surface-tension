@@ -174,7 +174,7 @@ void main(){
     acc += shaft(surfaceEntry(p)) * exp(-K * d - KV * ti) * (2.0 * fi);   // × dt/dfi of the quadratic spacing
   }
   float fwd = max(dot(dir, -u_sun), 0.0);
-  col += acc * dt * vec3(0.30, 0.78, 0.86) * (0.05 + 0.32 * pow(fwd, 3.0)) * (1.0 - u_deep);
+  col += acc * dt * vec3(0.30, 0.78, 0.86) * (0.07 + 0.52 * pow(fwd, 2.5)) * (1.0 - u_deep); // shafts read as the star of the open-water frames
 
   col *= 1.0 - u_deep * 0.9;
   gl_FragColor = vec4(col, 1.0);

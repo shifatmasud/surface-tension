@@ -44,11 +44,11 @@ Tick an item only when it runs on the live site and was checked visually.
 - [ ] Accumulated iridescence on trail fringes, like the original
 - [ ] Cursor trail 1:1 in look & behaviour with lusion.co (side-by-side verified; fresh code)
 - [ ] Parallax & depth
-- [ ] Mouse-move tilt
-- [ ] Odometer counters
-- [ ] Subtle cylinder bend tied to scroll velocity
+- [x] Mouse-move tilt — live real-GPU frames 04:25Z Oct 20 (pointer left vs right: camera parallax shifts the frame and the gem tilts toward the pointer)
+- [x] Odometer counters — live 04:25Z: intro 000→100 reel counter; lab index rolls as digit reels (DOM read 01→04 / 05 while scrolling)
+- [x] Subtle cylinder bend tied to scroll velocity — live real-GPU 04:45Z: bend forced to ±0.35 (QA hook) visibly curves the lab track; velocity→bend mapping (vel/4000 px/s, damped) in labGL; real-scroll magnitude not captured (remote browser 1–17 fps)
 - [ ] Depth-map 3D image parallax
-- [ ] Mask slide-up text reveals
+- [x] Mask slide-up text reveals — live 04:30Z statement sweep (12 frames): phrases rise through the mask line by line and sink upward; lab names slide up per project
 
 ## Journey section (before CTA)
 - [x] Red crewmate (our own model) drifts in space — live 1440+390 shots 03:25Z (m6-journey-space-live-*)
