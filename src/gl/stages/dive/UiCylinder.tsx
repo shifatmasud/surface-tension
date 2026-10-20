@@ -11,6 +11,7 @@ import { AtomField } from './Atom'
 import { TabletWindow } from '../journey/tabletWindow'; import { tabletPose } from '../../world/handoff' // TABLET HOOK: the live 3D window (journey/tabletWindow.ts) + the tablet's pose (world/handoff.ts)
 /** QA: ?atom holds the sequence at the atom, ?drum at the drum; window.__morph (0..1) pins it */
 const KEEP_EYE = new THREE.Vector3(0, 0, -1e3), KEEP_F = new THREE.Vector3(0, 0, 1), KEEP_V = new THREE.Vector3() // POLISH-2: the main lens, for the ring's keep-out
+const STONE_D = new THREE.Vector3() // W20: the eye→stone direction (phones' stone keep-out)
 const ss = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
 const QS = typeof location !== 'undefined' ? location.search : ''
 // QA: ?drumlift=<m> tries another phone drum lift
@@ -437,7 +438,8 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
     if (atom.points.visible) atom.mat.uniforms.u_on.value = 1 - pf
     s.visible = pf > 0.002
     // and as the camera pushes into the stone the drum dissolves around it (nothing ever crosses the lens)
-    const fv = pf * (1 - ss(0.3, 0.8, pw))
+    // W20: phones dissolve the drum a little earlier on the push, so a part opening past the lens never crosses the lede
+    const fv = pf * (1 - ss(0.3 - 0.15 * portrait(), 0.8 - 0.3 * portrait(), pw))
     s.visible = fv > 0.002
     if (Math.abs(fv - built.fade.v) > 1e-3) { built.fade.v = fv; for (const f of built.fades) f.m.opacity = f.base * fv }
     atom.mat.uniforms.u_amb.value = dive.abyss
@@ -489,7 +491,27 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
           }
         }
       }
-      it.g.position.set(Math.sin(it.a) * rr + sideX, iy + dodge + Math.sin(t * 0.6 + it.ph) * 0.05, Math.cos(it.a) * rr + sideZ)
+      // W20 (root 23:34Z: 'give the stone a small clear radius in screen space at 390 through the whole section'): on
+      // phones every part, in front of the stone or behind it, keeps out of a disc around the eye→stone line (stone
+      // ≈0.9 m + half a part + margin). The part slides straight away from the line by a soft-max (smooth, compact:
+      // parts already clear barely move), so nothing tucks in front of or behind the diamond. Fades out as the push
+      // begins (the drum dissolves and the stone drifts aside there).
+      let kx = 0, ky = 0, kz = 0
+      const kw = portrait() * (1 - ss(0.2, 0.5, pw))
+      if (kw > 0.001) {
+        const ry = s.rotation.y, cr = Math.cos(ry), sr = Math.sin(ry)
+        const lx0 = Math.sin(it.a) * rr + sideX, lz0 = Math.cos(it.a) * rr + sideZ, ly0 = iy + dodge + s.position.y
+        STONE_D.set(SYS_C.x - KEEP_EYE.x, SYS_C.y - KEEP_EYE.y, SYS_C.z - KEEP_EYE.z).normalize()
+        KEEP_V.set(SYS_C.x + lx0 * cr + lz0 * sr - KEEP_EYE.x, SYS_C.y + ly0 - KEEP_EYE.y, SYS_C.z - lx0 * sr + lz0 * cr - KEEP_EYE.z)
+        KEEP_V.addScaledVector(STONE_D, -KEEP_V.dot(STONE_D)) // the part's offset from the eye→stone line
+        const lat = KEEP_V.length(), rk = 1.35, e = 0.25
+        if (lat > 1e-4 && lat < rk + 1.0) {
+          const push = (0.5 * (lat + rk + Math.sqrt((lat - rk) * (lat - rk) + e * e)) - lat) * kw
+          const wx = KEEP_V.x / lat * push, wy = KEEP_V.y / lat * push, wz = KEEP_V.z / lat * push
+          kx = wx * cr - wz * sr; ky = wy; kz = wx * sr + wz * cr
+        }
+      }
+      it.g.position.set(Math.sin(it.a) * rr + sideX + kx, iy + dodge + ky + Math.sin(t * 0.6 + it.ph) * 0.05, Math.cos(it.a) * rr + sideZ + kz)
       // each part turns halfway toward the lens from its place on the drum (no edge-on slivers at the sides)
       let off = Math.PI - (it.a + s.rotation.y); off = Math.atan2(Math.sin(off), Math.cos(off))
       it.g.rotation.set(Math.sin(t * 0.5 + it.ph) * 0.04 * (1 - S.h), it.a + off * (0.55 + 0.45 * S.h) + S.turn, Math.sin(t * 0.4 + it.ph * 1.3) * 0.03 * (1 - S.h))

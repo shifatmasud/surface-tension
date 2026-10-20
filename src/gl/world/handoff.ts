@@ -57,7 +57,7 @@ export function tabletPose(push: number, out: THREE.Object3D, time = props.time)
   const pt = portrait(), up = 1 - k1
   const pitch0 = THREE.MathUtils.degToRad(FIXED_LENS.pitchDeg)
   out.position.set(TAB_F.x, TAB_F.y - (3.4 * (1 - pt) + 0.9 * pt) * up + Math.sin(time * 0.9) * 0.05 * bob, TAB_F.z)
-  if (pt > 0) { out.position.y += Math.sin(pitch0) * 6 * up * pt; out.position.z += Math.cos(pitch0) * 6 * up * pt }
+  if (pt > 0) { out.position.y += Math.sin(pitch0) * 6 * up * pt; out.position.z += Math.cos(pitch0) * 6 * up * pt; out.position.x -= 2.2 * up * pt } // W20 23:34Z: and from the stone's right, so it never tucks behind the diamond
   out.rotation.set(-0.18 * (1 - k1) + Math.sin(time * 0.7) * 0.02 * W, Math.PI + 0.1 * (1 - k1) + Math.sin(time * 0.5) * 0.025 * W, Math.sin(time * 0.6) * 0.015 * W)
   if (!FIXED_LENS.on || push <= 0.5 || !out.parent) return
   const kk = easeIO3(ss(0.5, 1, push))
