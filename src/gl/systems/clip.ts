@@ -83,12 +83,14 @@ class Clip {
       this.shift = 0; this.scale = 1; this.lag = 0; this.dark = 0; this.radius = 0; this.inset = 0; this.outRadius = 0
     } else {
       this.shift = this.K * yTop
-      this.scale = 1 - 0.06 * smooth(0, 1, t)
+      // Shifat 08:37Z: "Sections must not scale & light down to transition out." The outgoing scene keeps 100 %
+      // scale and full brightness; it only drifts up slower than the scroll (parallax) while the card covers it
+      this.scale = 1
       this.lag = this.LAG * d
-      this.dark = 0.62 * Math.pow(t, 1.15)
+      this.dark = 0
       this.radius = R * (1 - smooth(0.5, 1, t))
       this.inset = vw * 0.022 * (1 - smooth(0.2, 0.95, t))
-      this.outRadius = R * smooth(0, 0.45, t)
+      this.outRadius = 0
     }
     this.styleOutgoing(BLOCKS[b - 1][BLOCKS[b - 1].length - 1], d, yTop)
     if (this.reduced && this.styled) { this.styled.style.transform = ''; this.styled.style.clipPath = ''; this.styled.style.opacity = (1 - smooth(0.15, 0.85, t)).toFixed(3) }

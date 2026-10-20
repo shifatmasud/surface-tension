@@ -47,6 +47,9 @@ export class ClipCompositeEffect extends Effect {
         vec2 q = 0.5 * u_view + (px - C) / u_scale;                    // where this pixel was when captured
         float sdO = sdRound(q - 0.5 * u_view, 0.5 * u_view, u_outRadius / u_scale);
         float inO = clamp(0.5 - sdO * u_scale / u_px, 0.0, 1.0);
+        // the outgoing frame drifts up slower than the scroll (no scale, no dimming — Shifat 08:37Z); in the thin gutters
+        // beside the card, below the frame's bottom edge, its last rows are mirrored so no empty band ever shows
+        if (q.y > u_view.y) { q.y = 2.0 * u_view.y - q.y; inO = 1.0; }
         vec3 snap = u_has > 0.5 ? texture2D(u_snap, vec2(q.x / u_view.x, 1.0 - q.y / u_view.y)).rgb : u_under * 1.6;
         vec3 under = u_under;
         vec3 outC = mix(under, snap * (1.0 - u_dark), inO);
