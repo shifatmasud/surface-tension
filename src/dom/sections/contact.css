@@ -1,0 +1,7 @@
+/* Contact, landscape: the whole block sits on the bottom margin so the gem owns the upper third at the end of
+   the page (before, the footer pushed the headline up into the stone when scrolled to the bottom) */
+@media (min-width: 813px) and (min-aspect-ratio: 1/1) {
+  section.contact { padding-top: 0; padding-bottom: 4vh; justify-content: flex-end; }
+  section.contact .contact__row { margin-top: 4.5vh; }
+  section.contact .footer { padding-top: 3.5vh; }
+}

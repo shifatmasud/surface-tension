@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useSection, weightFrom } from './useSection'
 import { visuals } from '../../gl/systems/visuals'
 import { props } from '../../state/props'
-import { clamp } from '../../core/math'
+import { clamp, mix } from '../../core/math'
 import { vfovFor, portrait } from '../../core/frame'
 import { SITE } from '../../content/site'
 import { ArrowUpRight, GithubLogo, XLogo, PaperPlaneTilt } from '@phosphor-icons/react'
@@ -11,6 +11,7 @@ import { ufxText } from '../../gl/ufx/UfxText'
 import { scroll } from '../../services/scroll'
 import { audio } from '../../services/audio'
 import { pool } from '../../gl/systems/pool'
+import './contact.css'
 
 function DhakaClock() {
   const [t, setT] = useState('')
@@ -39,11 +40,11 @@ export function Contact() {
       pose.fov = vfovFor(46, 22, 60)
       // the stone keeps the same share of the frame height at any aspect: on ultrawide (narrow vertical fov) the
       // camera backs off along the same line instead of letting the gem crop off the top
-      const back = Math.max(1, 30 / pose.fov)
+      const back = Math.max(1, 30 / pose.fov) * mix(1.15, 1, pr) // landscape: a touch further so the stone clears the type
       pose.pos.y = 0.33 + (pose.pos.y - 0.33) * back; pose.pos.z *= back
       // aim so the gem sits ~28 % from the top at any aspect (ultrawide's narrow vertical fov would push a fixed
       // aim off the top): down-angle to the gem plus the angle that puts it k of the half-height above centre
-      const half = (pose.fov * Math.PI) / 360, k = 0.56 - pr * 0.08
+      const half = (pose.fov * Math.PI) / 360, k = 0.68 - pr * 0.2
       const dz = pose.pos.z, gemDown = Math.atan2(pose.pos.y - 0.33, dz)
       const pitch = gemDown + Math.atan(k * Math.tan(half))
       pose.target.set(0, pose.pos.y - Math.tan(pitch) * dz, 0)
