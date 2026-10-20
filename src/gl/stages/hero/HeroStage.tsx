@@ -98,6 +98,7 @@ export function HeroStage() {
     // underwater, the gem's reflection/env capture are wasted work: stop once the dive camera is below the surface
     const vis = (props.look.dive < 0.999 || props.stage === 'dive') && props.stage !== 'journey' && props.stage !== 'systems'
       && !(props.stage === 'dive' && dive.camY < -0.3)
+      && !(props.stage === 'lab' && props.look.fade > 0.965)  // the lab fades the lake to 97 %: skip its 138k-tri water + reflection/env passes there
     group.current.visible = vis
     if (!vis) return
     // gem: slow breathing hover; the tip dips into the water once per ~3.4 s
