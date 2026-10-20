@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import { BloomEffect, EffectComposer, EffectPass, KernelSize, Pass, RenderPass, SMAAEffect, SMAAPreset } from 'postprocessing'
 import { GradeEffect, ScreenPaintDistortionEffect, SharpenEffect } from './effects'
+import { DiveGodRaysPass } from './DiveGodRays'
+import { diveRays } from '../stages/dive/diveState'
 import { props, shared } from '../../state/props'
 import { settings } from '../../services/settings'
 
@@ -44,6 +46,7 @@ export class PostChain {
     const renderScale = () => props.dpr / Math.max(1, Math.min(window.devicePixelRatio || 1, 2))
     this.entries = [
       { name: 'Scene', order: 0, pass: this.scenePass, needsRender: () => true },
+      { name: 'DiveGodRays', order: 5, pass: new DiveGodRaysPass(camera), needsRender: () => diveRays.on },
       { name: 'Bloom', order: 10, pass: new EffectPass(camera, this.bloom), needsRender: () => settings.USE_BLOOM && props.look.bloom > 0.001 },
       { name: 'Grade', order: 30, pass: new EffectPass(camera, this.grade), needsRender: () => true },
       { name: 'PreUfx', order: 50, pass: this.preUfx, needsRender: () => ufxUnder.children.some((c) => c.visible) },

@@ -13,6 +13,7 @@ uniform vec3 u_cam;
 uniform vec3 u_sun;        // direction the sunlight travels underwater (points down)
 uniform vec3 u_sunAir;     // direction toward the sun in air
 uniform float u_time, u_deep, u_split, u_star;
+uniform float u_caus;      // caustic strength 0..1 (QA: ?nocaus)
 uniform vec2 u_res;
 uniform sampler2D u_bn;
 const vec3 K  = vec3(0.34, 0.092, 0.072);           // absorption of light from the surface, per unit depth
@@ -51,31 +52,61 @@ vec3 rayVeil(vec3 dir, float dc, float T){
 }
 vec2 surfaceEntry(vec3 p){ return p.xz - u_sun.xz * (p.y / u_sun.y); }
 
-float cellEdge(vec2 p, float t){
-  vec2 g = floor(p), f = fract(p);
-  float d1 = 8.0, d2 = 8.0;
-  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++){
-    vec2 o = vec2(float(x), float(y));
-    vec2 h = hash22(g + o);
-    h = 0.5 + 0.42 * sin(t + 6.2831 * h);
-    float d = length(o + h - f);
-    if (d < d1){ d2 = d1; d1 = d; } else if (d < d2) d2 = d;
+/**
+ * Caustics, analytically: the surface is a sum of directional gravity waves h(x). Light refracted at x lands
+ * displaced by D·∇h (D grows with depth), so the energy that reaches the sand is the inverse area change of
+ * that map: I = 1 / |det(I + D·H)|, H the Hessian of h. det = 1 + D·tr(H) + D²·det(H), so the three colour
+ * channels (slightly different D: dispersion) cost three multiply-adds once H is known. Where det → 0 the
+ * light folds into the sharp bright filaments real caustics are made of. One fixed-point step maps the sand
+ * point back to the surface point that feeds it, which bends the network the way real caustics drift.
+ */
+#define CW 13
+const float CL[13] = float[13](0.61, 0.83, 1.07, 1.39, 1.83, 2.37, 0.71, 0.95, 1.23, 1.61, 3.1, 0.52, 2.05);
+void cField(vec2 q, float t, out vec2 g, out vec3 h){
+  g = vec2(0.0); h = vec3(0.0);
+  for (int i = 0; i < CW; i++){
+    float fi = float(i);
+    float a = fi * 2.39996 + 0.3 + 0.35 * sin(fi * 5.1);
+    vec2 k = vec2(cos(a), sin(a)) * (6.28318 / CL[i]);
+    float A = 0.0085 * pow(CL[i], 1.6) * (0.75 + 0.5 * fract(fi * 0.618));   // steeper than λ¹: curvature spread over all scales → irregular cells
+    float th = dot(q, k) - sqrt(9.8 * length(k)) * t + fi * 1.7;
+    float s = sin(th), c = cos(th);
+    g += A * c * k;
+    h += -A * s * vec3(k.x * k.x, k.y * k.y, k.x * k.y);
   }
-  return d2 - d1;
 }
-float caustic(vec2 q){
-  float t = u_time * 0.5;
-  vec2 w = q + 0.30 * vec2(sin(q.y * 2.6 + t * 1.1), sin(q.x * 2.2 - t * 0.9))
-             + 0.12 * vec2(sin(q.y * 5.3 - t * 1.7), sin(q.x * 4.9 + t * 1.5));
-  float a = cellEdge(w, t);
-  float la = exp(-a * a * 140.0);
-#ifdef LOW
-  return la * 1.25;                                   // phones: one network layer
-#else
-  float b = cellEdge(w * 1.61 + 3.1, t * 1.25);
-  float lb = exp(-b * b * 90.0);
-  return la * 0.8 + lb * 0.3 + la * lb * 1.4;
-#endif
+/** RGB caustic gain (mean ≈ 1) at surface-plane point q; D = focus (0.9 shallow … 1.6 deep); blur = extra softness */
+vec3 causticRGB(vec2 q, float D, float blur){
+  float t = u_time * 0.42;
+  vec2 g; vec3 h;
+  cField(q, t, g, h);
+  q -= D * g;
+  cField(q, t, g, h);
+  float tr = h.x + h.y, dt = h.x * h.y - h.z * h.z;
+  vec3 Dc = D * vec3(1.05, 1.0, 0.95);
+  vec3 det = 1.0 + Dc * tr + Dc * Dc * dt;
+  float eps = 0.025 + blur;
+  vec3 I = 1.0 / (abs(det) + eps);
+  I *= 2.26 * pow(eps, 0.375);                   // mean ≈ 1 at any softness (fitted)
+  // knots where filaments cross get brighter, interiors stay dim; renormalised to mean ≈ 1 (fitted)
+  return (I * I * 0.55 + I * 0.45) / (0.6 + 0.642 * pow(eps, -0.4535));
+}
+float caustic(vec2 q){ return causticRGB(q * 0.8, 1.3, 0.05).g; }
+`
+
+export const CAUSTICS_FRAG = /* glsl */ `
+/** caustics on a surface at depth d whose surface-entry point is q; softened by the pixel footprint (fwidth) */
+vec3 causticsAt(vec2 q, float d, float dist){
+  vec2 cq = q * 2.6;
+  // wave groups: the light focuses harder where the swell lines up (the same pattern drives the shafts), so the
+  // network is crisp and bright in patches and soft between them — the ocean, not a pool floor
+  float grp = smoothstep(0.05, 0.85, shaft(q * 0.55) * 0.38);
+  cq += 0.45 * vec2(vnoise(cq * 0.21 + 3.0), vnoise(cq * 0.21 + 11.0));        // break the wave sum's regularity:
+  cq += 0.5 * (vec2(vnoise(cq * 0.6 + 5.0), vnoise(cq * 0.6 + 17.0)) - 0.5);  // large drift + uneven cell sizes
+  float fw = length(fwidth(cq));
+  float blur = fw * 1.0 + 0.008 + (1.0 - grp) * 0.12 + smoothstep(8.0, 30.0, d) * 0.25 + smoothstep(5.0, 16.0, dist) * 0.35;   // far sand goes soft
+  vec3 c = min(causticRGB(cq, 1.0 + 0.035 * d, blur), vec3(9.0));
+  return mix(vec3(1.0), c, (0.4 + 0.6 * grp) * exp(-max(d - 11.0, 0.0) * 0.1) * exp(-max(dist - 9.0, 0.0) * 0.08) * u_caus);
 }
 `
 
@@ -106,7 +137,7 @@ void main(){
 export const backdropFrag = /* glsl */ `
 ${DIVE_COMMON}
 ${CLIP}
-uniform float u_raySteps;
+uniform float u_raySteps, u_rayGain;
 varying vec3 vDir;
 
 float surfH(vec2 p){
@@ -174,7 +205,7 @@ void main(){
     acc += shaft(surfaceEntry(p)) * exp(-K * d - KV * ti) * (2.0 * fi);   // × dt/dfi of the quadratic spacing
   }
   float fwd = max(dot(dir, -u_sun), 0.0);
-  col += acc * dt * vec3(0.30, 0.78, 0.86) * (0.07 + 0.52 * pow(fwd, 2.5)) * (1.0 - u_deep); // shafts read as the star of the open-water frames
+  col += acc * dt * u_rayGain * vec3(0.30, 0.78, 0.86) * (0.07 + 0.52 * pow(fwd, 2.5)) * (1.0 - u_deep); // shafts read as the star of the open-water frames
 
   col *= 1.0 - u_deep * 0.9;
   gl_FragColor = vec4(col, 1.0);
@@ -196,6 +227,7 @@ void main(){
 }`
 export const floorFrag = /* glsl */ `
 ${DIVE_COMMON}
+${CAUSTICS_FRAG}
 ${CLIP}
 varying vec3 vWorld;
 varying vec3 vNormal2;
@@ -203,17 +235,16 @@ void main(){
   splitClip();
   vec3 p = vWorld;
   // sand ripples (normal only)
-  float near = exp(-length(p - u_cam) * 0.11);                 // detail only where it can resolve
+  float near = exp(-length(p - u_cam) * 0.07);                 // detail only where it can resolve
   float rp = sin(p.x * 3.1 + sin(p.z * 0.8) * 1.6 + p.z * 0.9) * 0.5 + 0.5;
-  vec3 n = normalize(vNormal2 + near * (vec3(0.10 * (rp - 0.5), 0.0, 0.06 * (rp - 0.5)) + 0.05 * (vec3(vnoise(p.xz * 6.0), 0.0, vnoise(p.zx * 6.0 + 3.0)) - 0.5)));
+  vec3 n = normalize(vNormal2 + near * (vec3(0.42 * (rp - 0.5), 0.0, 0.22 * (rp - 0.5)) + 0.05 * (vec3(vnoise(p.xz * 6.0), 0.0, vnoise(p.zx * 6.0 + 3.0)) - 0.5)));
   rp = mix(0.5, rp, near);
-  vec3 alb = vec3(0.86, 0.76, 0.60) * (0.88 + 0.12 * vnoise(p.xz * 1.7)) * (0.94 + 0.06 * rp);
+  vec3 alb = vec3(0.86, 0.76, 0.60) * (0.8 + 0.2 * vnoise(p.xz * 1.7)) * (0.9 + 0.1 * rp) * (0.9 + 0.1 * vnoise(p.xz * 9.0));
   float d = max(-p.y, 0.0);
   vec2 q = surfaceEntry(p);
   float sunL = max(dot(n, -u_sun), 0.0);
-  float dist0 = length(p - u_cam);
-  float c = mix(0.42, caustic(q * 2.1), exp(-dist0 * 0.07));
-  vec3 light = exp(-K * d) * (sunL * (0.45 + 0.9 * c) * 0.62) + inscatter(vec3(0.0, 1.0, 0.0), d) * 0.55;
+  vec3 c = causticsAt(q, d, length(p - u_cam));
+  vec3 light = exp(-K * d) * (sunL * (0.6 + 0.48 * c) * 0.62) + inscatter(vec3(0.0, 1.0, 0.0), d) * 0.55;
   vec3 col = alb * light;
   vec3 v = p - u_cam;
   float dist = length(v);

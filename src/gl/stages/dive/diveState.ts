@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { settings } from '../../../services/settings'
 
 /**
  * Dive — shared state and the camera path. The stage (GL) and the section (DOM) both read this.
@@ -18,6 +19,23 @@ export const dive = {
   pose: new THREE.Vector3(), // the path's camera position this frame (QA: compare with the damped camera)
 }
 ;(window as any).__dive = dive
+
+/**
+ * What the screen-space god-ray pass (src/gl/post/DiveGodRays.ts) reads each frame. The stage owns the
+ * occlusion scene (the light: Snell's window + lit water, with the vegetation drawn black over it).
+ */
+export const diveRays = {
+  on: false,                       // the pass runs only while this is true (dive, under water)
+  intensity: 0,                    // 0..1 overall gain (fades with depth and at the crossing)
+  scene: null as THREE.Scene | null,
+  invVP: new THREE.Matrix4(),      // inverse view-projection of the widened mask camera (the pass writes it)
+  toSun: new THREE.Vector3(0, 1, 0), // direction toward the sun under water
+  sun: new THREE.Vector4(0.5, 1, 0, 1), // the pass writes: sun vanishing point in mask uv (xy), behind camera (z), mask aspect (w)
+  scale: settings.TIER === 'high' ? 0.5 : settings.TIER === 'mid' ? 0.4 : 0.3,   // mask/blur resolution vs the render target
+  samples: settings.TIER === 'high' ? 40 : settings.TIER === 'mid' ? 28 : 16,    // radial taps in the long pass
+  tint: new THREE.Color(0.42, 0.88, 1.0),
+}
+;(window as any).__diveRays = diveRays
 
 /** Floor height — mirrored 1:1 in GLSL (shaders.ts FLOOR_H). A shelf at −11 that falls away past z ≈ 20. */
 export function floorH(x: number, z: number) {

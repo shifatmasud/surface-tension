@@ -6,10 +6,81 @@ import { settings } from '../../../services/settings'
 import { portrait } from '../../../core/frame'
 import { engine } from '../../engine'
 import { GEM_LAYER } from '../hero/HeroStage'
-import { dive, DIVE_LAYER, TOOL_POS } from './diveState'
+import { dive, diveRays, DIVE_LAYER, TOOL_POS, floorH } from './diveState'
+import { vegVert, vegFrag, rayMaskVert, rayMaskFrag } from './vegetation'
 import { backdropVert, backdropFrag, floorVert, floorFrag, siltVert, siltFrag, starVert, starFrag } from './shaders'
 
 const ss = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
+const Q = typeof location !== 'undefined' ? location.search : ''
+const QA = { noRays: /[?&]norays/.test(Q), noVeg: /[?&]noveg/.test(Q), noCaus: /[?&]nocaus/.test(Q) }
+
+/** Seeded random so the forest is the same on every visit (and in every QA frame). */
+function rng(seed: number) { let s = seed >>> 0; return () => { s = (s + 0x6d2b79f5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296 } }
+
+/**
+ * The forest: kelp ribbons frame the glide on both sides (clear lane down the middle so the light and his tools
+ * stay the one focal point), a few near the camera's path for parallax; seagrass in patches on the shelf.
+ */
+function plantForest(nKelp: number, nGrass: number) {
+  const R = rng(7)
+  const kelp: number[] = [], kShape: number[] = []
+  const nearTool = (x: number, z: number) => TOOL_POS.some((p) => Math.hypot(p[0] - x, p[2] - z) < 1.5)
+  let guard = 0
+  while (kelp.length / 4 < nKelp && guard++ < nKelp * 40) {
+    const fore = false
+    const side = R() < 0.5 ? -1 : 1
+    const x = side * (fore ? 2.0 + R() * 1.2 : 3.0 + Math.pow(R(), 1.5) * 19)
+    const z = fore ? 9.5 + R() * 2 : 10 + R() * 22
+    if (nearTool(x, z)) continue
+    const fy = floorH(x, z)
+    const depth = -fy
+    const maxH = Math.min(depth - 0.5, 16)
+    const H = maxH * (0.62 + R() * 0.38)
+    if (H < 2) continue
+    const clump = 1 + Math.floor(R() * 3)
+    for (let c = 0; c < clump && kelp.length / 4 < nKelp; c++) {
+      const ox = (R() - 0.5) * 0.4, oz = (R() - 0.5) * 0.4
+      const hh = H * (0.8 + R() * 0.25), wd = 0.8 + R() * 0.25, ph = R() * 6.283, tw = R() * 6.283
+      // two crossed strips per plant so it never goes edge-on
+      kelp.push(x + ox, floorH(x + ox, z + oz) - 0.05, z + oz, hh, x + ox, floorH(x + ox, z + oz) - 0.05, z + oz, hh)
+      kShape.push(wd, ph, tw, 0, wd, ph, tw + 1.5708, 0)
+    }
+  }
+  const grass: number[] = [], gShape: number[] = []
+  const clumps: [number, number, number][] = []
+  for (let i = 0; i < 70; i++) {
+    const x = (R() - 0.5) * 34, z = 6 + R() * 18
+    if (Math.abs(x) < 1.2 && R() < 0.7) continue
+    clumps.push([x, z, 0.5 + R() * 1.1])
+  }
+  for (let i = 0; i < nGrass && clumps.length; i++) {
+    const c = clumps[i % clumps.length]
+    const a = R() * 6.283, r = Math.sqrt(-2 * Math.log(1 - R() * 0.98)) * c[2] * 0.6
+    const x = c[0] + Math.cos(a) * r, z = c[1] + Math.sin(a) * r
+    grass.push(x, floorH(x, z) - 0.04, z, 0.35 + R() * R() * 0.9)
+    gShape.push(0.045 + R() * 0.04, R() * 6.283 * 0.3 + c[0] * 0.2, R() * 6.283, 1)
+  }
+  // a few big fronds right beside the camera's path: soft, dark, out-of-focus parallax (clear of his tools)
+  const fore: number[] = [], fShape: number[] = []
+  for (const [x, z] of [[2.1, 10.6], [-2.4, 11.4], [3.0, 12.6], [1.35, 13.6], [-3.4, 17.6]] as [number, number][]) {
+    const y = floorH(x, z) - 0.05, H = -y - 0.4 - R() * 1.5, wd = 1.15 + R() * 0.25, ph = R() * 6.283, tw = R() * 6.283
+    fore.push(x, y, z, H, x, y, z, H)
+    fShape.push(wd, ph, tw, 0, wd, ph, tw + 1.5708, 0)
+  }
+  return { kelp, kShape, grass, gShape, fore, fShape }
+}
+
+function strip(segs: number, n: number, root: number[], shape: number[]) {
+  const p = new THREE.PlaneGeometry(1, 1, 1, segs)
+  p.translate(0, 0.5, 0)
+  const g = new THREE.InstancedBufferGeometry()
+  g.index = p.index
+  g.setAttribute('position', p.getAttribute('position'))
+  g.setAttribute('aRoot', new THREE.InstancedBufferAttribute(new Float32Array(root), 4))
+  g.setAttribute('aShape', new THREE.InstancedBufferAttribute(new Float32Array(shape), 4))
+  g.instanceCount = n
+  return g
+}
 
 /** The sun: 58° up in air, a little left of the dive axis; refracted into the water by Snell's law. */
 function sunDirs() {
@@ -43,6 +114,8 @@ export function DiveStage() {
       u_star: { value: 0 },
       u_res: shared.u_resolution,
       u_bn: shared.u_blueNoise,
+      u_caus: { value: QA.noCaus ? 0 : 1 },
+      u_xk: { value: 1 },
     }
   }, [])
 
@@ -50,7 +123,7 @@ export function DiveStage() {
     const defines = low ? { LOW: 1 } : {}
     const backdrop = new THREE.ShaderMaterial({
       vertexShader: backdropVert, fragmentShader: backdropFrag,
-      uniforms: { ...u, u_raySteps: { value: hi ? 16 : low ? 7 : 11 } },
+      uniforms: { ...u, u_raySteps: { value: hi ? 14 : low ? 1 : 10 }, u_rayGain: { value: QA.noRays ? 1 : low ? 0 : 0.85 } },   // phones: the screen-space pass carries the shafts alone
       side: THREE.BackSide, depthTest: false, depthWrite: false, defines,
     })
     const floor = new THREE.ShaderMaterial({ vertexShader: floorVert, fragmentShader: floorFrag, uniforms: { ...u }, defines, transparent: true })
@@ -64,7 +137,11 @@ export function DiveStage() {
       uniforms: { ...u, u_dpr: { value: 1 } },
       transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
     })
-    return { backdrop, floor, silt, stars }
+    const veg = new THREE.ShaderMaterial({ vertexShader: vegVert, fragmentShader: vegFrag, uniforms: { ...u, u_part: { value: 2.6 } }, defines, side: THREE.DoubleSide })
+    const vegFore = new THREE.ShaderMaterial({ vertexShader: vegVert, fragmentShader: vegFrag, uniforms: { ...u, u_part: { value: 2.6 } }, defines: { ...defines, FORE: 1 }, side: THREE.DoubleSide, transparent: true, depthWrite: false })
+    const vegMask = new THREE.ShaderMaterial({ vertexShader: vegVert, fragmentShader: vegFrag, uniforms: { ...u, u_part: { value: 2.6 } }, defines: { ...defines, MASK: 1 }, side: THREE.DoubleSide, depthTest: false, depthWrite: false })
+    const rayMask = new THREE.ShaderMaterial({ vertexShader: rayMaskVert, fragmentShader: rayMaskFrag, uniforms: { ...u, u_invVP: { value: diveRays.invVP }, u_sunInfo: { value: diveRays.sun } }, defines, depthTest: false, depthWrite: false })
+    return { backdrop, floor, silt, stars, veg, vegFore, vegMask, rayMask }
   }, [u, hi, low])
 
   const geos = useMemo(() => {
@@ -85,14 +162,31 @@ export function DiveStage() {
     const stars = new THREE.BufferGeometry()
     stars.setAttribute('position', new THREE.BufferAttribute(sp, 3))
     stars.setAttribute('aRand', new THREE.BufferAttribute(rnd(starN), 3))
-    return { sphere, floor, silt, stars }
+    const f = plantForest(hi ? 320 : low ? 100 : 220, hi ? 6400 : low ? 1800 : 4000)
+    const kelp = strip(low ? 18 : 30, f.kelp.length / 4, f.kelp, f.kShape)
+    const grass = strip(low ? 4 : 6, f.grass.length / 4, f.grass, f.gShape)
+    const fore = strip(low ? 18 : 30, f.fore.length / 4, f.fore, f.fShape)
+    const quad = new THREE.PlaneGeometry(2, 2)
+    return { sphere, floor, silt, stars, kelp, grass, fore, quad }
   }, [hi, low])
+
+  // the god-ray occlusion scene: the light, with the kelp silhouettes drawn black over it
+  const maskScene = useMemo(() => {
+    const s = new THREE.Scene()
+    const bg = new THREE.Mesh(geos.quad, mats.rayMask); bg.frustumCulled = false; bg.renderOrder = 0
+    const k = new THREE.Mesh(geos.kelp, mats.vegMask); k.frustumCulled = false; k.renderOrder = 1
+    const kf = new THREE.Mesh(geos.fore, mats.vegMask); kf.frustumCulled = false; kf.renderOrder = 1
+    if (!QA.noVeg) { s.add(k); s.add(kf) }
+    s.add(bg)
+    return s
+  }, [geos, mats])
 
   useEffect(() => {
     camera.layers.enable(DIVE_LAYER)
     return () => {
       Object.values(mats).forEach((m) => m.dispose()); Object.values(geos).forEach((g) => g.dispose())
       const g = engine.chain?.grade; if (g) g.u('u_waterline').value = -1
+      diveRays.on = false; diveRays.scene = null
     }
   }, [camera, mats, geos])
 
@@ -132,7 +226,12 @@ export function DiveStage() {
     }
     if (st.hero && on && camY < -0.3) st.hero.visible = false
 
-    if (!showGL) { hideLabels(st.labels); return }
+    if (!showGL) { diveRays.on = false; hideLabels(st.labels); return }
+    // screen-space god rays: on once fully under, fading out into the deep
+    diveRays.scene = maskScene
+    diveRays.toSun.copy(u.u_sun.value).negate()
+    diveRays.intensity = QA.noRays ? 0 : ss(-0.3, -1.2, camY) * (1 - ss(-9, -20, camY)) * 0.9
+    diveRays.on = diveRays.intensity > 0.002
 
     u.u_cam.value.copy(camera.position)
     backdrop.current.position.copy(camera.position)
@@ -149,6 +248,7 @@ export function DiveStage() {
       st.labels = Array.from(document.querySelectorAll<HTMLElement>('#dive .dive__tool'))
     }
     const xk = 1 - 0.58 * portrait()
+    u.u_xk.value = 1 - 0.12 * portrait()
     const gate = ss(0.54, 0.62, dive.u)
     st.labels.forEach((el, i) => {
       const p = TOOL_POS[i % TOOL_POS.length]
@@ -169,6 +269,9 @@ export function DiveStage() {
     <group ref={group} visible={false}>
       <mesh ref={backdrop} geometry={geos.sphere} material={mats.backdrop} renderOrder={10} frustumCulled={false} onUpdate={(o) => o.layers.set(DIVE_LAYER)} />
       <mesh geometry={geos.floor} material={mats.floor} position={[0, 0, 28]} renderOrder={11} frustumCulled={false} onUpdate={(o) => o.layers.set(DIVE_LAYER)} />
+      {!QA.noVeg && <mesh geometry={geos.kelp} material={mats.veg} renderOrder={11} frustumCulled={false} onUpdate={(o) => o.layers.set(DIVE_LAYER)} />}
+      {!QA.noVeg && <mesh geometry={geos.grass} material={mats.veg} renderOrder={11} frustumCulled={false} onUpdate={(o) => o.layers.set(DIVE_LAYER)} />}
+      {!QA.noVeg && <mesh geometry={geos.fore} material={mats.vegFore} renderOrder={14} frustumCulled={false} onUpdate={(o) => o.layers.set(DIVE_LAYER)} />}
       <points geometry={geos.silt} material={mats.silt} renderOrder={12} frustumCulled={false} onUpdate={(o) => o.layers.set(DIVE_LAYER)} />
       <points geometry={geos.stars} material={mats.stars} renderOrder={13} frustumCulled={false} onUpdate={(o) => o.layers.set(DIVE_LAYER)} />
     </group>
