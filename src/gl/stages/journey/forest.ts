@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
 /** Seeded random so the forest is the same composition on every load. */
 function rng(seed: number) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296) }
@@ -24,7 +24,9 @@ function vnoise(x: number, y: number, z: number) {
 /** Bend a part's normals toward a shared "canopy" normal (outward from a centre, squashed by `sy`): the stylised-
  *  foliage trick — many blobs light as one soft mass instead of a pile of facets. Colours by height/exposure. */
 function softPart(g: THREE.BufferGeometry, centre: THREE.Vector3, sy: number, k: number, dark: THREE.Color, light: THREE.Color, y0: number, y1: number, disp = 0, seed = 0) {
-  g.deleteAttribute('uv')
+  // weld the shared corners first: on a non-indexed mesh computeVertexNormals gives one flat normal per face, which
+  // read as hard facets with a gold rim on every edge (worst on phones' coarser tiers). Welded = smooth shading.
+  g.deleteAttribute('uv'); g.deleteAttribute('normal'); g = mergeVertices(g, 1e-3)
   const p = g.attributes.position as THREE.BufferAttribute
   if (disp > 0) {
     for (let i = 0; i < p.count; i++) {
@@ -46,7 +48,7 @@ function softPart(g: THREE.BufferGeometry, centre: THREE.Vector3, sy: number, k:
     col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b
   }
   g.setAttribute('color', new THREE.BufferAttribute(col, 3))
-  return g
+  return g.toNonIndexed()
 }
 function trunk(h: number, r0: number, r1: number) {
   const g = new THREE.CylinderGeometry(r1, r0, h, 7, 1, true).translate(0, h / 2, 0).toNonIndexed()
@@ -56,7 +58,7 @@ function trunk(h: number, r0: number, r1: number) {
 
 /** A soft stylised conifer: five drooping, wavy-edged tiers (lathe skirts), smooth-lit as one mass. */
 function pineGeometry(low: boolean) {
-  const seg = low ? 14 : 22, parts: THREE.BufferGeometry[] = [trunk(1.3, 0.17, 0.11)]
+  const seg = low ? 18 : 22, parts: THREE.BufferGeometry[] = [trunk(1.3, 0.17, 0.11)]
   const tiers = low ? 4 : 5
   for (let t = 0; t < tiers; t++) {
     const f = t / (tiers - 1), R = THREE.MathUtils.lerp(1.3, 0.42, f), h = THREE.MathUtils.lerp(1.75, 1.2, f), y = 0.95 + t * 0.6
@@ -66,11 +68,11 @@ function pineGeometry(low: boolean) {
     const p = g.attributes.position as THREE.BufferAttribute, ph = t * 1.7
     for (let i = 0; i < p.count; i++) {
       const x = p.getX(i), z = p.getZ(i), r = Math.hypot(x, z), a = Math.atan2(z, x)
-      const wav = 1 + (0.1 * Math.sin(a * 7 + ph) + 0.05 * Math.sin(a * 13 - ph * 2)) * (r / R)
+      const wav = 1 + (0.065 * Math.sin(a * 7 + ph) + 0.03 * Math.sin(a * 13 - ph * 2)) * (r / R)
       const droop = -0.12 * (r / R) * (r / R) * (1 + 0.5 * Math.sin(a * 7 + ph))
       p.setXYZ(i, x * wav, p.getY(i) + y + droop, z * wav)
     }
-    parts.push(softPart(g, new THREE.Vector3(0, 2.4, 0), 1.9, 0.72, C('#2c6534'), C('#5aa646'), 0.6, 4.6, 0.09, t * 2.3))
+    parts.push(softPart(g, new THREE.Vector3(0, 2.4, 0), 1.9, 0.9, C('#2c6534'), C('#5aa646'), 0.6, 4.6, 0.09, t * 2.3))
   }
   const g = mergeGeometries(parts)!; return g
 }

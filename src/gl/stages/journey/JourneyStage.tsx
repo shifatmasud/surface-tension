@@ -96,7 +96,7 @@ export function JourneyStage(): JSX.Element {
     S.fan.mesh.scale.setScalar(300); S.fan.mesh.lookAt(S.icam.position)
     for (const m of S.mist.mats) { m.uniforms.u_time.value = time; m.uniforms.u_opacity.value = land }
     S.mist.group.visible = land > 0.01
-    S.treeRim.value = 0.42 * ss(0.3, 0.6, I.atmos)
+    S.treeRim.value = 0.3 * ss(0.3, 0.6, I.atmos)
     S.motes.material.uniforms.u_time.value = time; S.motes.material.uniforms.u_opacity.value = land
     S.motes.points.visible = land > 0.01
     const h = Math.max(0, I.crew.y)
@@ -238,7 +238,7 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   forestMat.onBeforeCompile = (sh) => {
     sh.uniforms.u_rim = treeRim; sh.uniforms.u_rimCol = treeRimCol
     sh.fragmentShader = 'uniform float u_rim; uniform vec3 u_rimCol;\n' + sh.fragmentShader.replace('#include <opaque_fragment>',
-      'float rimF = pow(1.0 - abs(dot(normal, normalize(vViewPosition))), 4.5);\n  outgoingLight += u_rimCol * rimF * u_rim;\n' +
+      'float rimF = pow(1.0 - abs(dot(normal, normalize(vViewPosition))), 6.0);\n  outgoingLight += u_rimCol * rimF * u_rim;\n' +
       // leaf translucency: with the low sun behind the canopy, light scatters through the foliage edges (tinted by
       // the leaf colour, so trunks barely glow) — the soft gold-green backlight of a stylised forest
       '  #if NUM_DIR_LIGHTS > 0\n  { vec3 Lv = directionalLights[0].direction; vec3 Vv = normalize(vViewPosition);\n' +
