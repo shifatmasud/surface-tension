@@ -26,9 +26,10 @@ html.no-gl .contact__inner { position: relative; height: auto; min-height: 100vh
 @media (max-width: 812px) { .contact__title { font-size: clamp(64px, 19vw, 132px); } }
 
 /* sticky footer: the CTA (canvas + DOM) slides up over it like a curtain; it never moves */
-.footer-spacer { height: calc(var(--footer-h) + 4px); }  /* W19: the bar fills during the reveal itself (Contact.tsx), so no extra 40vh */  /* the reveal, then the back-to-the-surface bar fills */
+.footer-spacer { height: calc(var(--footer-h) + var(--loop-runway) + 4px); }  /* W19 (Shifat 19:49Z "must scroll longer to loop back to top"): the reveal, then a runway where the footer holds and the bar fills */
+:root { --loop-runway: 100vh; }
 :root { --footer-h: 50vh; }   /* W19 (Shifat 19:06Z): half the viewport, not full */
-@media (max-width: 760px) { :root { --footer-h: 50svh; } .site-footer { padding-top: var(--s5, 32px); } .site-footer__top { row-gap: var(--s3, 16px); } }
+@media (max-width: 760px) { :root { --footer-h: 50svh; --loop-runway: 120svh; } .site-footer { padding-top: var(--s5, 32px); } .site-footer__top { row-gap: var(--s3, 16px); } }
 .site-footer { position: fixed; left: 0; right: 0; bottom: 0; height: var(--footer-h); z-index: -1; background: var(--c-paper); color: var(--c-ink);
   display: flex; flex-direction: column; justify-content: space-between; padding: calc(var(--s7) * 0.7) var(--pad-x) var(--pad-y); font-size: var(--fs-small); }
 .site-footer .overscroll__bar { display: grid; gap: var(--s2); width: min(100%, 520px); color: var(--c-ink); }

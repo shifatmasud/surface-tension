@@ -31,6 +31,7 @@ export function createGemSheen(opts: { strength?: number; warm?: number } = {}) 
     u_rim: { value: new THREE.Vector3(0.6, 0.35, -0.7).normalize() },
     u_surfaceY: { value: 0 },        // the lake's level: below it the stone is underwater
     u_under: { value: 1 },           // 0 disables the underwater look (caustics, absorption, waterline)
+    u_tp: { value: 1 },              // CINEMATIC: three-point strength (key from the surface underwater, fill, rim)
     ...causticUniforms,
   }
   const material = new THREE.ShaderMaterial({
@@ -50,7 +51,7 @@ export function createGemSheen(opts: { strength?: number; warm?: number } = {}) 
         gl_Position = projectionMatrix * viewMatrix * w;
       }`,
     fragmentShader: /* glsl */ `
-      uniform float u_time, u_strength, u_warm, u_surfaceY, u_under; uniform vec3 u_key, u_rim;
+      uniform float u_time, u_strength, u_warm, u_surfaceY, u_under, u_tp; uniform vec3 u_key, u_rim;
       varying vec3 vN; varying vec3 vW; varying vec3 vO; varying vec3 vON;
       ${THIN_FILM}
       float h31(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
@@ -85,6 +86,23 @@ export function createGemSheen(opts: { strength?: number; warm?: number } = {}) 
           col = mix(col, iri * u_strength * 0.6, sub);
           col += causticLight(vW, n) * sub * 1.0;           // the shared glowing caustic web (water/caustics.ts)
         }
+        // CINEMATIC three-point (Shifat 18:50Z), no scene lights (the light budget is unchanged): the rim and the fill are
+        // tied to the LENS (view space), so they separate the stone from the dark water from any camera; the key stays
+        // the warm softbox above (u_key) and becomes the surface light under water. All Fresnel-weighted: the facets'
+        // edges catch it, the faces stay clear, so the refracted body is never veiled.
+        vec3 lR = normalize((vec4(0.35, 0.55, -1.0, 0.0) * viewMatrix).xyz);    // rim: behind the stone, up-right
+        vec3 lF = normalize((vec4(0.7, -0.25, 0.65, 0.0) * viewMatrix).xyz);    // fill: the lens side, low right
+        float Fr = pow(1.0 - c, 2.5);
+        float rimL = Fr * smoothstep(0.0, 0.75, dot(n, lR));
+        float fillL = pow(max(dot(r, lF), 0.0), 5.0) * (0.25 + 0.75 * Fr);
+        float keyU = pow(max(dot(r, normalize(vec3(-0.2, 1.0, 0.25))), 0.0), 48.0) * (0.35 + 0.65 * F) * exp(-max(dz, 0.0) * 0.12);
+        vec3 tp = mix(vec3(0.55, 0.75, 1.0), vec3(0.6, 0.92, 1.0), sub) * rimL * mix(0.32, 0.6, sub)
+                + mix(vec3(0.58, 0.6, 0.66), vec3(0.3, 0.58, 0.64), sub) * fillL * 0.06
+                + vec3(0.85, 0.97, 1.0) * keyU * 1.8 * sub;
+        col += tp * u_tp;
+        // W19 (Shifat 19:50Z "blue with subtle glow"): a faint sapphire body glow, strongest face-on, low enough to feed the
+        // hot-spot bloom only where the facets already flare (no haze)
+        col += vec3(0.08, 0.26, 0.9) * 0.07 * (0.35 + 0.65 * c) * (1.0 - 0.6 * sub);
         // DIAG: (dz/w)² as a product: pow() of a negative base is undefined in GLSL (NaN on D3D/Metal fast-math), and dz
         // is negative on every facet above the waterline
         float wl = dz / 0.006;

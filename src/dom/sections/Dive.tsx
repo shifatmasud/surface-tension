@@ -91,7 +91,7 @@ export function Dive() {
         const rawS = sysR ? clamp((props.scroll - sysR.docTop + props.height) / Math.max(1, sysR.height)) : 0
         dive.u = rawS > 0 ? U_END + (U_MAX - U_END) * rawS : rawL > 0 ? U_LAB + (U_END - U_LAB) * rawL : raw * U_LAB
         dive.sys = clamp((rawS - 0.3) / 0.7)
-        dive.push = ss(0.62, 1.0, dive.sys)
+        dive.push = ss(0.56, 1.0, dive.sys) // POLISH-2: starts as the parts finish forming (morph ends at 0.56), so the tablet's approach gets more scroll
         dive.abyss = ss(0.96, 1.2, dive.u)
         dive.gemScale = 1 + 0.7 * ss(1.02, 1.2, dive.u)
         props.dive = dive.u
@@ -130,18 +130,10 @@ export function Dive() {
     }
   })
   return (
-    <section id="dive" className="section dive" ref={ref} aria-labelledby="dive-title">
-      <div className="sticky dive__inner">
-        <ul className="dive__tools" aria-label="Tools I work with">
-          {TOOLS.map((t, i) => (
-            <li className="dive__tool" key={t}><span className="dive__idx" aria-hidden="true"><Odometer value={i + 1} digits={2} play={toolsOn} delay={i * 0.06} /></span>{t}</li>
-          ))}
-        </ul>
-        <div className="dive__foot">
-          <h2 className="dive__title" id="dive-title"><span className="dive__line" ref={line}>Under the surface</span></h2>
-          <p className="dive__cap" ref={cap}>{noOrphan('Shaders, physics and the GPU. The part of the work you feel before you see it.')}</p>
-        </div>
-      </div>
+    // TEXT GAP (Shifat 18:52Z m:ef4a3572): no words between the hero's name and the work. The tool labels, the
+    // "Under the surface" line and its caption are gone; the dive is the world alone (its scroll length is unchanged)
+    <section id="dive" className="section dive" ref={ref} aria-label="The dive">
+      <div className="sticky dive__inner" />
     </section>
   )
 }

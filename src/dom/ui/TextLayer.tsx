@@ -5,7 +5,7 @@ import { SplitText } from 'gsap/SplitText'
 import { props } from '../../state/props'
 import { settings, browser } from '../../services/settings'
 import { clamp } from '../../core/math'
-import { PROJECTS, PHRASES } from '../../content/site'
+import { PROJECTS } from '../../content/site'
 import { SrHeadings } from '../a11y/SrHeadings'
 import { noOrphan, noOrphanLines } from '../a11y/noOrphans'
 import { dive } from '../../gl/stages/dive/diveState'
@@ -34,9 +34,8 @@ gsap.registerPlugin(SplitText)
 type Beat = { id: string; eyebrow: string; title: string[]; body: string }
 const BEATS: Beat[] = [
   { id: 'hero', eyebrow: 'Portfolio — 2026', title: ['Shifat', 'Masud'], body: 'Design engineer & creative technologist, Dhaka.' },
-  // SECTION CUT (Shifat 15:41Z): the Statement section is gone; its line plays here during the dive's descent
-  ...PHRASES.map((p, i) => ({ id: 'statement' + i, eyebrow: PHRASES.length > 1 ? `Principle 0${i + 1}` : 'Principle', title: p.t, body: p.c })),
-  { id: 'dive', eyebrow: 'Craft', title: ['Under the', 'surface'], body: 'Shaders, physics and the GPU. The part of the work you feel before you see it.' },
+  // TEXT GAP (Shifat 18:52Z m:ef4a3572): "After Shifat Masud, no other text untill project sections texts." The
+  // principle line and "Under the surface" are gone: the descent plays wordless until the first work beat.
   ...PROJECTS.map((p) => ({ id: 'lab-' + p.id, eyebrow: `Work · ${p.no} / 0${PROJECTS.length}`, title: [p.title], body: `${p.blurb} ${p.tags.join(' · ')}` })),
   { id: 'systems', eyebrow: 'Systems', title: ['Shade DS'], body: 'A generative design system for teams who ship fast and want every screen to feel like one product. Plus the tooling that hands it to agents: MCP servers and the Upsy OAuth bridge.' },
   { id: 'journey1', eyebrow: 'Next', title: ['Playable', 'worlds.'], body: 'Made for the browser.' },
@@ -57,9 +56,9 @@ function measure() {
 }
 const pin = (id: string, off = 0) => { const r = R[id]; return r ? (props.scroll - r.top + off) / Math.max(1, r.h - props.height) : -1 }
 
-/** SECTION CUT: where the statement's line hands the slot over (hero pin progress / dive progress) */
-const ST_FROM_HERO = 0.45, ST_END = 0.16
-const statementBeat = (f: number) => IDX.get('statement' + Math.min(PHRASES.length - 1, Math.max(0, Math.floor(f * PHRASES.length))))!
+/** the hero's name block hands the slot over at this hero pin progress (unchanged); the slot then stays empty until the work */
+const ST_FROM_HERO = 0.45
+
 /** which beat the scroll is on right now (-1: the slot is empty and lets the scene breathe) */
 function current(dropped: boolean): number {
   const vh = props.height, s = props.scroll
@@ -87,16 +86,10 @@ function current(dropped: boolean): number {
     const n = PROJECTS.length, a = Math.round(clamp(pl) * (n - 1))
     return IDX.get('lab-' + PROJECTS[a].id)!
   }
-  if (props.stage === 'dive' || (R.dive && s > R.dive.top)) {
-    if (dive.u > 0.405) return IDX.get('dive')!
-    // SECTION CUT: the statement's line (it was its own 300vh section before the dive) plays over the end of the
-    // hero and the first stretch of the descent, and is out before the stone fills the frame (cut-review P1-1); the
-    // crane-down, the over-under crossing and the window of light (u .16–.405) breathe with an empty slot, as on live
-    return dive.u < ST_END ? statementBeat(dive.u / ST_END) : -1
-  }
-  // the statement's line takes over from the hero's in the second half of the hero's pin, so it gets a full beat
-  // (~1.3 screens: ~0.8 of the hero pin + ~0.5 of the dive) instead of flashing past at the hand-off
-  if (dropped && pin('hero') > ST_FROM_HERO) return statementBeat(0)
+  // TEXT GAP (Shifat 18:52Z): the whole descent (crane-down, crossing, window of light, the deep) is wordless
+  if (props.stage === 'dive' || (R.dive && s > R.dive.top)) return -1
+  // the hero's name block leaves where it always did (second half of the hero's pin); nothing replaces it
+  if (dropped && pin('hero') > ST_FROM_HERO) return -1
   return dropped ? 0 : -1
 }
 

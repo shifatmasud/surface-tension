@@ -305,12 +305,20 @@ export function HeroStage() {
     const crossing = dive.split > -0.5
     m.renderOrder = camUnder || crossing ? 11 : 0; sheenMesh.current.renderOrder = camUnder || crossing ? 15 : 2
     // env capture: first frames, then every 24 frames on capable tiers (every 8 while the stone is under)
-    if (env.frame < 3 || (camUnder && env.frame % (dive.abyss > 0.5 ? (hi ? 3 : 8) : 30) === 0) || (hi && env.frame % (deep ? 8 : 24) === 0 && props.stage !== 'contact')) {  // contact keeps the hero's studio env: a re-capture of the bright contact field washed the pavilion out
+    // W19 (Shifat 19:50Z "diamond comes black"): the first 3 frames now run behind the preloader's warm gate, where the
+    // studio/sky can still be unready, and a low tier never re-captured, so the stone kept a black env. Re-capture through
+    // the first seconds and then every 90 frames in the hero on every tier (one cube pass, cheap at this rate)
+    const reEnv = env.frame < 240 && env.frame % 20 === 0   // (the warm gate no-ops clear/viewport/mipmaps on its frames)
+    if (env.frame < 3 || reEnv || (camUnder && env.frame % (dive.abyss > 0.5 ? (hi ? 3 : 8) : 30) === 0) || (hi && env.frame % (deep ? 8 : 24) === 0 && props.stage !== 'contact')) {  // contact keeps the hero's studio env: a re-capture of the bright contact field washed the pavilion out
       m.visible = false; sheenMesh.current.visible = false
       env.cam.position.copy(gem.pos)
       // camera under with the lake hidden: the env keeps the product flags only (QA __envDive=true adds the dive's water)
       const envDive = !lakeOn && ((window as any).__envDive ?? false)   // off: the dive backdrop (no depth test) wipes the flags → a pastel stone
       env.cam.children.forEach((cm) => { if (envDive) cm.layers.enable(DIVE_LAYER); else cm.layers.disable(DIVE_LAYER) })
+      // W19 (Shifat 19:50Z "diamond comes black", measured: __morph=1 turns it blue again): the UI drum and its particle atom
+      // (SYSUI_LAYER) sit around the stone before they form; seen by the hero's env capture they wrapped it in dark parts.
+      // The env sees them only in the systems deep, where the stone is meant to refract the cylinder
+      env.cam.children.forEach((cm) => { if (deep) cm.layers.enable(SYSUI_LAYER); else cm.layers.disable(SYSUI_LAYER) })
       studio.position.copy(gem.pos); uStudio.g.position.copy(gem.pos)
       env.cam.update(gl, scene)
       m.visible = true; sheenMesh.current.visible = true

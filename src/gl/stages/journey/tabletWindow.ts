@@ -135,6 +135,15 @@ void main(){
   // the stone's caustic light passes across the glass (the light hand-off): a narrow glint, on the dark of space only
   float sw = exp(-pow((vUv.x + vUv.y * 0.35 - u_sweep) * 26.0, 2.0));
   c += vec3(0.55, 0.75, 1.0) * sw * 0.07 * glass * u_sheen * (1.0 - smoothstep(0.02, 0.25, lum));
+  // CINEMATIC three-point (Shifat 18:50Z), no new lights: the key is the surface softbox in the glass above; the RIM is the
+  // glass's bevelled edge catching the surface light from behind/above (strongest along the top, so the black slab
+  // separates from the dark water); the FILL is a faint teal lift of the black bezel from the lens side
+  vec2 hp = vec2(${(PLANE_W / 2).toFixed(3)}, ${(PLANE_H / 2).toFixed(3)});
+  float dOut = sdBox(lp, hp - 0.004, 0.05);
+  float bevel = exp(-pow((dOut + 0.007) / 0.006, 2.0));
+  float topk = 0.35 + 0.65 * smoothstep(-0.4, 0.9, lp.y / hp.y);
+  c += vec3(0.55, 0.86, 0.95) * bevel * topk * (0.3 + 0.7 * (1.0 - ndv)) * 0.5 * glass;
+  c += vec3(0.010, 0.030, 0.034) * (1.0 - inS) * (0.5 + 0.5 * pow(1.0 - ndv, 2.0)) * glass;
   gl_FragColor = vec4(c, 1.0);
 }`
 
@@ -277,6 +286,7 @@ export class TabletWindow {
     const keyL = new THREE.DirectionalLight('#ffd2c4', 2.6); keyL.position.set(5, 6, 6)
     const rimL = new THREE.DirectionalLight('#5fd8ff', 3.4); rimL.position.set(-6, 3, -7)
     const rig = new THREE.Group(); rig.add(keyL, rimL, keyL.target, rimL.target); rig.name = 'rig'
+    this.crewMats.body.userData.rim.u_crewRimCol.value = rimL.color // CINEMATIC: the Fresnel rim takes the rig's rim colour
 
     // ---- rocks: a few tumbling chunks at different depths (one draw)
     this.rockMat = new THREE.MeshStandardMaterial({ color: '#6b6e76', roughness: 0.65, metalness: 0.08, flatShading: true, transparent: true, depthWrite: true, fog: false })
@@ -403,7 +413,7 @@ export class TabletWindow {
    * it, until the display covers the frame; then the picture hands off to the journey's opening camera. The progress is
    * an input, so the camera path can be anything (a moving camera still works: the portal reads the camera every frame).
    */
-  static FLY0 = 0.5
+  static FLY0 = 0.25 // POLISH-2: the fly starts earlier (more scroll), so the tablet is seen coming to the lens
   /** read-only hand-off state for the integrator: h (0..1, 1 = the glass shows exactly the journey's p = 0 frame) */
   handoff = { k: 0, h: 0, cam: this.cam as THREE.PerspectiveCamera }
   private restP = new THREE.Vector3(); private restQ = new THREE.Quaternion(); private pq = new THREE.Quaternion()
@@ -435,16 +445,25 @@ export class TabletWindow {
     this.warm()
     this.layout(isPortrait, Math.round(fillD * 20) / 20) // (the portal's scale: steady while the lens breathes)
     // ---- the fly: the tablet's own pose (UiCylinder's rise + bob) → square in front of the camera at fillD
+    // POLISH-2 (Shifat 19:30Z "Tablet never came in front of camera"): the old fly went from small-in-the-distance to
+    // over-covering in ~240 px of scroll, so the tablet itself was never seen in front of the lens. Now it travels to a
+    // PRESENT distance where the whole slab (bezel included) fills ~72 % of the frame (k 0 → 0.5), lingers there,
+    // easing a little closer (k 0.5 → 0.74), then moves the last stretch until the display covers the frame (k → 1).
+    // One continuous path: no cut, no fade, no pop.
     const k = ss(TabletWindow.FLY0, 1, push)
     const kk = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2
     if (k > 0 && tablet.parent && !FIXED_LENS.on) {
       tablet.updateWorldMatrix(true, false)
       tablet.matrixWorld.decompose(this.restP, this.restQ, this.v)
       camP.getWorldDirection(this.fwd)
+      const a = ss(0, 0.5, k), aa = a < 0.5 ? 4 * a * a * a : 1 - Math.pow(-2 * a + 2, 3) / 2
+      const presentD = Math.max(0.5 / (0.72 * tM), 0.75 / (0.72 * tM * aspect), fillD * 1.3)
+      const fz = ss(0.74, 1, k)
+      const dist = mix(mix(presentD, presentD * 0.9, ss(0.5, 0.74, k)), fillD, fz * fz * (3 - 2 * fz))
       // the glass sits 0.032 in front of the slab's origin (local +z faces the viewer)
-      const fillP = this.e.copy(camP.position).addScaledVector(this.fwd, fillD + 0.032)
-      this.restP.lerp(fillP, kk)
-      this.restQ.slerp(camP.quaternion, kk)
+      const fillP = this.e.copy(camP.position).addScaledVector(this.fwd, dist + 0.032)
+      this.restP.lerp(fillP, aa)
+      this.restQ.slerp(camP.quaternion, aa)
       // into the slab's parent space
       tablet.parent.updateWorldMatrix(true, false)
       this.m.copy(tablet.parent.matrixWorld).invert()
@@ -454,7 +473,7 @@ export class TabletWindow {
       tablet.updateMatrixWorld(true)
     }
     // the hand-off: once the display covers the frame, the picture converges on the journey's opening frame
-    const h = ss(0.78, 1.0, k)
+    const h = ss(0.8, 1.0, k) // POLISH-2: converges during the last stretch, once the display nears the frame
     this.handoff.k = k; this.handoff.h = h
     // the inner framing: centred on the crewmate mid-push, converging on the journey's opening aim
     this.qB.copy(this.qC).slerp(this.qJ, ss(0.15, 0.95, k))

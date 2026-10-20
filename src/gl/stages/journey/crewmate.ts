@@ -44,6 +44,17 @@ export function crewMaterials(env: THREE.Texture | null) {
     specularColor: new THREE.Color('#c8f6ff'), specularIntensity: 1,
     envMap: env, envMapIntensity: 1.9, fog: false,
   })
+  // CINEMATIC three-point (Shifat 18:50Z): the rig's directional rim only lights faces turned toward it; this Fresnel rim
+  // (emissive, no extra light) puts the separating edge on the whole silhouette. Its colour/strength are the owner's
+  // rig values (tabletWindow ties the colour to its rim light); a material that sets its own onBeforeCompile replaces it.
+  const rim = { u_crewRim: { value: 0.32 }, u_crewRimCol: { value: new THREE.Color('#7fdcff') } }
+  body.userData.rim = rim
+  body.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, rim)
+    sh.fragmentShader = 'uniform float u_crewRim; uniform vec3 u_crewRimCol;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>',
+      '#include <emissivemap_fragment>\n{ float fr = pow(1.0 - abs(dot(normalize(normal), normalize(vViewPosition))), 3.5); totalEmissiveRadiance += u_crewRimCol * fr * u_crewRim; }')
+  }
+  body.customProgramCacheKey = () => 'crew-3pt'
   return { body, visor }
 }
 

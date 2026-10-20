@@ -27,6 +27,16 @@ function footerH(vh: number) {
   }
   return footH > 0 ? footH : vh
 }
+/** W19 (Shifat 19:49Z): the loop runway after the footer is fully in view (100vh / 120svh), read off the spacer's own height */
+let spH = 0
+let spObs: ResizeObserver | null = null
+function runwayPx(vh: number, fh: number) {
+  if (!spObs && typeof ResizeObserver !== 'undefined') {
+    const el = document.querySelector('.footer-spacer') as HTMLElement | null
+    if (el) { spH = el.offsetHeight; spObs = new ResizeObserver(() => { spH = el.offsetHeight }); spObs.observe(el) }
+  }
+  return spH > fh + 4 ? spH - fh - 4 : vh
+}
 
 
 function DhakaClock() {
@@ -79,7 +89,8 @@ export function Contact() {
         if (k !== lastK && canvasEl) { lastK = k; canvasEl.style.transform = k > 0 ? `translate3d(0, ${-k}px, 0)` : '' }
         // once the footer is fully uncovered, keep scrolling: the flat bar fills and floats you back to the surface
         // W19: the bar fills over the second half of the footer's reveal and wraps as it lands (no empty band above a half-height footer)
-        const f = clamp((k0 - 0.45 * fh) / (0.5 * fh))
+        // W19 (Shifat 19:49Z): the footer is fully in view at k0 = fh; it then HOLDS for the runway while the bar fills, and wraps at the end
+        const f = clamp((k0 - fh - 2) / Math.max(1, runwayPx(vh, fh) - 6))
         props.overscroll = f
         footerBar.el?.style.setProperty('--f', f.toFixed(3))
         if (f > 0.985 && !fired) { fired = true; audio.swell(false); scroll.wrapToTop(); setTimeout(() => (fired = false), 900) }

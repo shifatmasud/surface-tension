@@ -25,8 +25,9 @@ import { houseInOut } from '../core/house'
  */
 
 // ── Lusion ScrollPane / Input constants (120_ScrollPane.js, 008_Input.js) ──
-const WHEEL_EASE = 12            // wheelEaseCoeff
-const WHEEL_CLAMP = 200          // Input._onWheel clamp, px per event
+const WHEEL_EASE = 8             // W19 (Shifat 19:44Z "scrolls too fast"): 12 → 8, a softer glide toward the target
+const WHEEL_CLAMP = 120          // W19: 200 → 120 px per event (a hard flick no longer throws a section)
+const WHEEL_GAIN = 0.6           // W19 (Shifat 19:44Z): each notch / trackpad delta moves the world 60 % as far
 const LINE_PX = 40, PAGE_PX = 800 // normalizeWheel LINE_HEIGHT / PAGE_HEIGHT for deltaMode 1 / 2
 const MIN_PX = 0.1               // minScrollPixel: snap to target under this
 const DRAG_HISTORY = 0.1         // dragHistoryMaxTime, s
@@ -197,7 +198,7 @@ class ScrollService {
       if (a > 40 && a > this.muteDy * 1.8 && now > this.muteUntil - 450 + 120) { this.muteUntil = 0 }
       else { this.muteDy = a; this.muteUntil = Math.min(this.muteCap, now + 450); return }
     }
-    this.wheelAcc += clamp(dy, -WHEEL_CLAMP, WHEEL_CLAMP)
+    this.wheelAcc += clamp(dy * WHEEL_GAIN, -WHEEL_CLAMP, WHEEL_CLAMP)
   }
   private onTouchStart = (e: TouchEvent) => {
     if (!this.virtual) { if (this.nativeTouch) { this.tween = null; this.isWheelScrolling = false } return } // a finger takes over a glide

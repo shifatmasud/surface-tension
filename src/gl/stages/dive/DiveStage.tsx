@@ -11,6 +11,7 @@ import { GEM_LAYER } from '../hero/HeroStage'
 import { brilliantGeometry } from '../hero/diamond'
 import { dive, diveRays, DIVE_LAYER, TOOL_POS, floorH, PORT } from './diveState'
 import { Floaters } from './floaters' // FLOATERS HOOK
+import { Bubbles } from '../../fx/bubbles' // FX HOOK (CINEMATIC)
 import { browser } from '../../../services/settings'
 import { vegVert, vegFrag, rayMaskVert, rayMaskFrag } from './vegetation'
 import { applyCaustics, causticUniforms, causticsFrame } from '../../water/caustics'
@@ -318,6 +319,7 @@ export function DiveStage() {
       <points geometry={geos.stars} material={mats.stars} renderOrder={13} frustumCulled={false} onUpdate={(o) => o.layers.set(DIVE_LAYER)} />
       <DeepSea u={u} />
       <Floaters u={u} /> {/* FLOATERS HOOK */}
+      <Bubbles u={u} /> {/* FX HOOK (CINEMATIC) */}
       <UiCylinder u={u} />
     </group>
   )

@@ -406,7 +406,7 @@ export function Floaters({ u }: { u: U }) {
     createElement('mesh', { geometry: geos.kelp, material: mats.kelp, renderOrder: 12, frustumCulled: false, onUpdate: layer }),
     createElement('mesh', { geometry: geos.rock, material: mats.rock, renderOrder: 12, frustumCulled: false, onUpdate: layer }),
     createElement('mesh', { geometry: geos.jelly, material: mats.jelly, renderOrder: 16, frustumCulled: false, onUpdate: layer }),
-    createElement('points', { geometry: geos.bubbles, material: mats.bubbles, renderOrder: 16, frustumCulled: false, onUpdate: layer }),
+    // CINEMATIC: the old additive bubble streams are replaced by fx/bubbles.ts (realistic, sparse, mounted in DiveStage)
     createElement('points', { geometry: geos.motes, material: mats.motes, renderOrder: 17, frustumCulled: false, onUpdate: layer }),
   )
 }

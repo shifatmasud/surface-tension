@@ -13,6 +13,7 @@ import { InlineSharpenEffect } from './perfEffects' // PERF HOOK
 import type { Look } from '../../state/props'
 import { ufx } from '../ufx/ufx'
 import { SharpText } from './SharpText'
+import { makeSelective, syncSelective } from '../fx/hotBloom' // CINEMATIC: selective bloom (hot spots only)
 import { gpuTimer } from '../systems/perfGovernor' // SHARP: the governor's GPU frame timer ends after the last draw
 
 /**
@@ -77,6 +78,7 @@ export class PostChain {
     this.bloom = settings.BLOOM_HQ
       ? new BloomEffect({ mipmapBlur: true, levels: 8, radius: 0.72, intensity: 0.4, luminanceThreshold: 0.9, luminanceSmoothing: 0.08 })
       : new BloomEffect({ mipmapBlur: false, kernelSize: KernelSize.SMALL, intensity: 0.35, luminanceThreshold: 0.9, luminanceSmoothing: 0.1, resolutionScale: 0.5 })
+    makeSelective(this.bloom) // CINEMATIC: the same bloom pass, its luminance pre-pass masked to hot spots
     this.preUfx = new RenderPass(ufxUnder, ufxCamera); this.preUfx.clear = false; this.preUfx.ignoreBackground = true
     this.postUfx = new RenderPass(ufxOver, ufxCamera); this.postUfx.clear = false; this.postUfx.ignoreBackground = true
     const smaa = new SMAAEffect({ preset: SMAAPreset.MEDIUM })
@@ -187,7 +189,7 @@ void main(){
       const composer = new EffectComposer(this.gl, { frameBufferType: THREE.HalfFloatType, multisampling: 0 })
       composer.autoRenderToScreen = false
       const grade = new GradeEffect()
-      const bloom = new BloomEffect({ mipmapBlur: false, kernelSize: KernelSize.SMALL, intensity: 0.35, luminanceThreshold: 0.9, luminanceSmoothing: 0.1, resolutionScale: 0.5 })
+      const bloom = makeSelective(new BloomEffect({ mipmapBlur: false, kernelSize: KernelSize.SMALL, intensity: 0.35, luminanceThreshold: 0.9, luminanceSmoothing: 0.1, resolutionScale: 0.5 }))
       const passes: Pass[] = [new RenderPass(scene, camera), new EffectPass(camera, bloom, grade)]
       const pre = new RenderPass(ufxUnder, ufxCamera); pre.clear = false; pre.ignoreBackground = true
       const post = new RenderPass(ufxOver, ufxCamera); post.clear = false; post.ignoreBackground = true
@@ -208,8 +210,7 @@ void main(){
     g('u_exposure').value = look.exposure; g('u_saturation').value = look.saturation; g('u_contrast').value = look.contrast
     g('u_brightness').value = look.brightness; g('u_vignette').value = look.vignette; g('u_vignetteSoft').value = look.vignetteSoft
     g('u_fade').value = look.fade; g('u_lift').value = look.lift; ;(g('u_tint').value as THREE.Color).copy(look.tint); ;(g('u_fadeColor').value as THREE.Color).copy(look.bg)
-    n.bloom.intensity = settings.USE_BLOOM ? look.bloom : 0
-    n.bloom.luminanceMaterial.threshold = look.bloomThreshold
+    syncSelective(n.bloom, settings.USE_BLOOM ? look.bloom : 0, look.bloomThreshold)
     n.composer.render(dt)
     return (n.swaps % 2 === 1 ? n.composer.outputBuffer : n.composer.inputBuffer).texture
   }
@@ -220,8 +221,7 @@ void main(){
     g('u_exposure').value = L.exposure; g('u_saturation').value = L.saturation; g('u_contrast').value = L.contrast
     g('u_brightness').value = L.brightness; g('u_vignette').value = L.vignette; g('u_vignetteSoft').value = L.vignetteSoft
     g('u_fade').value = L.fade; g('u_lift').value = L.lift; ;(g('u_tint').value as THREE.Color).copy(L.tint); ;(g('u_fadeColor').value as THREE.Color).copy(L.bg)
-    this.bloom.intensity = L.bloom
-    this.bloom.luminanceMaterial.threshold = L.bloomThreshold
+    syncSelective(this.bloom, L.bloom, L.bloomThreshold)
     const d = (n: string) => this.distortion.u(n)
     d('u_amount').value = L.paintAmount; d('u_rgbShift').value = L.paintRGBShift
     d('u_multiplier').value = L.paintMultiplier; d('u_colorMultiplier').value = L.paintColorMultiplier

@@ -1,17 +1,16 @@
 import { useEffect } from 'react'
-import { PROJECTS, PHRASES } from '../../content/site'
+import { PROJECTS } from '../../content/site'
 
 /**
  * A11Y (eng #19): a real heading outline for screen readers, with no visual change.
  * The beats are painted by the global text slot (TextLayer), which is aria-hidden and sits outside <main>, so a
  * section that has no heading of its own gets an sr-only copy of its beat INSIDE the section, in reading order:
- *   h1 Shifat Masud (Hero) · h2 the principle (statement beat, end of the hero) · h2 Under the surface (Dive)
+ *   h1 Shifat Masud (Hero) · (the dive is wordless since Shifat 18:52Z: no principle, no Under the surface)
  *   · h2 Selected work + h3 per project (Work) · h2 Shade DS (Systems) · h2 Journey + h3 per beat · h2 CTA (Contact)
- * Sections that already carry a heading (dive, systems, contact) are left alone.
+ * Sections that already carry a heading (systems, contact) are left alone.
  */
 type H = { section: string; at: 'start' | 'end'; level: 2 | 3; text: string }
 const HEADINGS: H[] = [
-  ...PHRASES.map((p) => ({ section: 'hero', at: 'end' as const, level: 2 as const, text: p.t.join(' ') })),
   { section: 'lab', at: 'start', level: 2, text: 'Selected work' },
   ...PROJECTS.map((p) => ({ section: 'lab', at: 'end' as const, level: 3 as const, text: `${p.title}, ${p.year}` })),
   { section: 'journey', at: 'start', level: 2, text: 'Journey' },
