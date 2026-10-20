@@ -3,7 +3,8 @@ import { useRef } from 'react'
 import { useSection, weightFrom } from './useSection'
 import { visuals } from '../../gl/systems/visuals'
 import { props } from '../../state/props'
-import { clamp } from '../../core/math'
+import { clamp, mix } from '../../core/math'
+import { portrait } from '../../core/frame'
 import { ufxText } from '../../gl/ufx/UfxText'
 import { audio } from '../../services/audio'
 
@@ -25,8 +26,16 @@ export function Statement() {
     // the gem from directly above, close: its crown facets and the blue spill on the rings read as the star in the
     // upper third (a distinct shot from the hero's side view; it was a faint blue dot from 17 m behind a 0.55 fade)
     const pose = { pos: new THREE.Vector3(0, 5.6, 1.8), target: new THREE.Vector3(0, 0, 0.6), fov: 38 }
-    ;(window as any).__stPose = pose // QA
-    const st = visuals.register('statement', () => pose, { fade: 0.1, bg: new THREE.Color('#f7f8f9'), fogColor: new THREE.Color('#eceef0'), brightness: 0.05, saturation: 1.1, vignette: 0.02, bloom: 0.1, contrast: 1.02, exposure: 1.12 })
+        // phones: the same shot from further up, so the stone sits at ~60% of the width instead of filling it
+    const base = { pos: pose.pos.clone(), target: pose.target.clone() }
+    ;(window as any).__stPose = base // QA
+    const live = { pos: new THREE.Vector3(), target: new THREE.Vector3(), fov: 38 }
+    const shot = () => {
+      const k = mix(1, 1.18, portrait())
+      live.target.copy(base.target); live.pos.copy(base.pos).sub(base.target).multiplyScalar(k).add(base.target); live.fov = pose.fov
+      return live
+    }
+    const st = visuals.register('statement', shot, { fade: 0.1, bg: new THREE.Color('#f7f8f9'), fogColor: new THREE.Color('#eceef0'), brightness: 0.05, saturation: 1.1, vignette: 0.02, bloom: 0.1, contrast: 1.02, exposure: 1.12 })
     const handles: ReturnType<typeof ufxText>[] = []
     let lastStep = -1
     return {
