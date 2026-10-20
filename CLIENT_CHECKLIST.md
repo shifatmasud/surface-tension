@@ -138,3 +138,7 @@ Tick an item only when it runs on the live site and was checked visually.
 - [ ] Best preloading strategy: better UX without sacrificing performance; before/after numbers (m:4ba63a11)
 - [ ] Virtual scroll like lusion.co for smooth scroll, desktop + phone (m:bc0a9be7)
 - [x] Logo lockup = flat mark + "Shifat" only, no dot after the name (nav, footer, OG) (Shifat 10:06Z) — live 10:11Z index-B05FrcGC.js, frames 1440/390
+
+- [x] v3 structure live (Shifat 13:24Z-14:44Z): tablet -> space -> tunnel -> forest, black sticker wall with odometer CTA, frosted card morph, sharp full-density text, preloader logo clipped to the panel, footer pill + loop wrap -- live 15:28Z index-Dq2QMKTR.js (hash checked), GitHub 93e927f; frames 1440/390 (hero, statement, dive, lab, systems, tunnel, forest, CTA/footer); no console errors; frame loop advancing in every scene
+- [x] Cold deep-jump to the footer lands on the wall (stages prewarm in idle after the hero; camera cuts on a pose jump) -- live 15:28Z index-Dq2QMKTR.js
+- [x] Card morph 1440 + 390: open, close button, Esc, focus trap both directions, reopen (1440 proven with Web Animations time driven step by step) -- live 15:28Z index-Dq2QMKTR.js
