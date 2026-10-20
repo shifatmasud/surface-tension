@@ -426,3 +426,12 @@ html:not(.is-ready) .hdr-roll > .mroll__in { transform: translate3d(0, calc(100%
 .pill--menu .hdr-roll > .mroll__in { transition-delay: .33s; }
 @media (prefers-reduced-motion: reduce) { html:not(.is-ready) .hdr-roll > .mroll__in { transform: none; } }
 @media (max-width: 400px) { .pill--menu .pill__txt.hdr-roll { display: none; } }
+
+/* W19 (Shifat 21:09Z m:8a684a7a "Hero section subtitle in desktop must be in 2 line"): on desktop the hero subtitle sits
+   on exactly two balanced lines ("Design engineer &" / "creative technologist"; no city since 21:11Z); phones unchanged */
+@media (min-width: 1024px) { .slot__beat[data-beat="hero"] .slot__body { text-wrap: balance; flex-basis: 22ch; max-width: 22ch; } }
+
+/* W19 (Shifat 21:10Z): the preloader's four lines of real information, one line each (no wrap) */
+.intro__meta { max-width: none; }
+.intro__line { display: block; white-space: nowrap; }
+@media (max-width: 760px) { .intro { flex-direction: column; align-items: flex-start; justify-content: flex-end; gap: var(--s3, 16px); } .intro__meta { order: -1; text-align: left; font-size: min(var(--fs-small), 3.4vw); } }

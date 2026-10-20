@@ -10,6 +10,7 @@ import { dive, divePath, gemPath, U_MAX, SYS_C, TAB_F } from '../../gl/stages/di
 import { portrait } from '../../core/frame'
 import { sections } from '../../app/sections'
 import { TOOLS } from '../../content/site'
+import { scroll } from '../../services/scroll'
 import { pool } from '../../gl/systems/pool'
 import { browser } from '../../services/settings'
 import { noOrphan } from '../a11y/noOrphans'
@@ -27,6 +28,21 @@ let scrollForU: ((u: number) => number) | null = null
  * (Snell's window, the star), then sinks over the sand and off the drop-off until the water is black
  * and the silt turns into stars. One display line early; afterwards only his tools, small, in the water.
  */
+/** W19 (Shifat 20:40Z m:0578f462 + 20:44Z m:d3c2c6e4): under water the look UP holds for the first ~60 % of the span (god
+ *  rays, the surface ripples from below); from there the lens eases to looking a little DOWN (base −6° − 4.5°) and dollies
+ *  ~0.8 forward to sell depth, then hands back to the fixed −6° of the deep descent. Scroll-driven, reversible. Applied to
+ *  the camera AND to the guide stone's path pose, so the stone keeps its place in the frame. */
+function underwaterShape(u: number, pos: THREE.Vector3, target: THREE.Vector3) {
+  const kIn = ss(0.54, 0.62, u), kOut = ss(0.74, 0.84, u), k = kIn * (1 - kOut)
+  if (k <= 0) return
+  const dx = target.x - pos.x, dz = target.z - pos.z, hz = Math.max(1e-3, Math.hypot(dx, dz))
+  const fx = dx / hz, fz = dz / hz
+  const dolly = 0.8 * ss(0.54, 0.68, u) * (1 - kOut)
+  pos.x += fx * dolly; pos.z += fz * dolly; target.x += fx * dolly; target.z += fz * dolly
+  const pNow = Math.atan2(target.y - pos.y, hz), pDown = -10.5 * Math.PI / 180
+  target.y = pos.y + Math.tan(pNow + (pDown - pNow) * k) * hz
+}
+
 export function Dive() {
   const ref = useRef<HTMLElement>(null)
   const line = useRef<HTMLSpanElement>(null)
@@ -37,6 +53,7 @@ export function Dive() {
     const pose = { pos: new THREE.Vector3(), target: new THREE.Vector3(), fov: 45 }
     const st = visuals.register('dive', () => {
       const h = divePath(dive.u, pose.pos, pose.target)
+      underwaterShape(dive.u, pose.pos, pose.target)
       pose.fov = vfovFor(h, 30, 74)
       // W18-DIVE OVER-UNDER: a slow operator's float through the crane-down and the crossing (≈0.1–0.25°, two incommensurate
       // sines in yaw and pitch); none under reduced motion
@@ -67,12 +84,15 @@ export function Dive() {
         pose.fov = pose.fov + (vfovFor(46, 30, 74) - pose.fov) * a
       }
       dive.pose.copy(pose.pos)
+      // QA (W19): the dive camera's pose as numbers (u, height, z, pitch in degrees) for the regression suite
+      ;(window as any).__divePose = { u: +dive.u.toFixed(4), y: +pose.pos.y.toFixed(3), z: +pose.pos.z.toFixed(3), pitch: +(Math.atan2(pose.target.y - pose.pos.y, Math.hypot(pose.target.x - pose.pos.x, pose.target.z - pose.pos.z)) * 57.2958).toFixed(2) }
       return pose
     }, {
       bg: new THREE.Color('#020405'), fogColor: new THREE.Color('#020405'),
       saturation: 1.02, contrast: 1.05, vignette: 0.34, vignetteSoft: 0.7, bloom: 0.5, bloomThreshold: 0.86, dive: 1,
     })
     const back = new THREE.Vector3(), pushP = new THREE.Vector3(), tabW = new THREE.Vector3()
+    ;(window as any).__diveGo = (u: number) => { if (scrollForU) scroll.scrollTo(scrollForU(u), { immediate: true }) }
     scrollForU = (u: number) => range.docTop - props.height + Math.max(0, Math.min(1, u / U_LAB)) * Math.max(1, range.height)
     let lastT = -1
     const gp = new THREE.Vector3(), gt = new THREE.Vector3()
@@ -96,7 +116,7 @@ export function Dive() {
         dive.gemScale = 1 + 0.7 * ss(1.02, 1.2, dive.u)
         props.dive = dive.u
         // the guide gem: handed from the hero's physics to the dive path as the dive starts; it sinks, then leads
-        const vf = vfovFor(divePath(dive.u, gp, gt), 30, 74)  // (path pose without the phone step-back: the stone's place is world-fixed in the deep)
+        const vf = vfovFor(divePath(dive.u, gp, gt), 30, 74); underwaterShape(dive.u, gp, gt)  // (path pose without the phone step-back: the stone's place is world-fixed in the deep)
         gemPath(dive.u, gp, gt, vf, props.time, dive.gem)
         dive.gemMix = ss(0.0, 0.08, dive.u)
         dive.gemOn = props.stage === 'dive' && dive.gemMix > 0

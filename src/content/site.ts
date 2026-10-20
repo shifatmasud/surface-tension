@@ -2,8 +2,6 @@
 export const SITE = {
   name: 'Shifat Masud',
   role: 'Design engineer & creative technologist',
-  city: 'Dhaka',
-  tz: 'Asia/Dhaka',
   github: 'https://github.com/shifatmasud',
   x: 'https://x.com/shifatmasud',
   // No public email was verifiable; set one here and the contact button switches to mailto.

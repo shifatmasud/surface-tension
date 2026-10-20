@@ -33,7 +33,7 @@ gsap.registerPlugin(SplitText)
  */
 type Beat = { id: string; eyebrow: string; title: string[]; body: string }
 const BEATS: Beat[] = [
-  { id: 'hero', eyebrow: 'Portfolio — 2026', title: ['Shifat', 'Masud'], body: 'Design engineer & creative technologist, Dhaka.' },
+  { id: 'hero', eyebrow: 'Portfolio — 2026', title: ['Shifat', 'Masud'], body: 'Design engineer & creative technologist' },
   // TEXT GAP (Shifat 18:52Z m:ef4a3572): "After Shifat Masud, no other text untill project sections texts." The
   // principle line and "Under the surface" are gone: the descent plays wordless until the first work beat.
   ...PROJECTS.map((p) => ({ id: 'lab-' + p.id, eyebrow: `Work · ${p.no} / 0${PROJECTS.length}`, title: [p.title], body: `${p.blurb} ${p.tags.join(' · ')}` })),

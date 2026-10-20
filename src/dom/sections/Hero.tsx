@@ -71,7 +71,7 @@ export function Hero() {
       <div className="sticky hero__inner">
         <div className="hero__row">
           <h1 className="hero__title" ref={title}>Shifat<br />Masud</h1>
-          <p className="hero__sub">Design engineer &amp;<br />creative technologist, Dhaka.</p>
+          <p className="hero__sub">Design engineer &amp;<br />creative technologist</p>
         </div>
       </div>
     </section>

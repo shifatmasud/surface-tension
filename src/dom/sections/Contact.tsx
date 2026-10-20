@@ -40,16 +40,6 @@ function runwayPx(vh: number, fh: number) {
 }
 
 
-function DhakaClock() {
-  const [t, setT] = useState([0, 0, 0])
-  useEffect(() => {
-    const f = new Intl.DateTimeFormat('en-GB', { timeZone: SITE.tz, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
-    const tick = () => setT(f.format(new Date()).split(':').map(Number))
-    tick(); const id = setInterval(tick, 1000); return () => clearInterval(id)
-  }, [])
-  // every second the reels roll one step (odometer); minutes and hours carry when they turn over
-  return <span className="clock"><Odometer value={t[0]} digits={2} />:<Odometer value={t[1]} digits={2} />:<Odometer value={t[2]} digits={2} duration={0.7} /> GMT+6</span>
-}
 
 /**
  * S7 — the CTA (STRUCTURE v2, Shifat 08:32Z). The crewmate that broke out of the tablet lands in front of a plain black
@@ -155,16 +145,15 @@ export function Footer() {
   return createPortal(
     <footer className="site-footer" aria-label="Footer">
       <div className="site-footer__top">
-        <p className="site-footer__name" data-roll="marked"><span data-roll-line=""><span className="site-footer__lockup" role="img" aria-label={SITE.name}><span className="site-footer__mark" aria-hidden="true"><Logo size="100%" /></span><span aria-hidden="true">Shifat</span></span></span><span data-roll-line=""><span>{SITE.role}, {SITE.city}.</span></span></p>
+        <p className="site-footer__name" data-roll="marked"><span data-roll-line=""><span className="site-footer__lockup" role="img" aria-label={SITE.name}><span className="site-footer__mark" aria-hidden="true"><Logo size="100%" /></span><span aria-hidden="true">Shifat</span></span></span><span data-roll-line=""><span>{SITE.role}.</span></span></p>
         <nav className="site-footer__links" aria-label="Elsewhere" data-roll="marked">
           <a href={SITE.github} target="_blank" rel="noreferrer" data-cursor data-roll-line="inline"><GithubLogo size={16} /> GitHub</a>
           <a href={SITE.x} target="_blank" rel="noreferrer" data-cursor data-roll-line="inline"><XLogo size={16} /> X / Twitter</a>
         </nav>
-        <div className="site-footer__time" data-roll="marked"><span data-roll-line="">Local time, {SITE.city}</span><span data-roll-line=""><DhakaClock /></span></div>
       </div>
       <div className="overscroll__bar" aria-hidden="true"><p className="overscroll__label" data-roll="split">{noOrphan('Keep scrolling — back to the surface')}</p><div className="overscroll__track"><div className="overscroll__fill" ref={(e) => { footerBar.el = e }} /></div></div>
       <div className="site-footer__bottom" data-roll="marked">
-        <span data-roll-line="inline">© <Odometer value={new Date().getFullYear()} digits={4} /> {SITE.name}. Surface Tension, portfolio prototype.</span>
+        <span data-roll-line="inline">© <Odometer value={new Date().getFullYear()} digits={4} /> {SITE.name}. Surface Tension.</span>
         {/* POLISH (one CTA button): a plain text link, not a button */}
         <a className="site-footer__top-link" href="#hero" data-cursor data-roll-line="inline" onClick={(e) => { e.preventDefault(); audio.swell(false); scroll.scrollTo(0, { duration: 3.2 }) }}>Back to the surface <ArrowUp size={14} weight="bold" /></a>
       </div>

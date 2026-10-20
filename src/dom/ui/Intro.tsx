@@ -81,7 +81,13 @@ export function Intro() {
       onAnimationComplete={() => { if (gone) { setHidden(true); document.documentElement.classList.add('is-lifted') } }}
       style={{ pointerEvents: gone ? 'none' : undefined, visibility: hidden ? 'hidden' : undefined }}>
       <div className="intro__count" ref={count} aria-label="Loading" />
-      <div className="intro__meta">Shifat Masud — portfolio prototype.<br />Warming up the water.</div>
+      {/* W19 (Shifat 21:10Z m:2dfd15ea "Preloader text content must say something useful"): real information, one line each */}
+      <div className="intro__meta">
+        <span className="intro__line">Shifat Masud: design engineer &amp; creative technologist</span>
+        <span className="intro__line">Design systems, WebGL, motion and product UI</span>
+        <span className="intro__line">Building Shade DS, Water Sim and Geo-Slash</span>
+        <span className="intro__line">Open to select projects. Say hi on X</span>
+      </div>
     </motion.div>
   )
 }
