@@ -1,3 +1,4 @@
+import { Odometer } from './Odometer'
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowUpRight, X } from '@phosphor-icons/react'
@@ -31,7 +32,7 @@ export function ProjectOverlay() {
             <button className="pill overlay__close" onClick={() => overlay.close()} aria-label="Close"><X size={16} weight="bold" /></button>
             <video ref={vid} src={p.media} poster={p.poster} autoPlay muted loop playsInline />
             <div className="overlay__body">
-              <span className="eyebrow">{p.no} · {p.year}{p.client ? ' · ' + p.client : ''}</span>
+              <span className="eyebrow"><Odometer value={Number(p.no)} digits={2} delay={0.2} /> · <Odometer value={Number(p.year)} digits={4} delay={0.25} />{p.client ? ' · ' + p.client : ''}</span>
               <h3>{p.title}</h3>
               <p style={{ color: '#a9adb3', fontSize: 'var(--fs-m)', margin: 0 }}>{p.blurb}</p>
               <div className="tags">{p.tags.map((t) => <span className="tag" key={t}>{t}</span>)}</div>

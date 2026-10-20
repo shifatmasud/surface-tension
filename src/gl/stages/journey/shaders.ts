@@ -30,26 +30,41 @@ export function skyMaterial() {
       ${NOISE}
       void main(){
         vec3 d = normalize(vDir);
-        // ---- space: a deep graded field, one domain-warped nebula (magenta core, teal edges, dark dust lanes,
-        // a few bright filaments) kept low in contrast so the crewmate stays the star, plus a fine procedural star dust
+        // ---- space: a real night sky. Near-black with the faintest cool grade, the Milky Way as a soft diagonal band
+        // (a brighter warm core, mottled star clouds, dark dust lanes along its spine), a dense unresolved star dust
+        // that thickens inside the band, and the old nebula kept only as a faint far accent. Kept low so the
+        // crewmate stays the one bright, saturated thing in the frame.
         float g = smoothstep(-0.8, 0.9, d.y * 0.7 + d.x * 0.3);
-        vec3 space = mix(vec3(0.003, 0.004, 0.02), vec3(0.025, 0.012, 0.065), g);
+        vec3 space = mix(vec3(0.0016, 0.002, 0.006), vec3(0.0045, 0.005, 0.012), g);
+        vec3 MWN = normalize(vec3(0.55, 0.83, 0.0));
+        float lat = dot(d, MWN);
+        vec3 core = normalize(vec3(0.35, -0.23, -0.9));
+        float toCore = max(dot(d, core), 0.0);
+        float wq = fbm(d * 4.0 + 3.7);
+        float band = exp(-pow(lat / (0.11 + 0.04 * wq + 0.05 * toCore), 2.0));
+        float clouds = fbm(d * 14.0 + vec3(wq * 1.4));
+        float fine = fbm(d * 42.0 - 2.0);
+        // dust lanes: thin, ragged, hugging the band's spine
+        float lane = smoothstep(0.5, 0.75, fbm(d * vec3(18.0, 18.0, 18.0) + vec3(5.1, 1.3, 0.0) + vec3(clouds))) * exp(-pow((lat + 0.01 * (wq - 0.5)) / 0.028, 2.0));
+        float glow = band * pow(clouds, 1.6) * (0.6 + 0.8 * fine) * (0.5 + 0.9 * pow(toCore, 3.0));
+        glow *= 1.0 - 0.6 * lane;
+        vec3 mwCol = mix(vec3(0.05, 0.062, 0.1), vec3(0.085, 0.08, 0.09), pow(toCore, 2.0) * band); // cool and deep; only the core warms a touch
+        space += mwCol * glow * 0.62;
+        // the nebula, demoted to a faint far accent
         vec3 q = d * 1.15 + vec3(0.0, 0.0, u_time * 0.0015);
-        vec3 wq = vec3(fbm(q * 1.2 + vec3(1.7, 9.2, 0.0)), fbm(q * 1.2 + vec3(8.3, 2.8, 4.1)), fbm(q * 1.2 + vec3(3.1, 5.4, 7.7)));
-        float n1 = fbm(q * 1.7 + wq * 1.6);
-        float n2 = fbm(q * 3.4 + wq * 2.2 - 4.0);
-        float region = pow(max(dot(d, normalize(vec3(0.7, 0.35, -0.62))), 0.0), 1.4);
-        float cloud = smoothstep(0.32, 0.78, n1) * region;
-        float dust = smoothstep(0.42, 0.7, n2);
-        vec3 neb = mix(vec3(0.12, 0.03, 0.24), vec3(0.5, 0.08, 0.34), smoothstep(0.42, 0.75, n1));
-        neb = mix(neb, vec3(0.04, 0.26, 0.34), smoothstep(0.5, 0.8, n2) * (1.0 - smoothstep(0.55, 0.8, n1)) * 0.7);
-        space += neb * cloud * 0.62 * (1.0 - dust * 0.55);
-        space += vec3(0.85, 0.55, 0.85) * pow(cloud * (1.0 - dust), 3.0) * 0.35;
-        space += vec3(0.03, 0.2, 0.26) * pow(max(dot(d, normalize(vec3(0.85, 0.05, -0.5))), 0.0), 8.0) * 0.12;
-        vec3 sc = d * 230.0, sid = floor(sc); float sh = h31(sid);
-        float sr = length(fract(sc) - 0.5 - (vec3(h31(sid + 1.3), h31(sid + 2.7), h31(sid + 4.1)) - 0.5) * 0.5);
-        float star = step(0.982, sh) * smoothstep(0.22, 0.0, sr) * (0.35 + 0.65 * h31(sid + 9.1));
-        space += mix(vec3(0.75, 0.82, 1.0), vec3(1.0, 0.85, 0.75), h31(sid + 5.5)) * star * (0.75 + 0.25 * sin(u_time * 1.7 + sh * 60.0)) * (1.0 - dust * 0.6);
+        float n1 = fbm(q * 1.7 + vec3(wq * 1.6));
+        float region = pow(max(dot(d, normalize(vec3(0.7, 0.35, -0.62))), 0.0), 2.0);
+        space += mix(vec3(0.12, 0.03, 0.24), vec3(0.42, 0.08, 0.3), smoothstep(0.42, 0.75, n1)) * smoothstep(0.38, 0.8, n1) * region * 0.06;
+        // unresolved star dust: two scales, denser inside the band, a few coloured
+        for (int L = 0; L < 2; L++) {
+          float sc = L == 0 ? 260.0 : 520.0;
+          vec3 cp = d * sc, sid = floor(cp); float sh = h31(sid + float(L) * 17.0);
+          float sr = length(fract(cp) - 0.5 - (vec3(h31(sid + 1.3), h31(sid + 2.7), h31(sid + 4.1)) - 0.5) * 0.6);
+          float th = mix(L == 0 ? 0.986 : 0.978, L == 0 ? 0.9 : 0.84, band * smoothstep(0.3, 0.7, clouds) * (1.0 - lane));
+          float star = step(th, sh) * smoothstep(0.26, 0.0, sr) * (0.25 + 0.75 * pow(h31(sid + 9.1), 3.0));
+          vec3 sCol = mix(vec3(0.72, 0.8, 1.0), vec3(1.0, 0.86, 0.72), h31(sid + 5.5));
+          space += sCol * star * (L == 0 ? 0.55 : 0.3) * (0.85 + 0.15 * sin(u_time * 1.3 + sh * 60.0));
+        }
         // ---- sky (morning): zenith blue → warm horizon, sun glow
         float y = d.y;
         float sd = max(dot(d, u_sun), 0.0);
@@ -66,29 +81,65 @@ export function skyMaterial() {
         dusk = mix(duskGnd, dusk, step(0.0, y));
         float a = u_atmos;
         vec3 col = a < 0.5 ? mix(space, dusk, smoothstep(0.0, 0.5, a)) : mix(dusk, sky, smoothstep(0.5, 1.0, a));
-        gl_FragColor = vec4(col, 1.0);
+        // dither: the near-black grades would band on 8-bit screens
+        col += (h31(vec3(gl_FragCoord.xy, fract(u_time) * 61.0)) - 0.5) * (1.5 / 255.0);
+        gl_FragColor = vec4(max(col, 0.0), 1.0);
       }`,
   })
 }
 
-/** Soft round star points, modest count, gentle twinkle, fading out as the atmosphere thickens. */
+/** Star points: a gaussian core with a faint halo (bright ones bloom a touch), a slow, subtle scintillation. */
 export function starMaterial(pr: number) {
   return new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
     uniforms: { u_opacity: { value: 1 }, u_time: { value: 0 }, u_pr: { value: pr } },
     vertexShader: /* glsl */ `
       attribute float aSize; attribute vec3 aColor; uniform float u_time; uniform float u_pr;
-      varying vec3 vC; varying float vT;
+      varying vec3 vC; varying float vS;
       void main(){
-        vC = aColor; vT = 0.75 + 0.25 * sin(u_time * (0.6 + aSize) + position.x * 3.1);
+        float ph = position.x * 3.1 + position.y * 1.7;
+        vC = aColor * (0.86 + 0.14 * sin(u_time * (0.7 + fract(ph) * 1.6) + ph));
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        gl_Position = projectionMatrix * mv;
+        vS = aSize;
+        gl_PointSize = (aSize * 1.6 + 1.0) * u_pr;
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform float u_opacity; varying vec3 vC; varying float vS;
+      void main(){ vec2 c = gl_PointCoord - 0.5; float r = length(c) * 2.0;
+        float core = exp(-r * r * 9.0), halo = exp(-r * 3.5) * 0.12 * smoothstep(1.4, 2.6, vS);
+        float a = (core + halo) * smoothstep(1.0, 0.8, r);
+        gl_FragColor = vec4(vC * a * u_opacity, 1.0); }`,
+  })
+}
+
+/** The few bright stars: a tight core, a soft halo and four thin diffraction spikes, gently breathing. */
+export function glintStarMaterial(pr: number) {
+  return new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+    uniforms: { u_opacity: { value: 1 }, u_time: { value: 0 }, u_pr: { value: pr } },
+    vertexShader: /* glsl */ `
+      attribute float aSize; attribute vec3 aColor; attribute float aAngle; uniform float u_time; uniform float u_pr;
+      varying vec3 vC; varying float vA; varying float vTw;
+      void main(){
+        vC = aColor; vA = aAngle * 0.15; vTw = 0.9 + 0.1 * sin(u_time * 0.9 + aAngle * 7.0);
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         gl_Position = projectionMatrix * mv;
         gl_PointSize = aSize * u_pr;
       }`,
     fragmentShader: /* glsl */ `
-      uniform float u_opacity; varying vec3 vC; varying float vT;
-      void main(){ vec2 c = gl_PointCoord - 0.5; float r = length(c); float a = smoothstep(0.5, 0.0, r); a *= a;
-        gl_FragColor = vec4(vC * a * vT * u_opacity, 1.0); }`,
+      uniform float u_opacity; varying vec3 vC; varying float vA; varying float vTw;
+      void main(){
+        vec2 c = (gl_PointCoord - 0.5) * 2.0;
+        float cs = cos(vA), sn = sin(vA); c = mat2(cs, -sn, sn, cs) * c;
+        float r = length(c);
+        float core = exp(-r * r * 110.0) * 1.5;
+        float halo = exp(-r * 7.0) * 0.38;
+        float sx = exp(-abs(c.y) * 180.0) * pow(max(1.0 - abs(c.x), 0.0), 3.0);
+        float sy = exp(-abs(c.x) * 180.0) * pow(max(1.0 - abs(c.y), 0.0), 3.0);
+        float spikes = (sx + sy) * 0.6 * vTw;
+        float a = (core + halo + spikes) * smoothstep(1.0, 0.85, r);
+        gl_FragColor = vec4(vC * a * u_opacity, 1.0); }`,
   })
 }
 

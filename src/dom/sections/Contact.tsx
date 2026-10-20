@@ -1,3 +1,4 @@
+import { Odometer } from '../ui/Odometer'
 import * as THREE from 'three'
 import { useEffect, useRef, useState } from 'react'
 import { useSection, weightFrom } from './useSection'
@@ -14,13 +15,14 @@ import { pool } from '../../gl/systems/pool'
 import './contact.css'
 
 function DhakaClock() {
-  const [t, setT] = useState('')
+  const [t, setT] = useState([0, 0, 0])
   useEffect(() => {
     const f = new Intl.DateTimeFormat('en-GB', { timeZone: SITE.tz, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
-    const tick = () => setT(f.format(new Date()))
+    const tick = () => setT(f.format(new Date()).split(':').map(Number))
     tick(); const id = setInterval(tick, 1000); return () => clearInterval(id)
   }, [])
-  return <span style={{ fontVariantNumeric: 'tabular-nums' }}>{t} GMT+6</span>
+  // every second the reels roll one step (odometer); minutes and hours carry when they turn over
+  return <span className="clock"><Odometer value={t[0]} digits={2} />:<Odometer value={t[1]} digits={2} />:<Odometer value={t[2]} digits={2} duration={0.7} /> GMT+6</span>
 }
 
 /** S7 — Resurface + contact. One star: the line. Keep scrolling and the bar floats you back up. */
@@ -129,7 +131,7 @@ export function Contact() {
             <div><h3>Local time</h3><span>{SITE.city}</span><br /><DhakaClock /></div>
           </div>
         </div>
-        <footer className="footer"><span>© {new Date().getFullYear()} {SITE.name}</span><span>Surface Tension — portfolio prototype</span></footer>
+        <footer className="footer"><span>© <Odometer value={new Date().getFullYear()} digits={4} /> {SITE.name}</span><span>Surface Tension — portfolio prototype</span></footer>
       </section>
       <div className="overscroll" ref={over} aria-hidden>
         <div className="overscroll__bar"><p className="overscroll__label">Keep scrolling — back to the surface</p><div className="overscroll__track"><div className="overscroll__fill" ref={bar} /></div></div>

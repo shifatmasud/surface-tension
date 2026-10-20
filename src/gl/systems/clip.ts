@@ -40,7 +40,7 @@ class Clip {
   shift = 0; scale = 1; lag = 0; dark = 0; radius = 0; inset = 0; outRadius = 0
   private allowedSet = new Set<string>(BLOCKS[0])
   private styled: HTMLElement | null = null
-  private readonly K = 0.5      // inner parallax of the incoming scene inside its card (0 = fixed scene, 1 = glued to the card)
+  private readonly K = 0.85     // inner parallax of the incoming scene inside its card (0 = fixed scene, 1 = glued to the card)
   private readonly LAG = 0.28   // outgoing scene moves up at this fraction of the scroll
 
   allowed(name: string) { return !this.enabled || this.allowedSet.has(name) }

@@ -1,3 +1,4 @@
+import { Odometer } from './Odometer'
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { SpeakerSimpleHigh, SpeakerSimpleSlash, ArrowUpRight, X as XIcon, List } from '@phosphor-icons/react'
@@ -66,7 +67,7 @@ export function Header() {
                 {LINKS.map((l, i) => (
                   <li key={l.id}>
                     <motion.a href={'#' + l.id} onClick={(e) => { e.preventDefault(); go(l.id) }} initial={{ y: '110%' }} animate={{ y: 0 }} exit={{ y: '110%' }} transition={{ delay: 0.08 + i * 0.045, duration: 0.7, ease: [0.22, 0.9, 0.24, 1] }} onMouseEnter={() => audio.tick()}>
-                      <small>{String(i + 1).padStart(2, '0')}</small>{l.label}
+                      <small><Odometer value={i + 1} digits={2} delay={0.1 + i * 0.05} /></small>{l.label}
                     </motion.a>
                   </li>
                 ))}

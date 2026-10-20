@@ -64,7 +64,7 @@ export function Lab() {
   return (
     <section id="lab" className="section lab" ref={ref} aria-label="Lab: selected experiments">
       <div className="sticky lab__inner">
-        <p className="lab__count" aria-hidden><Odometer value={active + 1} digits={2} play={seen} /> <span>/ {String(PROJECTS.length).padStart(2, '0')}</span></p>
+        <p className="lab__count" aria-hidden><Odometer value={active + 1} digits={2} play={seen} /> <span>/ <Odometer value={PROJECTS.length} digits={2} play={seen} delay={0.15} /></span></p>
         <div className="lab__track" ref={track}>
           {PROJECTS.map((p, i) => (
             <article key={p.id} className={'card' + (i === active ? ' is-active' : '')} data-id={p.id} data-cursor data-cursor-label="Open" tabIndex={0}
@@ -82,7 +82,7 @@ export function Lab() {
           <div className="lab__names" aria-hidden>
             {PROJECTS.map((p, i) => <span key={p.id} className={'lab__name' + (i === active ? ' is-on' : i < active ? ' is-past' : '')}>{p.title}</span>)}
           </div>
-          <p className="lab__cap" aria-live="polite">{cur.blurb}<br /><span>{cur.year} · {cur.tags.join(', ')}</span></p>
+          <p className="lab__cap" aria-live="polite">{cur.blurb}<br /><span><Odometer value={Number(cur.year)} digits={4} play={seen} /> · {cur.tags.join(', ')}</span></p>
         </div>
       </div>
     </section>

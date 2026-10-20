@@ -1,5 +1,6 @@
 import * as THREE from 'three'
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
+import { Odometer } from '../ui/Odometer'
 import { useSection, weightFrom } from './useSection'
 import { visuals } from '../../gl/systems/visuals'
 import { props } from '../../state/props'
@@ -20,6 +21,8 @@ export function Dive() {
   const ref = useRef<HTMLElement>(null)
   const line = useRef<HTMLSpanElement>(null)
   const cap = useRef<HTMLParagraphElement>(null)
+  const [toolsOn, setToolsOn] = useState(false)
+  const toolsRef = useRef(false)
   useSection(ref, (range) => {
     const pose = { pos: new THREE.Vector3(), target: new THREE.Vector3(), fov: 45 }
     const st = visuals.register('dive', () => {
@@ -53,6 +56,9 @@ export function Dive() {
             pool.drop(x, z, 0.1 + Math.random() * 0.06, 0.02 + Math.random() * 0.015)
           }
         }
+        // the tool indices roll in (odometer) as the tools gate opens, and roll back out when it closes
+        const on = dive.u > 0.545 && dive.u < 0.98
+        if (on !== toolsRef.current) { toolsRef.current = on; setToolsOn(on) }
         // UI tone (data-bg) is set every frame in visuals.resolve
         // the one display line: mask slide-up in, slide-up out
         const inn = ss(0.405, 0.455, dive.u), out = ss(0.555, 0.6, dive.u)
@@ -71,7 +77,7 @@ export function Dive() {
       <div className="sticky dive__inner">
         <ul className="dive__tools" aria-label="Tools I work with">
           {TOOLS.map((t, i) => (
-            <li className="dive__tool" key={t}><span className="dive__idx" aria-hidden="true">{String(i + 1).padStart(2, '0')}</span>{t}</li>
+            <li className="dive__tool" key={t}><span className="dive__idx" aria-hidden="true"><Odometer value={i + 1} digits={2} play={toolsOn} delay={i * 0.06} /></span>{t}</li>
           ))}
         </ul>
         <div className="dive__foot">

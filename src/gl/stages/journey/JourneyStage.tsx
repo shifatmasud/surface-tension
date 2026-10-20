@@ -10,7 +10,8 @@ import { Crewmate, CREW_HEIGHT, CREW_CENTER_Y, crewMaterials } from './crewmate'
 import { makeEnvs } from './env'
 import { buildForest, buildShadows, longShadowGeometry, longShadowMaterial } from './forest'
 import { buildGrass, buildSunFan, buildMist, buildMotes } from './forestFx'
-import { skyMaterial, starMaterial, screenMaterial, dropletMaterial, backdropMaterial, SUN_DIR } from './shaders'
+import { skyMaterial, starMaterial, glintStarMaterial, screenMaterial, backdropMaterial, SUN_DIR } from './shaders'
+import { buildShatterGeometry, shatterMaterial, buildGlints } from './shatter'
 import { inner, outer, T, type Inner, type Outer } from './timeline'
 import { journeyAudio, resetJourneyAudio } from './journeyAudio'
 
@@ -38,7 +39,8 @@ function bezelGeometry(w: number, h: number, r: number, sw: number, sh: number) 
  * S6 — Journey. One star per beat: the red crewmate.
  * An inner world (space → forest) renders into a render target that plays on a tablet screen; the main
  * camera starts flush against that screen (the screen *is* the viewport), pulls back to reveal the tablet,
- * and the crewmate breaks out through the glass as if it were a water surface.
+ * and the crewmate breaks out: two hits crack the cover glass, the third shatters it into hundreds of pieces of the
+ * picture that fly at the lens in a slow-motion beat (shatter.ts).
  * The stage never renders the main scene and never moves the camera: it writes journey.pose.
  */
 export function JourneyStage(): JSX.Element {
@@ -86,6 +88,7 @@ export function JourneyStage(): JSX.Element {
     S.sky.position.copy(S.icam.position); S.stars.position.copy(S.icam.position)
     S.skyMat.uniforms.u_atmos.value = I.atmos; S.skyMat.uniforms.u_time.value = time
     S.starMat.uniforms.u_opacity.value = I.stars; S.starMat.uniforms.u_time.value = time
+    S.glintMat.uniforms.u_opacity.value = I.stars; S.glintMat.uniforms.u_time.value = time
     S.stars.visible = I.stars > 0.001
     S.forest.visible = I.atmos > 0.2
     // forest air: grass sway, the sun fan behind the tree line, mist veils and pollen once we are near the ground
@@ -139,14 +142,14 @@ export function JourneyStage(): JSX.Element {
     const top = S.tmp2.set(B.crew.x, B.crew.y + CREW_HEIGHT, B.crew.z).project(S.bcam)
     proj.project(S.bcam)
     const start = { x: proj.x * S.sw / 2, y: proj.y * S.sh / 2, k: Math.max(0.6, (top.y - proj.y) * S.sh / 2 / (CREW_HEIGHT - CREW_CENTER_Y)) }
-    const O = outer(p, S.O, fit, start, SCREEN_Z)
+    const O = outer(p, S.O, fit, start, SCREEN_Z, Math.max(...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sy]) => Math.hypot(sx * S.sw / 2 - start.x, sy * S.sh / 2 - start.y))))
     journey.pose.pos.copy(O.camPos).add(JOURNEY_ORIGIN)
     journey.pose.target.copy(O.camTarget).add(JOURNEY_ORIGIN)
     journey.pose.fov = O.fov
 
     const su = S.screenMat.uniforms
     su.u_bulge.value = O.bulge; su.u_width.value = O.width; su.u_center.value.copy(O.center)
-    su.u_ringT.value = O.ringT; su.u_ringAmp.value = O.ringAmp; su.u_bright.value = O.bright
+    su.u_ringT.value = O.ringT; su.u_ringAmp.value = O.ringAmp; su.u_bright.value = O.screenBright
     su.u_time.value = time; su.u_gloss.value = O.gloss
     S.backdropMat.uniforms.u_amount.value = O.gloss
     // the backdrop always sits square behind what the REAL camera looks at (the rig damps toward journey.pose, so on
@@ -169,26 +172,28 @@ export function JourneyStage(): JSX.Element {
       S.tmp.copy(O.crew); S.tmp.y -= CREW_CENTER_Y * O.crewScale
       S.crewOut.update({ pos: S.tmp, yaw: O.yaw, pitch: O.pitch, roll: O.roll, walk: 0, phase: 0, float: O.float, squash: 0, scale: O.crewScale }, dt, time, snap || p - T.BREAK < 0.004)
     }
-    // the hand-off frame: while the glass is still pressed, nobody is in front of it
-    // droplets — ballistic, scroll-scrubbed (reversible), each a tiny lens carrying the forest
-    S.drops.visible = O.dropT >= 0
-    if (O.dropT >= 0) {
-      const t = O.dropT
-      for (let i = 0; i < S.dropData.length; i++) {
-        const d = S.dropData[i]
-        const tt = Math.max(0, t - d.delay)
-        const rr = start.k * (d.crown ? 0.62 : 0.45)
-        const x = O.center.x + d.dir.x * rr + d.vel.x * tt
-        const y = O.center.y + d.dir.y * rr + d.vel.y * tt - (d.crown ? 0 : 2.2 * tt * tt)
-        const z = SCREEN_Z + d.vel.z * tt - (d.crown ? 3.4 * tt * tt : 0) // the crown falls back into the glass
-        const grow = d.crown ? ss(0, 0.08, tt) * (1 - ss(0.55, 0.95, tt)) * (z > SCREEN_Z ? 1 : 0) : ss(0, 0.12, tt) * (1 - ss(1.4, 2.6, tt))
-        S.o3.position.set(x, y, z)
-        const st = 1 + Math.min(1.6, Math.hypot(d.vel.x, d.vel.y - 4.4 * tt, d.vel.z) * 0.12) // stretch along velocity
-        S.o3.scale.set(d.r * grow, d.r * grow, d.r * grow * st)
-        S.o3.lookAt(x + d.vel.x, y + d.vel.y - 4.4 * tt, z + d.vel.z)
-        S.o3.updateMatrix(); S.drops.setMatrixAt(i, S.o3.matrix)
+    // ---- the glass: cracks, then the burst (built for the current impact point; rebuilt only if a resize moves it)
+    const far = Math.max(...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sy]) => Math.hypot(sx * S.sw / 2 - start.x, sy * S.sh / 2 - start.y)))
+    S.shards.visible = O.shardsVisible
+    if (O.shardsVisible || p > 0.7) {
+      const key = `${start.x.toFixed(1)},${start.y.toFixed(1)},${start.k.toFixed(1)}`
+      if (key !== S.shardKey) {
+        S.shards.geometry.dispose()
+        S.shards.geometry = buildShatterGeometry({ sw: S.sw, sh: S.sh, impact: new THREE.Vector2(start.x, start.y), k: start.k, tier: S.tier }).geometry
+        S.shardKey = key
       }
-      S.drops.instanceMatrix.needsUpdate = true
+    }
+    if (O.shardsVisible) {
+      const u = S.shardMat.uniforms
+      u.u_t.value = O.shatterT; u.u_crackR.value = O.crackR; u.u_ringR.value = O.ringR; u.u_frost.value = O.frost; u.u_tilt.value = O.tilt
+      u.u_hole.value = O.hole; u.u_k.value = start.k; u.u_impact.value.set(start.x, start.y); u.u_time.value = time
+      u.u_bright.value = O.bright; u.u_gloss.value = O.gloss
+    }
+    S.glints.points.visible = O.shatterT > 0 && O.shatterT < 4
+    if (S.glints.points.visible) {
+      const g = S.glints.material.uniforms
+      g.u_t.value = O.shatterT; g.u_impact.value.set(start.x, start.y, SCREEN_Z + 0.05); g.u_k.value = start.k; g.u_time.value = time
+      g.u_scale.value = Math.min(W, H) / 900
     }
 
     // ---- render the inner world into the screen texture (offscreen only; the main frame is the post chain's)
@@ -223,24 +228,57 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   const skyMat = skyMaterial()
   const sky = new THREE.Mesh(new THREE.SphereGeometry(900, 48, 24), skyMat)
   sky.renderOrder = -10; sky.frustumCulled = false
-  // stars: modest and soft
-  const N = low ? 110 : 220
-  const sp = new Float32Array(N * 3), ss_ = new Float32Array(N), sc = new Float32Array(N * 3)
+  // stars: a real night sky — thousands of points on a steep brightness curve (most at the edge of seeing, a few
+  // bright), concentrated along the Milky Way band, coloured by temperature; plus a handful of bright stars with
+  // soft diffraction glints (their own points)
   let seed = 3; const r = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
-  const tint = [new THREE.Color('#ffffff'), new THREE.Color('#cfe3ff'), new THREE.Color('#ffe2c4'), new THREE.Color('#ffd0ec')]
+  const MWN = new THREE.Vector3(0.55, 0.83, 0).normalize() // the band's pole: it crosses the space shots on a diagonal
+  const mwA = new THREE.Vector3(0, 0, -1), mwB = new THREE.Vector3().crossVectors(MWN, mwA).normalize()
+  const N = low ? 2200 : 6500
+  const sp = new Float32Array(N * 3), ss_ = new Float32Array(N), sc = new Float32Array(N * 3)
+  const temp = [new THREE.Color('#9fbfff'), new THREE.Color('#cadaff'), new THREE.Color('#f4f6ff'), new THREE.Color('#fff4e3'), new THREE.Color('#ffd9a8'), new THREE.Color('#ffb98a')]
+  const tw = [0.08, 0.2, 0.36, 0.2, 0.11, 0.05]
+  const pickT = () => { let x = r(), i = 0; while (i < tw.length - 1 && x > tw[i]) { x -= tw[i]; i++ } return temp[i] }
+  const v = new THREE.Vector3()
   for (let i = 0; i < N; i++) {
-    const u = r() * 2 - 1, th = r() * Math.PI * 2, s = Math.sqrt(1 - u * u)
-    sp.set([Math.cos(th) * s * 600, u * 600, Math.sin(th) * s * 600], i * 3)
-    const big = r() > 0.95
-    ss_[i] = big ? 2.4 + r() * 1.2 : 1.0 + r() * 1.0
-    const c = tint[Math.floor(r() * 4)]
-    const b = big ? 0.9 : 0.25 + r() * 0.35
+    if (r() < 0.42) {
+      // in the band: a point on the great circle, scattered by a gaussian in galactic latitude
+      const lon = r() * Math.PI * 2, g = (r() + r() + r() - 1.5) * 0.32
+      v.copy(mwA).multiplyScalar(Math.cos(lon)).addScaledVector(mwB, Math.sin(lon)).multiplyScalar(Math.cos(g)).addScaledVector(MWN, Math.sin(g)).normalize()
+    } else {
+      const u = r() * 2 - 1, th = r() * Math.PI * 2, s = Math.sqrt(1 - u * u)
+      v.set(Math.cos(th) * s, u, Math.sin(th) * s)
+    }
+    sp.set([v.x * 600, v.y * 600, v.z * 600], i * 3)
+    const m = Math.pow(r(), 5.5) // steep: most stars faint
+    ss_[i] = 0.9 + m * 2.1 + r() * 0.35
+    const c = pickT(), b = 0.1 + m * 0.95
     sc.set([c.r * b, c.g * b, c.b * b], i * 3)
   }
   const sg = new THREE.BufferGeometry()
   sg.setAttribute('position', new THREE.BufferAttribute(sp, 3)); sg.setAttribute('aSize', new THREE.BufferAttribute(ss_, 1)); sg.setAttribute('aColor', new THREE.BufferAttribute(sc, 3))
-  const starMat = starMaterial(Math.min(gl.getPixelRatio(), 2) * (rt.width / 1024))
+  const starPr = Math.min(gl.getPixelRatio(), 2) * (rt.width / 1024)
+  const starMat = starMaterial(starPr)
   const stars = new THREE.Points(sg, starMat); stars.frustumCulled = false; stars.renderOrder = -9
+  // the bright few, placed in the part of the sky the space shots look at (behind and around the crewmate, not on it)
+  const GN = low ? 7 : 12
+  const gp = new Float32Array(GN * 3), gs = new Float32Array(GN), gc = new Float32Array(GN * 3), ga = new Float32Array(GN)
+  for (let i = 0; i < GN; i++) {
+    const az = -Math.PI / 2 + (r() - 0.5) * 2.6, el = (r() - 0.35) * 1.0
+    v.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az)).normalize()
+    if (i === 0) v.set(-0.42, 0.3, -0.86).normalize() // the brightest sits high in the empty sky, away from the crewmate
+    if (i === 1) v.set(0.5, 0.24, -0.83).normalize()
+    gp.set([v.x * 580, v.y * 580, v.z * 580], i * 3)
+    gs[i] = (i < 2 ? 44 : 22 + r() * 16)
+    const c = temp[[0, 1, 2, 2, 3, 4][Math.floor(r() * 6)]], b = i < 2 ? 1.0 : 0.55 + r() * 0.35
+    gc.set([c.r * b, c.g * b, c.b * b], i * 3)
+    ga[i] = r() * Math.PI
+  }
+  const gg = new THREE.BufferGeometry()
+  gg.setAttribute('position', new THREE.BufferAttribute(gp, 3)); gg.setAttribute('aSize', new THREE.BufferAttribute(gs, 1)); gg.setAttribute('aColor', new THREE.BufferAttribute(gc, 3)); gg.setAttribute('aAngle', new THREE.BufferAttribute(ga, 1))
+  const glintMat = glintStarMaterial(starPr)
+  const glintStars = new THREE.Points(gg, glintMat); glintStars.frustumCulled = false; glintStars.renderOrder = -8
+  stars.add(glintStars)
 
   // Lambert: matte foliage with no grazing sheen against the low sun (and cheaper on phones)
   const forestMat = new THREE.MeshLambertMaterial({ vertexColors: true })
@@ -298,27 +336,18 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   outerMats.visor.envMapIntensity = 2.6
   const crewOut = new Crewmate(outerMats, low)
   crewOut.root.visible = false
-  // droplets
-  const DN = low ? 8 : 12, CN = low ? 8 : 12 // free droplets + the splash crown
-  const dropMat = dropletMaterial(rt.texture)
-  const drops = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, low ? 2 : 3), dropMat, DN + CN)
-  drops.frustumCulled = false; drops.visible = false
-  const dropData = Array.from({ length: DN }, (_, i) => {
-    const ang = (i / DN) * Math.PI * 2 + r() * 0.5
-    const dir = new THREE.Vector2(Math.cos(ang), Math.sin(ang))
-    const sp = 1.2 + r() * 2.4
-    return { dir, vel: new THREE.Vector3(dir.x * sp, dir.y * sp + 1.6, 1.6 + r() * 3.2), r: 0.12 + Math.pow(r(), 2) * 0.24, delay: r() * 0.12, crown: false }
-  }).concat(Array.from({ length: CN }, (_, i) => {
-    const ang = (i / CN) * Math.PI * 2
-    const dir = new THREE.Vector2(Math.cos(ang), Math.sin(ang))
-    // a crown: tall, slow jets out of the glass that lean outwards and fall back
-    return { dir, vel: new THREE.Vector3(dir.x * 0.9, dir.y * 0.9, 3.2 + r() * 0.8), r: 0.09 + r() * 0.05, delay: 0.02 * r(), crown: true }
-  }))
+  // the cover glass that breaks (geometry built on first use for the real impact point) + its glass dust
+  const tier = (settings.TIER === 'low' || low ? 'low' : settings.TIER === 'mid' ? 'mid' : 'high') as 'low' | 'mid' | 'high'
+  const shardMat = shatterMaterial(rt.texture)
+  const shards = new THREE.Mesh(new THREE.BufferGeometry(), shardMat)
+  shards.position.z = SCREEN_Z + 0.002; shards.frustumCulled = false; shards.visible = false
+  const glints = buildGlints(tier === 'low' ? 160 : tier === 'mid' ? 320 : 520, Math.min(gl.getPixelRatio(), 2))
+  glints.points.visible = false
   // the room behind the device: a graphite → deep-blue studio wash that melts into the page colour at its edges
   const backdropMat = backdropMaterial()
   const backdrop = new THREE.Mesh(new THREE.PlaneGeometry(260, 160), backdropMat)
   backdrop.position.set(0, 0, -60); backdrop.renderOrder = -5
-  outerG.add(backdrop, body, bezel, lens, screen, crewOut.root, drops)
+  outerG.add(backdrop, body, bezel, lens, screen, shards, glints.points, crewOut.root)
 
   const c = {
     hSpace: new THREE.Color('#7a5cff'), hSky: new THREE.Color('#8a9cc0'), gSpace: new THREE.Color('#071a22'), gForest: new THREE.Color('#2f7a30'),
@@ -326,7 +355,7 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   }
   const I: Inner = { crew: new THREE.Vector3(), yaw: 0, pitch: 0, roll: 0, walk: 0, phase: 0, float: 0, squash: 0, visible: true, cam: new THREE.Vector3(), look: new THREE.Vector3(), fov: 40, atmos: 0, stars: 1, shadow: 0 }
   const IB: Inner = { ...I, crew: new THREE.Vector3(), cam: new THREE.Vector3(), look: new THREE.Vector3() }
-  const O: Outer = { camPos: new THREE.Vector3(), camTarget: new THREE.Vector3(), fov: 35, crewVisible: false, crew: new THREE.Vector3(), crewScale: 1, yaw: 0, pitch: 0, roll: 0, float: 0, bulge: 0, width: 1, center: new THREE.Vector2(), ringT: -1, ringAmp: 0, dropT: -1, bright: 1, gloss: 0 }
+  const O: Outer = { camPos: new THREE.Vector3(), camTarget: new THREE.Vector3(), fov: 35, crewVisible: false, crew: new THREE.Vector3(), crewScale: 1, yaw: 0, pitch: 0, roll: 0, float: 0, bulge: 0, width: 1, center: new THREE.Vector2(), ringT: -1, ringAmp: 0, dropT: -1, bright: 1, gloss: 0, crackR: 0, ringR: 0, frost: 0, tilt: 0, shatterT: -1, hole: 4, screenBright: 1, shardsVisible: false }
 
   const keep = new Set<THREE.BufferGeometry>([crewIn.body.geometry, crewIn.visor.geometry, (crewIn.legL.children[0] as THREE.Mesh).geometry])
   const dispose = () => {
@@ -334,8 +363,8 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
     ;[innerScene, outerG].forEach((root) => root.traverse((o: any) => { if (o.geometry && !keep.has(o.geometry)) o.geometry.dispose?.(); if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m: any) => m.dispose()) }))
   }
   return {
-    sw, sh, rt, envs, inner: innerScene, grass, fan, mist, motes, treeRim, icam, bcam, sky, skyMat, stars, starMat, forest, crewIn, innerMats, shadow, shadowMat, hemi, sun, rim, lightRig,
-    outer: outerG, backdrop, backdropMat, screenMat, crewOut, drops, dropData, c, I, IB, O, lastP: -1,
+    sw, sh, rt, envs, inner: innerScene, grass, fan, mist, motes, treeRim, icam, bcam, sky, skyMat, stars, starMat, glintMat, forest, crewIn, innerMats, shadow, shadowMat, hemi, sun, rim, lightRig,
+    outer: outerG, backdrop, backdropMat, screenMat, crewOut, shards, shardMat, shardKey: '', tier, glints, c, I, IB, O, lastP: -1,
     tmp: new THREE.Vector3(), tmp2: new THREE.Vector3(), o3: new THREE.Object3D(), dispose,
   }
 }

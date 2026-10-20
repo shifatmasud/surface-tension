@@ -9,11 +9,39 @@ import { clamp, mix, smoothstep as ss } from '../../../core/math'
  *   0.22–0.50  DESCENT  atmosphere entry, dusk → morning, it rights itself and falls
  *   0.50       LAND     forest clearing, squash and settle
  *   0.58–0.74  REVEAL   the camera pulls back: it was all playing on a tablet
- *   0.72–0.80  PRESS    it walks to the glass, the surface bulges under the pressure
- *   0.80–0.86  BREAK    the surface gives like water: it pierces, the membrane snaps into rings, droplets
- *   0.86–1.00  OUT      it floats free into the page; the tablet steps back
+ *   0.715–0.765 WALK   it walks up to the glass
+ *   0.772      HIT 1   it throws its weight at the glass: a dull knock, a white star cracks out from the impact
+ *   0.788      HIT 2   harder: the cracks race to the bezel, concentric rings join them, the pane goes spider-web
+ *   0.80       BREAK   the glass bursts: hundreds of pieces of the picture fly at us in a slow-motion beat
+ *   0.86–1.00  OUT      time comes back, the shards clear the frame, it floats free into the page; the tablet steps back
  */
-export const T = { LAND: 0.5, PULL0: 0.58, PULL1: 0.74, WALK0: 0.715, BREAK: 0.8, SNAP: 0.865 }
+export const T = { LAND: 0.5, PULL0: 0.58, PULL1: 0.74, WALK0: 0.715, HIT1: 0.772, HIT2: 0.788, BREAK: 0.8, SNAP: 0.865 }
+
+/** the windup and the slam of one hit: back, then a short hard lunge into the glass */
+function knock(p: number, h: number) {
+  const back = Math.exp(-Math.pow((p - (h - 0.0065)) / 0.0035, 2))
+  const slam = Math.exp(-Math.pow((p - h) / 0.0016, 2))
+  return { z: -0.3 * back + 0.05 * slam, lean: 0.32 * slam - 0.12 * back }
+}
+/** a decaying shake after an impact, a pure function of scroll (reversible, still when the scroll is still) */
+function shake(p: number, h: number, amp: number, seed: number) {
+  if (p < h) return 0
+  const u = (p - h) * 600
+  return amp * Math.exp(-u * 0.55) * Math.sin(u * 2.3 + seed)
+}
+/**
+ * The slow-motion clock of the break, in pseudo-seconds after the burst: the first instant runs fast (the pane
+ * explodes), then time all but stops while the pieces hang in the air around it, then it comes back.
+ */
+export function shatterClock(p: number) {
+  if (p < T.BREAK) return -1
+  const u = p - T.BREAK
+  const rate = (x: number) => mix(mix(36, 4.5, ss(0.0015, 0.007, x)), 26, ss(0.042, 0.07, x))
+  const n = 40, h = u / n
+  let s = 0
+  for (let i = 0; i < n; i++) s += rate((i + 0.5) * h) * h
+  return s
+}
 
 const easeIO = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
 const easeO = (t: number) => 1 - Math.pow(1 - t, 3)
@@ -32,17 +60,18 @@ export function inner(p: number, out: Inner, portrait = false) {
   const fall = easeIO(seg(p, 0.22, T.LAND))
   const alt = 70 * (1 - fall)
   const space = 1 - ss(0.24, 0.42, p)
-  const walkZ = mix(0, 2.0, easeIO(seg(p, 0.72, T.BREAK)))
+  const k1 = knock(p, T.HIT1), k2 = knock(p, T.HIT2), k3 = knock(p, T.BREAK)
+  const walkZ = mix(0, 2.0, easeIO(seg(p, 0.72, 0.766))) + k1.z + k2.z * 1.2 + (p < T.BREAK ? k3.z * 1.3 : 0)
   out.crew.set(Math.sin(p * 9) * 0.35 * space, alt, walkZ)
   const tumble = 1 - ss(0.28, 0.46, p)
   const spaceYaw = 0.55 + Math.sin(p * 5) * 0.35 // a three-quarter view: the visor reads
   const forestYaw = mix(mix(0.6, -0.4, ss(0.52, 0.6, p)), 0, ss(0.62, 0.7, p))
   out.yaw = mix(spaceYaw, forestYaw, ss(0.3, 0.48, p))
-  out.pitch = tumble * (0.12 + Math.sin(p * 11) * 0.18)
+  out.pitch = tumble * (0.12 + Math.sin(p * 11) * 0.18) + (k1.lean + k2.lean * 1.2 + k3.lean * 1.3) * ss(0.7, 0.75, p)
   out.roll = tumble * (Math.sin(p * 7 + 1) * 0.3 - 0.15)
   out.float = 1 - ss(0.44, 0.5, p)
   out.squash = Math.exp(-Math.pow((p - 0.503) / 0.009, 2))
-  out.walk = ss(0.715, 0.73, p) * (1 - ss(0.785, 0.8, p))
+  out.walk = ss(0.715, 0.73, p) * (1 - ss(0.758, 0.768, p))
   out.phase = (p - 0.715) * 240
   out.visible = p < T.BREAK
   // ---- camera: an orbit in space, a chase from above while falling, eye level in the clearing
@@ -53,6 +82,9 @@ export function inner(p: number, out: Inner, portrait = false) {
   const off = offSpace.lerp(offFall, ss(0.22, 0.36, p)).lerp(offLand, ss(0.38, 0.52, p))
   const anchor = _b.set(out.crew.x, alt + 0.85, Math.min(walkZ, 0)) // camera does not follow the walk: it comes to us
   out.cam.copy(anchor).add(off)
+  // each hit jolts the picture (the camera inside the device takes the blow)
+  const jx = shake(p, T.HIT1, 0.05, 0) + shake(p, T.HIT2, 0.09, 1.3), jy = shake(p, T.HIT1, 0.04, 2.1) + shake(p, T.HIT2, 0.07, 0.4)
+  out.cam.x += jx; out.cam.y += jy
   out.look.set(out.crew.x, alt + 0.85 + 0.75 * ss(0.4, 0.55, p), walkZ * 0.6) // eye level, looking a touch up: more sky, the star against it
   // thirds: in space and the fall the crewmate sits on the left third with lead room ahead of it
   const thirds = portrait ? 0 : (1 - ss(0.4, 0.52, p)) * 1.25 // phones: the frame is narrow, the star stays centred
@@ -70,27 +102,33 @@ export type Outer = {
   crewVisible: boolean; crew: THREE.Vector3; crewScale: number; yaw: number; pitch: number; roll: number; float: number
   bulge: number; width: number; center: THREE.Vector2; ringT: number; ringAmp: number
   dropT: number; bright: number; gloss: number
+  /** cracks: radial reach and concentric reach (local units from the impact), the crushed spot, the askew tilt */
+  crackR: number; ringR: number; frost: number; tilt: number
+  /** slow-motion seconds since the burst (-1 before it), the radius the hole tears out to, the screen behind */
+  shatterT: number; hole: number; screenBright: number; shardsVisible: boolean
 }
 
-/** Outer world, local to the tablet (screen plane at z = SCREEN_Z, facing +z). */
-export function outer(p: number, o: Outer, fit: { dFill: number; dFar: number; lateral: number }, start: { x: number; y: number; k: number }, screenZ: number) {
+/** Outer world, local to the tablet (screen plane at z = SCREEN_Z, facing +z). `far` = impact → farthest screen corner. */
+export function outer(p: number, o: Outer, fit: { dFill: number; dFar: number; lateral: number }, start: { x: number; y: number; k: number }, screenZ: number, far = 9) {
   // ---- camera
   const pull = easeIO(seg(p, T.PULL0, T.PULL1))
   const lean = easeIO(seg(p, 0.74, T.BREAK))
   const outT = easeIO(seg(p, T.BREAK, 1))
-  let d = mix(fit.dFill, fit.dFar, pull) * mix(1, 0.9, lean)
+  // the slow-motion beat: the camera eases in on the burst while time hangs, then lets go
+  const beat = ss(T.BREAK, T.BREAK + 0.008, p) * (1 - ss(0.84, 0.875, p))
+  let d = mix(fit.dFill, fit.dFar, pull) * mix(1, 0.9, lean) * (1 - 0.085 * beat)
   let az = mix(0, -0.34, pull) + lean * 0.08 + outT * 0.42
   let el = mix(0, 0.13, pull) - outT * 0.05
   d *= mix(1, fit.lateral > 0 ? 0.86 : 1, outT)
   // thirds: the device settles left of centre, leaving the right third for what comes out of it
   o.camTarget.set(fit.lateral * pull, -fit.lateral * 0.25 * pull, 0)
-  // ---- crewmate out of the glass
+  // ---- crewmate out of the glass: it bursts through on the slow-motion clock, then floats free
   const k = start.k
-  const wrap = seg(p, T.BREAK, T.SNAP)
+  const ts = shatterClock(p)
+  const burst = ts > 0 ? 1 - Math.exp(-ts * 2.4) : 0
   const free = easeO(seg(p, T.SNAP, 0.97))
   o.crewVisible = p >= T.BREAK
-  // it pushes out slowly while the surface holds on to it, then the surface lets go and it floats free
-  const zc = k * (mix(0.06, 0.9, easeIO(wrap)) + free * 1.9)
+  const zc = k * (0.06 + 1.05 * burst + free * 1.75)
   const wide = fit.lateral > 0 // landscape: it floats out to the right third; phones: it rises above the device
   o.crew.set(
     start.x + outT * k * (wide ? 2.4 : 0.5),
@@ -99,29 +137,30 @@ export function outer(p: number, o: Outer, fit: { dFill: number; dFar: number; l
   )
   o.crewScale = k * mix(1, 0.8, outT)
   o.yaw = mix(0, -0.35, ss(0.86, 1, p))
-  o.pitch = mix(-0.22, 0.06, ss(T.BREAK, 0.92, p))
+  o.pitch = mix(-0.3, 0.06, ss(T.BREAK, 0.92, p))
   o.roll = mix(0, 0.18, ss(0.86, 1, p))
   o.float = ss(0.84, 0.94, p)
   // camera drifts to keep the star and the tablet in one composed frame
   o.camTarget.lerp(_a.set(o.crew.x * 0.75, o.crew.y * 0.6, o.crew.z * 0.55), outT)
   o.camPos.set(Math.sin(az) * Math.cos(el) * d, Math.sin(el) * d, Math.cos(az) * Math.cos(el) * d).add(_b.set(o.camTarget.x, o.camTarget.y * 0.6, 0))
+  // the blows reach us too: a small jolt per hit, a real shake on the burst
+  const sx = shake(p, T.HIT1, 0.035, 0.3) + shake(p, T.HIT2, 0.07, 1.1) + shake(p, T.BREAK, 0.2, 2.0)
+  const sy = shake(p, T.HIT1, 0.03, 1.7) + shake(p, T.HIT2, 0.06, 0.2) + shake(p, T.BREAK, 0.16, 0.9)
+  o.camPos.x += sx; o.camPos.y += sy; o.camTarget.x += sx * 0.5; o.camTarget.y += sy * 0.5
   o.fov = mix(35, 32, pull)
-  // ---- membrane: press → wrap → snap → rings
-  const press = ss(0.745, T.BREAK, p)
+  // ---- the glass: two hits crack it, the third bursts it (no water any more: bulge, rings and droplets stay off)
   o.center.set(start.x, start.y)
-  o.width = k * mix(0.45, 0.75, wrap)
-  // the meniscus: the surface clings to the body (apex near its waist) and stretches with it
-  const cling = k * (press * 0.24 * (1 - wrap) + easeIO(wrap) * 0.82)
-  if (p < T.SNAP) {
-    o.bulge = cling
-    o.ringT = -1; o.ringAmp = 0
-  } else {
-    const t = (p - T.SNAP) * 16 // pseudo-seconds after the snap
-    o.bulge = k * 0.82 * Math.exp(-t * 2.2) * (0.5 + 0.5 * Math.cos(t * 5.2))
-    o.ringT = t; o.ringAmp = 0.16 + k * 0.03
-  }
-  o.dropT = p >= T.SNAP - 0.004 ? (p - (T.SNAP - 0.004)) * 16 : -1
+  o.width = k; o.bulge = 0; o.ringT = -1; o.ringAmp = 0; o.dropT = -1
+  const c1 = easeO(seg(p, T.HIT1, T.HIT1 + 0.004)), c2 = easeO(seg(p, T.HIT2, T.HIT2 + 0.009))
+  o.crackR = Math.max(c1 * 1.15 * k, c2 * far * 1.05)
+  o.ringR = Math.max(c1 * 0.38 * k, c2 * far * 0.55)
+  o.frost = 0.55 * ss(T.HIT1, T.HIT1 + 0.002, p) + 0.45 * ss(T.HIT2, T.HIT2 + 0.002, p)
+  o.tilt = ss(T.HIT2, T.HIT2 + 0.006, p)
+  o.shardsVisible = p >= T.HIT1 - 0.0015
+  o.shatterT = ts
+  o.hole = far * 0.52
   o.bright = mix(1, 0.62, ss(0.88, 1, p))
+  o.screenBright = o.bright * mix(1, 0.4, ss(T.BREAK, T.BREAK + 0.005, p))
   o.gloss = pull
   return o
 }
