@@ -47,7 +47,7 @@ Tick an item only when it runs on the live site and was checked visually.
 - [x] Mouse-move tilt — live real-GPU frames 04:25Z Oct 20 (pointer left vs right: camera parallax shifts the frame and the gem tilts toward the pointer)
 - [x] Odometer counters — live 04:25Z: intro 000→100 reel counter; lab index rolls as digit reels (DOM read 01→04 / 05 while scrolling)
 - [x] Subtle cylinder bend tied to scroll velocity — live real-GPU 04:45Z: bend forced to ±0.35 (QA hook) visibly curves the lab track; velocity→bend mapping (vel/4000 px/s, damped) in labGL; real-scroll magnitude not captured (remote browser 1–17 fps)
-- [ ] Depth-map 3D image parallax
+- [x] Depth-map 3D image parallax — live real-GPU frames 05:13Z Oct 20 (Water Sim card held on its poster, parallax pointer forced to opposite corners: 19% of the card's pixels shift along the depth map; same pointer twice = no change)
 - [x] Mask slide-up text reveals — live 04:30Z statement sweep (12 frames): phrases rise through the mask line by line and sink upward; lab names slide up per project
 
 ## Journey section (before CTA)

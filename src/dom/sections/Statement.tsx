@@ -26,7 +26,7 @@ export function Statement() {
     // upper third (a distinct shot from the hero's side view; it was a faint blue dot from 17 m behind a 0.55 fade)
     const pose = { pos: new THREE.Vector3(0, 5.6, 1.8), target: new THREE.Vector3(0, 0, 0.6), fov: 38 }
     ;(window as any).__stPose = pose // QA
-    const st = visuals.register('statement', () => pose, { fade: 0.18, vignette: 0.04, bloom: 0.1, contrast: 1.02, exposure: 1.1 })
+    const st = visuals.register('statement', () => pose, { fade: 0.1, bg: new THREE.Color('#f7f8f9'), fogColor: new THREE.Color('#eceef0'), brightness: 0.05, saturation: 1.1, vignette: 0.02, bloom: 0.1, contrast: 1.02, exposure: 1.12 })
     const handles: ReturnType<typeof ufxText>[] = []
     let lastStep = -1
     return {

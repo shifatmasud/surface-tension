@@ -143,11 +143,12 @@ export const labGL = {
           card.ty = damp(card.ty, inside ? mx * 0.12 : 0, 6, props.dt)
           card.lift = damp(card.lift, card.hover * 40, 6, props.dt)
           u.u_tilt.value.set(card.tx, card.ty); u.u_lift.value = card.lift
-          u.u_mouse.value.set(input.mouseXY.x, input.mouseXY.y)
+          const qm = (window as any).__labMouse as [number, number] | undefined // QA: force the parallax pointer
+          if (qm) u.u_mouse.value.set(qm[0], qm[1]); else u.u_mouse.value.set(input.mouseXY.x, input.mouseXY.y)
           // video: only the focused card plays
           this.ensureMedia(card, p)
           if (card.video) {
-            const want = card.focus > 0.55
+            const want = card.focus > 0.55 && !(window as any).__labPause // QA: __labPause holds every card on its poster
             if (want && card.video.paused) card.video.play().catch(() => {})
             else if (!want && !card.video.paused) card.video.pause()
             // a paused video's texture never receives a frame (three uploads on video frames): show the reel only

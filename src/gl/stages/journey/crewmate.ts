@@ -38,7 +38,10 @@ export function crewMaterials(env: THREE.Texture | null) {
   })
   const visor = new THREE.MeshPhysicalMaterial({
     // the iconic pale-cyan visor: tinted glass with crisp studio highlights (was a flat grey)
-    color: '#8fc3e3', roughness: 0.04, metalness: 0.15, clearcoat: 1, clearcoatRoughness: 0.02,
+    // a faint cyan self-glow keeps the hue under the violet space light, and cyan-tinted reflections keep it in the highlights
+    color: '#9fe0f2', roughness: 0.04, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.02,
+    emissive: new THREE.Color('#5cc8e6'), emissiveIntensity: 0.42,
+    specularColor: new THREE.Color('#c8f6ff'), specularIntensity: 1,
     envMap: env, envMapIntensity: 1.9, fog: false,
   })
   return { body, visor }

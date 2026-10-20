@@ -14,7 +14,7 @@ const A = { pos: new THREE.Vector3(0, 2.8, 4.5), tgt: new THREE.Vector3(0, -0.3,
 const B = { pos: new THREE.Vector3(0, 10.5, 3.2), tgt: new THREE.Vector3(0, 0, -0.4) }
 ;(window as any).__heroA = A // QA
 // portrait framing offsets (phones): closer and lower so the stone is the star of the upper frame
-const HP = { z: 2.45, y: 1.2, ty: 0.32 }
+const HP = { z: 1.7, y: 0.9, ty: 0.22 } // stone ~62% of a phone's width: it breathes
 ;(window as any).__heroP = HP // QA
 const ease = (t: number) => t * t * (3 - 2 * t)
 

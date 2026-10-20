@@ -59,7 +59,7 @@ export function SystemsStage() {
   }, [size, buf])
 
   const mats = useMemo(() => {
-    const top = new THREE.MeshPhysicalMaterial({ color: '#1f5bff', roughness: 0.24, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.1, emissive: new THREE.Color('#1f5bff'), emissiveIntensity: 0.3, envMapIntensity: 0.5 })
+    const top = new THREE.MeshPhysicalMaterial({ color: '#1f5bff', roughness: 0.1, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.03, emissive: new THREE.Color('#1f5bff'), emissiveIntensity: 0.2, envMapIntensity: 0.7, sheen: 0.5, sheenRoughness: 0.35, sheenColor: new THREE.Color('#9cc0ff') })
     const white = new THREE.MeshPhysicalMaterial({ color: '#ffffff', roughness: 0.22, clearcoat: 1, clearcoatRoughness: 0.1, envMapIntensity: 1.0 })
     const track = new THREE.MeshPhysicalMaterial({ color: '#ffffff', roughness: 0.4, transparent: true, opacity: 0.3, depthWrite: false })
     const accent = new THREE.MeshPhysicalMaterial({ color: '#1f5bff', roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.15, emissive: new THREE.Color('#1f5bff'), emissiveIntensity: 0.18 })
@@ -171,9 +171,10 @@ export function SystemsStage() {
     if (btn) { btn.mesh.position.y = parts.button.y + 0.05 + bp * 0.05; btn.mesh.scale.set(1 - bp * 0.4, 1 + bp * 0.6, 1 - bp * 0.4) }
 
     // ---- colour & light
-    mats.top.color.copy(st.accent); mats.top.emissive.copy(st.accent); mats.top.emissiveIntensity = 0.04 + 0.34 * light
+    // beauty pass: a deeper body + crisp reflections reads as glossy ultramarine (the reference), not flat periwinkle
+    mats.top.color.copy(st.accent).multiplyScalar(0.62); mats.top.emissive.copy(st.accent); mats.top.emissiveIntensity = 0.02 + 0.17 * light
     mats.accent.color.copy(st.accent); mats.accent.emissive.copy(st.accent); mats.accent.emissiveIntensity = 0.05 + 0.2 * light
-    mats.top.envMapIntensity = 0.3 + 0.25 * light
+    mats.top.envMapIntensity = 0.45 + 0.4 * light
     if (glass.current.base) { glass.current.base.attenuationColor?.copy?.(st.tmpC.copy(st.accent).lerp(new THREE.Color(1, 1, 1), 0.35)); glass.current.base.color?.copy?.(st.tmpC.copy(st.accent).lerp(new THREE.Color(1, 1, 1), 0.72)) }
     if (!hi) mats.lowBase.color.copy(st.accent).lerp(new THREE.Color(1, 1, 1), 0.45)
     floor.uniforms.uAccent.value.copy(st.accent)
