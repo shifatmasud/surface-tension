@@ -9,12 +9,15 @@ import { SITE } from '../../content/site'
 import gsap from 'gsap'
 import { vfovFor, portrait } from '../../core/frame'
 
-// A: eye level over the lake, the gem centred low in frame; B: a slow crane up until it is a point of blue
-const A = { pos: new THREE.Vector3(0, 2.8, 4.5), tgt: new THREE.Vector3(0, -0.3, 0) }
+// A: eye level over the lake; B: a slow crane up until it is a point of blue
+// first frame, optically centred (Shifat 11:05Z): the stone + its reflection read as one mass whose centre sits at
+// ~47 % of the frame height (true centre, a hair above). Only the aim moves: the lens looks a touch higher
+// (target -0.3 -> 0.11), so the stone drops from ~33 % to ~47 % without changing size or the type slot.
+const A = { pos: new THREE.Vector3(0, 2.8, 4.5), tgt: new THREE.Vector3(0, 0.11, 0) }
 const B = { pos: new THREE.Vector3(0, 10.5, 3.2), tgt: new THREE.Vector3(0, 0, -0.4) }
 ;(window as any).__heroA = A // QA
-// portrait framing offsets (phones): closer and lower so the stone is the star of the upper frame
-const HP = { z: 1.7, y: 0.9, ty: 0.22 } // stone ~62% of a phone's width: it breathes
+// portrait framing offsets (phones): closer and lower; the aim offset keeps the optical centre at ~46 % on phones too
+const HP = { z: 1.7, y: 0.9, ty: 0.06 } // stone ~62% of a phone's width: it breathes
 ;(window as any).__heroP = HP // QA
 const ease = (t: number) => t * t * (3 - 2 * t)
 
@@ -28,7 +31,7 @@ export function Hero() {
       const t = ease(props.heroPin)
       const pr = portrait()
       pose.pos.lerpVectors(A.pos, B.pos, t); pose.target.lerpVectors(A.tgt, B.tgt, t)
-      // north-star frame: the gem centred in the upper ~60 %, giant type on the bottom margin
+      // north-star frame: the stone optically centred, giant type on the bottom margin
       pose.pos.z -= pr * HP.z * (1 - t); pose.pos.y -= pr * HP.y * (1 - t); pose.target.y -= pr * HP.ty * (1 - t)
       pose.fov = mix(vfovFor(44, 22, 58), vfovFor(58), t)
       // ultrawide: the vertical fov hits its 22° floor and the stone grew past the header; back off along the view
