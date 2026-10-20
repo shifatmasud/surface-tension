@@ -38,7 +38,10 @@ export function Dive() {
       update() {
         st.weight = weightFrom(range.ratio) * 1.2
         // 0 when the section's top meets the bottom of the screen, 1 at the end of the pin
-        dive.u = clamp((props.scroll - range.docTop + props.height) / Math.max(1, range.height))
+        // clipped sections: the section enters as a card sliding over Systems, so its entry (raw 0 → 1/3) shows the
+        // last stretch of the approach and the crossing instead of the long, blank calm-lake glide
+        const raw = clamp((props.scroll - range.docTop + props.height) / Math.max(1, range.height))
+        dive.u = raw < 1 / 3 ? 0.17 + raw * (1 / 3 - 0.17) * 3 : raw
         props.dive = dive.u
         // the approach is a wide calm lake: stir it with a few rings ahead of the camera so the frame before the
         // crossing always reads as water (a horizon of moving rings), never a blank light field

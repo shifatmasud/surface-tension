@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { useEffect, useRef, useState } from 'react'
 import { useSection, weightFrom } from './useSection'
+import { clip } from '../../gl/systems/clip'
 import { visuals } from '../../gl/systems/visuals'
 import { props } from '../../state/props'
 import { settings, browser } from '../../services/settings'
@@ -58,7 +59,7 @@ export function Systems() {
       name: 'systems',
       update() {
         st.weight = weightFrom(range.ratio) * 0.95
-        sys.weight = st.weight
+        sys.weight = clip.allowed('systems') ? st.weight : 0
         const pinLen = Math.max(1, range.height - props.height)
         p = clamp((props.scroll - range.docTop) / pinLen)
         out = Math.max(0, range.ratio)

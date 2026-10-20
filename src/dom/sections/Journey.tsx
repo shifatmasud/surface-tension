@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { useRef } from 'react'
 import { useSection, weightFrom } from './useSection'
+import { clip } from '../../gl/systems/clip'
 import { visuals } from '../../gl/systems/visuals'
 import { props } from '../../state/props'
 import { clamp } from '../../core/math'
@@ -18,7 +19,7 @@ export function Journey() {
         st.weight = weightFrom(range.ratio) * 1.4
         const pinLen = Math.max(1, range.height - props.height)
         props.journey = clamp((props.scroll - range.docTop) / pinLen)
-        journey.active = range.isActive
+        journey.active = range.isActive && clip.allowed('journey')
         // two small lines, timed to beats: one in space, one at the reveal (mask slide-up in, slide on out)
         const p = props.journey
         b1.current?.classList.toggle('is-on', range.isActive && p > 0.03 && p < 0.2)

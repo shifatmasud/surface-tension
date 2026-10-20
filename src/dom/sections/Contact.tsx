@@ -132,7 +132,7 @@ export function Contact() {
         <footer className="footer"><span>© {new Date().getFullYear()} {SITE.name}</span><span>Surface Tension — portfolio prototype</span></footer>
       </section>
       <div className="overscroll" ref={over} aria-hidden>
-        <div className="overscroll__bar"><div className="overscroll__fill" ref={bar} />Keep scrolling — back to the surface</div>
+        <div className="overscroll__bar"><p className="overscroll__label">Keep scrolling — back to the surface</p><div className="overscroll__track"><div className="overscroll__fill" ref={bar} /></div></div>
       </div>
     </>
   )

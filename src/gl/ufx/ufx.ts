@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { props, shared } from '../../state/props'
 import { BICUBIC } from '../shaders/chunks'
+import { clip } from '../systems/clip'
 
 /**
  * Ufx — DOM → WebGL sync (handbook ch.4), written fresh. Real HTML elements stay the layout truth
@@ -25,6 +26,8 @@ export interface UfxItem {
   /** inside a sticky/transformed ancestor: read the live screen rect every frame instead of doc space */
   live?: () => { top: number; left: number; w: number; h: number }
   visibleWhen?: () => boolean
+  /** id of the section the element lives in (resolved once; '' = global) */
+  section?: string
 }
 
 const FOV = 30
@@ -63,11 +66,18 @@ class UfxSystem {
   }
   update() {
     const vw = this.w, vh = this.h
+    // clipped sections: the live frame is drawn shifted down inside the incoming card (inner parallax), so the
+    // DOM-mirrored layer renders that much higher and lands exactly on its DOM boxes
+    this.camera.position.y = -clip.shift
     for (const it of this.items) {
       let top = it.docTop - (it.fixed ? 0 : props.scroll)
       if (it.live) { const L = it.live(); top = L.top; it.docLeft = L.left; it.w = L.w; it.h = L.h }
       const inView = it.selfPlaced || (top < vh + 200 && top + it.h > -200)
-      const on = this.enabled && inView && (it.visibleWhen ? it.visibleWhen() : true)
+      // clipped sections: a mirrored item belongs to its section's block; the outgoing block's items live on in its
+      // captured frame, so the live render (the incoming card) must not draw them again
+      if (it.section === undefined) it.section = it.el.closest('section')?.id ?? ''
+      const owned = !it.section || clip.allowed(it.section)
+      const on = this.enabled && inView && owned && (it.visibleWhen ? it.visibleWhen() : true)
       it.mesh.visible = on && (it.w > 0 || !!it.selfPlaced)
       if (!it.mesh.visible) continue
       if (!it.selfPlaced) {

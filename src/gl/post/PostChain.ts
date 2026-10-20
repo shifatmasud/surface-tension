@@ -2,6 +2,8 @@ import * as THREE from 'three'
 import { BloomEffect, EffectComposer, EffectPass, KernelSize, Pass, RenderPass, SMAAEffect, SMAAPreset } from 'postprocessing'
 import { GradeEffect, ScreenPaintDistortionEffect, SharpenEffect } from './effects'
 import { DiveGodRaysPass } from './DiveGodRays'
+import { ClipCompositeEffect } from './ClipComposite'
+import { clip } from '../systems/clip'
 import { diveRays } from '../stages/dive/diveState'
 import { props, shared } from '../../state/props'
 import { settings } from '../../services/settings'
@@ -20,6 +22,7 @@ import { settings } from '../../services/settings'
  *   100  PostUfx          (crisp layer drawn over the distortion)
  *   500  SMAA
  *   2000 Sharpen         (only when the render scale is below native)
+ *   3000 ClipComposite   (clipped-section boundary: live card over the outgoing block's captured frame)
  */
 type Entry = { name: string; order: number; pass: Pass; needsRender: () => boolean; on?: boolean }
 
@@ -54,6 +57,7 @@ export class PostChain {
       { name: 'PostUfx', order: 100, pass: this.postUfx, needsRender: () => ufxOver.children.some((c) => c.visible) },
       { name: 'SMAA', order: 500, pass: new EffectPass(camera, smaa), needsRender: () => true },
       { name: 'Sharpen', order: 2000, pass: new EffectPass(camera, new SharpenEffect()), needsRender: () => renderScale() < 0.99 },
+      { name: 'ClipComposite', order: 3000, pass: new EffectPass(camera, new ClipCompositeEffect()), needsRender: () => clip.boundary || clip.capture >= 0 },
     ]
   }
   setSize(w: number, h: number) {

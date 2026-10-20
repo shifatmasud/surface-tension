@@ -5,6 +5,7 @@ import { input } from '../services/input'
 import { scroll } from '../services/scroll'
 import { taskManager } from '../services/loader'
 import { sections } from './sections'
+import { clip } from '../gl/systems/clip'
 import { audio } from '../services/audio'
 import { settings } from '../services/settings'
 
@@ -28,6 +29,7 @@ export function startClock() {
     scroll.raf(time * 1000)
     scroll.update(dt)
     sections.update(dt)
+    clip.update()
     audio.update(dt)
     if (settings.USE_GL) advance(props.time)
     input.postUpdate()

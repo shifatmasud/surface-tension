@@ -7,6 +7,7 @@ import { input } from '../../services/input'
 import { Spring3, Spring } from '../../core/spring'
 import { BrownianMotion } from '../../core/math'
 import { tilt } from '../../services/tilt'
+import { clip } from './clip'
 
 const FINE_POINTER = typeof matchMedia === 'function' ? matchMedia('(any-pointer: fine)').matches : true
 
@@ -23,17 +24,23 @@ export function CameraRig() {
     init: false,
     parK: 1,
     stage: '',
+    owner: -1,
   }), [])
   useFrame((_, dt) => {
     visuals.resolve(st.pose, dt)
     if (!st.init) { st.pos.x.reset(st.pose.pos.x); st.pos.y.reset(st.pose.pos.y); st.pos.z.reset(st.pose.pos.z); st.tgt.x.reset(st.pose.target.x); st.tgt.y.reset(st.pose.target.y); st.tgt.z.reset(st.pose.target.z); st.init = true }
     // a stage that lives far away (the journey sits 200 m off) is a cut, not a 200 m dolly through the void
-    if (props.stage !== st.stage) {
+    // a new block owner (clipped sections) starts on its own pose: the first frames of the incoming scene are
+    // a sliver at the bottom of its card, so its camera must not fly in from the previous block's
+    const newOwner = clip.enabled && clip.ownerKey !== st.owner
+    st.owner = clip.ownerKey
+    if (props.stage !== st.stage || newOwner) {
       st.stage = props.stage
       const cur = new THREE.Vector3(st.pos.x.value, st.pos.y.value, st.pos.z.value)
-      if (cur.distanceTo(st.pose.pos) > 30) {
+      if (newOwner || cur.distanceTo(st.pose.pos) > 30) {
         st.pos.x.reset(st.pose.pos.x); st.pos.y.reset(st.pose.pos.y); st.pos.z.reset(st.pose.pos.z)
         st.tgt.x.reset(st.pose.target.x); st.tgt.y.reset(st.pose.target.y); st.tgt.z.reset(st.pose.target.z)
+        if (newOwner) st.fov.reset(st.pose.fov)
       }
     }
     const p = st.pos.update(st.pose.pos, dt), t = st.tgt.update(st.pose.target, dt)
