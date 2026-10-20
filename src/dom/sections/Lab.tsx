@@ -67,15 +67,15 @@ export function Lab() {
         <p className="lab__count" aria-hidden><Odometer value={active + 1} digits={2} play={seen} /> <span>/ <Odometer value={PROJECTS.length} digits={2} play={seen} delay={0.15} /></span></p>
         <div className="lab__track" ref={track}>
           {PROJECTS.map((p, i) => (
-            <article key={p.id} className={'card' + (i === active ? ' is-active' : '')} data-id={p.id} data-cursor data-cursor-label="Open" tabIndex={0}
+            <div key={p.id} className={'card' + (i === active ? ' is-active' : '')} data-id={p.id} data-cursor data-cursor-label="Open" tabIndex={0} role="button"
               onClick={() => { overlay.open(p.id, { morph: true, from: labGL.rectOf(p.id) }); audio.splash() }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); overlay.open(p.id, { morph: true, from: labGL.rectOf(p.id) }) } }}
               onFocus={() => labGL.hover(p.id, true)} onBlur={() => labGL.hover(p.id, false)}
-              onMouseEnter={() => { audio.tick(); labGL.hover(p.id, true) }} onMouseLeave={() => labGL.hover(p.id, false)} aria-label={`${p.title}, ${p.year}. ${p.blurb} Open project.`}>
+              onMouseEnter={() => { audio.tick(); labGL.hover(p.id, true) }} onMouseLeave={() => labGL.hover(p.id, false)} aria-label={`${p.title}, ${p.year}, ${p.no} ${p.tags.join(' · ')} — ${p.blurb} Open project.`}>
               <div className="card__dom">
                 <img className="card__media" src={p.poster} alt="" loading="lazy" />
                 <div className="card__label"><span>{p.no}</span><span>{p.tags.join(' · ')}</span></div>
               </div>
-            </article>
+            </div>
           ))}
         </div>
         <div className="lab__foot">

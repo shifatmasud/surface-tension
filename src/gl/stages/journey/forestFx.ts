@@ -12,7 +12,8 @@ import { groundHeight } from './forest'
 function rng(seed: number) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296) }
 
 export function buildGrass(low: boolean, tier: 'low' | 'mid' | 'high', sunDir: THREE.Vector3) {
-  const count = low ? 5000 : tier === 'high' ? 22000 : 15000
+  void low; void tier
+  const count = 15000 // PERF lane (eng #5): one count (dead path since the foliage helper; JourneyStage still imports it)
   // a tapered blade: 3 segments, 7 vertices (x across −0.5..0.5, y 0..1)
   const base = new THREE.BufferGeometry()
   const v: number[] = []
@@ -120,7 +121,9 @@ export function buildSunFan(sunDir: THREE.Vector3) {
 
 /** Additive veils of morning mist between the tree layers, lit warmer toward the sun. */
 export function buildMist(low: boolean) {
-  const layers = low ? [[-14, 34, 5], [-34, 60, 8]] : [[-9, 26, 3.5], [-18, 40, 5.5], [-34, 64, 8], [-58, 110, 12]]
+  // PERF lane (eng #5): the same four veils on every tier (phones used to get two); each is one cheap additive quad
+  void low
+  const layers = [[-9, 26, 3.5], [-18, 40, 5.5], [-34, 64, 8], [-58, 110, 12]]
   const group = new THREE.Group()
   const mats: THREE.ShaderMaterial[] = []
   layers.forEach(([z, w, hgt], i) => {
@@ -150,7 +153,8 @@ export function buildMist(low: boolean) {
 
 /** Pollen in the light: slow drifting motes that glow when they sit between the camera and the sun. */
 export function buildMotes(low: boolean, pr: number, sunDir: THREE.Vector3) {
-  const N = low ? 70 : 180
+  void low
+  const N = 180 // PERF lane (eng #5): one mote count; phones already pay less per mote through pr (dpr × render scale)
   const pos = new Float32Array(N * 3), seed = new Float32Array(N)
   const r = rng(5)
   for (let i = 0; i < N; i++) { pos.set([(r() - 0.5) * 14, 0.1 + Math.pow(r(), 1.6) * 2.2, -1 - r() * 12], i * 3); seed[i] = r() }

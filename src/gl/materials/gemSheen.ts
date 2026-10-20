@@ -40,9 +40,10 @@ export function createGemSheen(opts: { strength?: number; warm?: number } = {}) 
     depthTest: true,
     blending: THREE.AdditiveBlending,
     vertexShader: /* glsl */ `
-      varying vec3 vN; varying vec3 vW; varying vec3 vO;
+      varying vec3 vN; varying vec3 vW; varying vec3 vO; varying vec3 vON;
       void main() {
         vO = position;
+        vON = normal;   // DIAG: object-space facet normal (the facet's id must not change as the stone spins)
         vec4 w = modelMatrix * vec4(position * 1.004, 1.0);
         vW = w.xyz;
         vN = normalize(mat3(modelMatrix) * normal);
@@ -50,7 +51,7 @@ export function createGemSheen(opts: { strength?: number; warm?: number } = {}) 
       }`,
     fragmentShader: /* glsl */ `
       uniform float u_time, u_strength, u_warm, u_surfaceY, u_under; uniform vec3 u_key, u_rim;
-      varying vec3 vN; varying vec3 vW; varying vec3 vO;
+      varying vec3 vN; varying vec3 vW; varying vec3 vO; varying vec3 vON;
       ${THIN_FILM}
       float h31(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
       ${causticsChunk()}
@@ -61,7 +62,9 @@ export function createGemSheen(opts: { strength?: number; warm?: number } = {}) 
         float c = clamp(dot(n, v), 0.0, 1.0);
         float F = pow(1.0 - c, 4.0);
         // film thickness drifts slowly over the stone (flat per facet + a soft gradient across it)
-        float facet = h31(floor(n * 6.0 + 0.5));
+        // DIAG: hashed on the OBJECT-space normal: the world normal turns with the spin and the tilt springs, so each
+        // facet's film thickness jumped to a new random value whenever its normal crossed a 1/6 cell (sheen popping)
+        float facet = h31(floor(normalize(vON) * 6.0 + 0.5));
         float d = 260.0 + 220.0 * (0.5 + 0.5 * sin(vO.y * 3.1 + vO.x * 1.7 + u_time * 0.22)) + 90.0 * facet;
         vec3 film = thinFilm(c, d, 1.38);
         film = film * film * (3.0 - 2.0 * film);               // a touch more saturated, still soft
@@ -82,7 +85,10 @@ export function createGemSheen(opts: { strength?: number; warm?: number } = {}) 
           col = mix(col, iri * u_strength * 0.6, sub);
           col += causticLight(vW, n) * sub * 1.0;           // the shared glowing caustic web (water/caustics.ts)
         }
-        col += vec3(0.9, 0.97, 1.0) * exp(-pow(dz / 0.006, 2.0)) * 0.9 * u_under;
+        // DIAG: (dz/w)² as a product: pow() of a negative base is undefined in GLSL (NaN on D3D/Metal fast-math), and dz
+        // is negative on every facet above the waterline
+        float wl = dz / 0.006;
+        col += vec3(0.9, 0.97, 1.0) * exp(-wl * wl) * 0.9 * u_under;
         gl_FragColor = vec4(col, 1.0);
       }`,
   })

@@ -51,6 +51,8 @@ export class PostChain {
   /** PERF HOOK: set once behind the preloader curtain — the next render runs every pass this tier can use, so each
    *  pass program (clip composite, god rays, trail, SMAA/FXAA) compiles during loading, not at its first boundary */
   warmAll = false
+  /** DIAG: the warm-up frame above has run (the preloader counts it) */
+  warmDone = false
   scenePass: RenderPass
   /** W18 (Shifat 14:01Z): the global text slot at the canvas's full density */
   text: SharpText
@@ -236,6 +238,10 @@ void main(){
       this.warmAll = false
       // NEIGHBOUR HOOK: link the neighbour chain's programs (bloom+grade pass, its targets) behind the curtain too
       try { this.renderNeighbour(props.look, 0.5, dt) } catch { /* warm-up only */ }
+      // DIAG (preloader): this frame links every post program at once without parallel compile (4.8 s on live at 1440,
+      // ANGLE/D3D11) and used to run AFTER the counter read 100. It now counts: the counter holds an honest ~85 % through
+      // it and reaches 100 only after it. (Spreading it one pass per frame was measured: it doubled the total wait.)
+      this.warmDone = true
     }
     if (sig !== this.signature) {
       this.signature = sig

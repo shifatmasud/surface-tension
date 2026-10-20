@@ -355,8 +355,6 @@ export function buildCta(portrait: boolean) {
     [-0.3, 0.335, 0.29, -9], [0.02, 0.37, 0.25, 6], [0.31, 0.325, 0.28, 8],
     [-0.375, -0.115, 0.24, 7], [0.375, -0.07, 0.24, -6], [-0.35, -0.225, 0.22, -8],   // STICKERS LANE: Notion clear of the CTA row
   ]
-  // slap order: round the frame, top-left first
-  const ORDER = [0, 1, 3, 5, 4, 2]
   let typeY = 0   // the headline's first baseline (tablet-local), set by layout()
   const lay: CtaLayout = { C: new THREE.Vector3(), D: 20, hw: 12, wv: 19, fov: 34, textZ: WALL_Z + 1.4, em: 1, crewZ: 6, crewY: 0, crewScale: 1, crewH: 1 }
 
@@ -387,6 +385,7 @@ export function buildCta(portrait: boolean) {
     ix?.relayout()   // STICKERS HOOK
     LOGOS.forEach((_, i) => aProg.setY(i, i === 1 || i === 4 ? 0.06 : 0)) // a lifted corner on two of them
     LOGOS.forEach((_, i) => aProg.setZ(i, i * 0.37))
+    LOGOS.forEach((_, i) => aProg.setX(i, 1)) // POLISH: on the wall from the start (no slap-in)
     aSt.needsUpdate = true; aProg.needsUpdate = true
     wallMat.uniforms.u_c.value.set(lay.C.x, lay.C.y); wallMat.uniforms.u_hw.value = hw
     dirty = false
@@ -398,9 +397,8 @@ export function buildCta(portrait: boolean) {
     group.visible = on
     if (!on) { ix?.update(time, a, on); return }   // STICKERS HOOK
     sU.u_cam.value.copy(cam); sU.u_time.value = time
-    // W19 (Shifat 18:14Z "no appear animation"): the stickers are already on the wall, pressed flat; no slap-in on scroll
-    for (let j = 0; j < N; j++) aProg.setX(ORDER[j], 1)
-    aProg.needsUpdate = true
+    // POLISH (Shifat 18:14Z "no appear animation"; perf cross-lane B): the stickers are already on the wall (slap
+    // progress fixed at 1 in layout()), so nothing slaps in on arrival and the attribute is no longer uploaded per frame
     ix?.update(time, a, on)   // STICKERS HOOK
     const showType = built
     type.visible = typeShadow.visible = showType

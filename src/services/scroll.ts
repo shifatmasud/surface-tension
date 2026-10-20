@@ -49,8 +49,16 @@ class ScrollService {
   /** true while easing toward target (wheel, keys, anchors, scrollTo) */
   isWheelScrolling = false
   isScrolling = false
-  /** false = reduced motion: the browser scrolls natively and we only read it */
+  /** false = reduced motion or a touch-first phone: the browser scrolls natively and we only read it */
   virtual = true
+  /** POLISH (eng #9): on a touch-first device (hover: none, pointer: coarse) the browser's own compositor scroll runs
+   *  the page (never blocked by a long main-thread task; the iOS URL bar collapses), with passive touch listeners only.
+   *  The scroll → progress mapping is the same (props.scroll = the page's scrollY, read once per frame in the clock);
+   *  designed glides (anchors, the header pills) still ease by writing the page scroll, and any touch takes over.
+   *  ?vscroll forces the virtual engine back on a phone (A/B). */
+  nativeTouch = false
+  private reduced = false
+  private touchPassive: boolean | null = null
   private stopped = true
   private started = false
   private inited = false
@@ -77,14 +85,20 @@ class ScrollService {
     if (this.inited) return
     this.inited = true
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
-    this.virtual = !mq.matches
-    mq.addEventListener?.('change', () => { this.virtual = !mq.matches; this.resetScroll(window.scrollY) })
+    const tq = window.matchMedia('(hover: none) and (pointer: coarse)')
+    const forceVirtual = /[?&]vscroll\b/.test(location.search)
+    const apply = () => {
+      this.reduced = mq.matches; this.nativeTouch = !forceVirtual && tq.matches
+      this.virtual = !this.reduced && !this.nativeTouch
+      this.bindTouch()
+    }
+    apply()
+    const onChange = () => { apply(); this.tween = null; this.resetScroll(window.scrollY) }
+    mq.addEventListener?.('change', onChange); tq.addEventListener?.('change', onChange)
     document.documentElement.classList.add('vscroll')
     if ('scrollRestoration' in history) history.scrollRestoration = 'manual'
     const np = { passive: false } as AddEventListenerOptions
     window.addEventListener('wheel', this.onWheel, np)
-    window.addEventListener('touchstart', this.onTouchStart, np)
-    window.addEventListener('touchmove', this.onTouchMove, np)
     window.addEventListener('touchend', this.onTouchEnd, { passive: true })
     window.addEventListener('touchcancel', this.onTouchEnd, { passive: true })
     window.addEventListener('keydown', this.onKey)
@@ -97,6 +111,16 @@ class ScrollService {
     this.measure(true)
     this.resetScroll(window.scrollY)
     this.stop()
+  }
+
+  /** touch listeners are non-passive only while the virtual engine needs preventDefault (POLISH, eng #9) */
+  private bindTouch() {
+    const passive = !this.virtual
+    if (this.touchPassive === passive) return
+    if (this.touchPassive !== null) { window.removeEventListener('touchstart', this.onTouchStart); window.removeEventListener('touchmove', this.onTouchMove) }
+    this.touchPassive = passive
+    window.addEventListener('touchstart', this.onTouchStart, { passive })
+    window.addEventListener('touchmove', this.onTouchMove, { passive })
   }
 
   stop() {
@@ -144,18 +168,11 @@ class ScrollService {
     const now = performance.now()
     this.muteUntil = now + 700; this.muteCap = now + 6000; this.muteDy = 1e9   // the mute holds until the gesture ends (see onWheel)
     this.wheelAcc = 0; this.keyTarget = null; this.dragAcc = 0
-    let veil = document.getElementById('wrap-veil')
-    if (!veil) {
-      veil = document.createElement('div'); veil.id = 'wrap-veil'; veil.setAttribute('aria-hidden', 'true')
-      veil.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:#fff;pointer-events:none;opacity:0'
-      document.body.appendChild(veil)
-    }
-    veil.style.transition = 'none'; veil.style.opacity = '1'
+    // POLISH (Shifat 18:47Z: the stone must never disappear at the wrap): no white veil any more. The veil hid the jump
+    // but it also hid the stone and then faded it back in (a disappear/appear). The footer and the hero are both on
+    // white, and the hero is pre-positioned (HeroStage), so the first frame after the jump is a normal hero frame.
+    document.getElementById('wrap-veil')?.remove()
     this.scrollTo(0, { immediate: true })
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (!veil) return
-      veil.style.transition = 'opacity .55s cubic-bezier(.2,.7,.2,1)'; veil.style.opacity = '0'
-    }))
     ;(document.querySelector('#hero, main, body') as HTMLElement | null)?.focus?.({ preventScroll: true } as any)
   }
   resetScroll(v: number) {
@@ -183,7 +200,7 @@ class ScrollService {
     this.wheelAcc += clamp(dy, -WHEEL_CLAMP, WHEEL_CLAMP)
   }
   private onTouchStart = (e: TouchEvent) => {
-    if (!this.virtual) return
+    if (!this.virtual) { if (this.nativeTouch) { this.tween = null; this.isWheelScrolling = false } return } // a finger takes over a glide
     if (e.touches.length > 1) { this.touchId = null; this.touchDown = false; return } // pinch: native zoom
     if ((window.visualViewport?.scale ?? 1) > 1.01) return // zoomed in (low vision): one finger pans the zoom natively
     const t = e.changedTouches[0]
@@ -289,8 +306,30 @@ class ScrollService {
     if (this.needsMeasure) { this.needsMeasure = false; this.measure() }
     const prev = this.scrollPixel
     if (!this.virtual) {
-      this.scrollPixel = this.targetScrollPixel = window.scrollY
-      this.tween = null
+      const y = window.scrollY
+      // native touch scroll: a designed glide (anchor, header pill) still eases, written to the page once per frame;
+      // the page moving under it (a finger, momentum) ends it and the page's own position wins
+      if (this.nativeTouch && !this.stopped && (this.tween || this.isWheelScrolling) && Math.abs(y - this.written) <= 1) {
+        let a = 0
+        if (this.tween) {
+          const tw = this.tween
+          tw.t = Math.min(1, tw.t + dt / tw.dur)
+          a = tw.from + (tw.to - tw.from) * tw.ease(tw.t) - this.scrollPixel
+          if (tw.t >= 1) { this.tween = null; tw.done?.() }
+        } else {
+          const f = this.targetScrollPixel - this.scrollPixel
+          a = f * (1 - Math.exp(-WHEEL_EASE * dt))
+          if (Math.abs(f) < MIN_PX) { a = f; this.isWheelScrolling = false }
+        }
+        this.scrollPixel = this.clampPx(this.scrollPixel + a)
+        if (Math.abs(this.scrollPixel - this.written) > 0.01) {
+          this.written = this.scrollPixel
+          window.scrollTo({ top: this.scrollPixel, left: 0, behavior: 'instant' as ScrollBehavior })
+        }
+      } else {
+        this.scrollPixel = this.targetScrollPixel = y
+        this.tween = null; this.isWheelScrolling = false
+      }
     } else {
       if (this.external !== null) {
         const y = this.external; this.external = null
@@ -386,7 +425,7 @@ class ScrollService {
       y = el.getBoundingClientRect().top + window.scrollY
     }
     y = this.clampPx(y + (opts.offset ?? 0))
-    if (!this.virtual || opts.immediate) {
+    if (this.reduced || opts.immediate || (!this.virtual && !this.nativeTouch)) {
       this.tween = null
       this.resetScroll(y)
       this.written = y
@@ -394,6 +433,7 @@ class ScrollService {
       opts.onComplete?.()
       return
     }
+    if (!this.virtual) { this.scrollPixel = window.scrollY; this.written = this.scrollPixel } // native touch: glide from where the page is
     if (opts.duration && opts.duration > 0) {
       this.velocityPixel = 0; this.history.length = 0; this.isWheelScrolling = false
       this.tween = { from: this.scrollPixel, to: y, t: 0, dur: opts.duration, ease: houseInOut, done: opts.onComplete } // house A→B move: eases in and out, never a hard start

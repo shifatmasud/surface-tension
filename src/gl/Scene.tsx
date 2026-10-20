@@ -115,8 +115,8 @@ function Renderer() {
     // PERF HOOK: once the hero is linked, one curtain-hidden frame runs every post pass this tier can use (clip
     // composite, god rays, trail, SMAA/FXAA), so none of them links at its first boundary mid-scroll
     const done = () => { if (++n === 2) { engine.warm = true; sys.chain.warmAll = true } }
-    taskManager.addAsync(() => warmCompile(gl, scene, camera, scene, rt).then(done))
-    taskManager.addAsync(() => warmCompile(gl, ufx.under, ufx.camera, ufx.under, rt).then(done))
+    taskManager.addAsync((r) => warmCompile(gl, scene, camera, scene, rt, r).then(done))
+    taskManager.addAsync((r) => warmCompile(gl, ufx.under, ufx.camera, ufx.under, rt, r).then(done))
     setTimeout(() => { engine.warm = true }, 8000) // never hold the loop forever (a driver that never reports)
     htmlRender.init(gl.domElement, ufx.camera, gl)
     engine.ready = true

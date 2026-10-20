@@ -99,6 +99,7 @@ uniform float u_curlScale;
 uniform float u_curlStrength;
 uniform vec3 u_dissipations; // velocity, weight1, weight2
 uniform vec2 u_scrollOffset;
+uniform float u_velSnap;   // POLISH: touch snaps the 8-bit velocity residue to rest (0 on desktop = unchanged)
 varying vec2 v_uv;
 #ifdef USE_NOISE
 ${PAINT_NOISE}
@@ -136,6 +137,7 @@ void main(){
   // 8-bit floor: every weight step is at least ~1/255 so the trail always reaches exactly 0 or 1
   change.zw = sign(change.zw) * max(vec2(0.004), abs(change.zw));
   data += change;
+  data.xy *= step(vec2(u_velSnap), abs(data.xy));               // POLISH: below the snap the residue is rest, not a push
 
   data.xy += 0.5;
   gl_FragColor = clamp(data, 0.0, 1.0);
@@ -179,6 +181,7 @@ export class ScreenPaint {
         u_pushStrength: { value: 25 }, u_curlScale: { value: 0.02 }, u_curlStrength: { value: 3 },
         u_dissipations: { value: new THREE.Vector3() },
         u_scrollOffset: { value: new THREE.Vector2() },
+        u_velSnap: { value: 0 },
       },
       depthTest: false, depthWrite: false, blending: THREE.NoBlending,
     }))
@@ -246,7 +249,7 @@ export class ScreenPaint {
     const ratio = props.look.paintOffsetRatio
     const scrollView = props.height > 0 ? props.scrollDelta / props.height : 0 // viewport fractions
     const offY = scrollView * ratio        // added to the -1..1 pointer as the reference does (one viewport = 1.0)
-    u.u_scrollOffset.value.set(0, scrollView * ratio)
+    u.u_scrollOffset.value.set(0, Math.abs(props.scrollDelta) > props.height * 0.5 ? 0 : scrollView * ratio)   // POLISH: a jump does not drag the field
 
     // pointer source: the mouse (input service), or the finger (own touch listeners) once a touch has been seen
     if (this.touchMoved) { this.touchMode = true; this.hasTouched = true }
@@ -263,34 +266,55 @@ export class ScreenPaint {
       isDown = input.isDown; wasDown = input.wasDown; moved = input.hadMoved; ever = input.everMoved
     }
     this.touchMoved = false; this.touchWasDown = this.touchDown
+    // POLISH (rv-visual #11): on touch the finger already moves WITH the page, so the scroll term double-counted it into
+    // a full-height stroke, and momentum scroll kept painting at the lifted finger: screen-crack seams that lingered.
+    // On touch the brush follows the finger only (no scroll term, paints only while held); desktop is unchanged.
+    // a JUMP (the loop wrap, a nav/deep-link jump: more than half a screen in one frame) is not a scroll: it never
+    // paints, on any device (the wrap used to draw a full-height seam over the hero)
+    const jump = Math.abs(props.scrollDelta) > props.height * 0.5
+    const scrollTerm = this.touchMode || jump ? 0 : props.scrollDelta
 
     // 2) radius from speed: px moved this frame, the scroll added to the pointer ×3 viewports (the reference adds
     // scrollViewDelta × viewportHeight × 3 to the y-down pixel position), so a scroll paints even with a still pointer
-    this.v2.copy(px); this.v2.y += props.scrollDelta * ratio * 3
+    this.v2.copy(px); this.v2.y += scrollTerm * ratio * 3
     let radius = fit(this.v2.distanceTo(prevPx), 0, this.radiusDistanceRange, this.minRadius, this.maxRadius)
     // 3) when it refuses to paint: still and not scrolling; on touch / needsMouseDown only while held two frames
     const touchRule = (this.needsMouseDown || browser.isMobile || this.touchMode) && (!isDown || !wasDown)
-    if (Math.abs(props.scrollDelta) === 0 && (!moved || !this.drawEnabled || touchRule)) radius = 0
+    if (Math.abs(scrollTerm) === 0 && (!moved || !this.drawEnabled || touchRule)) radius = 0
+    if (this.touchMode && touchRule) radius = 0
     if (!ever || !this.drawEnabled) radius = 0
     radius = (radius / props.height) * ph // CSS px → paint px
 
     // 4) the brush is a segment: from = last to (pointer in -1..1, y up, plus the scroll in viewport units)
     this.from.copy(this.to)
     const mx = ever ? (px.x / props.width) * 2 - 1 : 0
-    const my = (ever ? 1 - (px.y / props.height) * 2 : 0) + offY
+    const my = (ever ? 1 - (px.y / props.height) * 2 : 0) + (this.touchMode || jump ? 0 : offY)
     this.to.set(((mx + 1) * pw) / 2, ((my + 1) * ph) / 2, radius, 1)
     if (!this.started) { this.from.copy(this.to); this.started = true }
+    if (this.touchMode) {
+      // POLISH: cap the stroke length on touch (a flick or a new touch far from the last one never draws a long seam)
+      const dx = this.to.x - this.from.x, dy = this.to.y - this.from.y, len = Math.hypot(dx, dy), cap = ph * 0.12
+      if (len > cap) { const k = 1 - cap / len; this.from.x += dx * k; this.from.y += dy * k }
+    }
 
     // 5) leaky-integrated brush velocity
     this.v2.set(this.to.x - this.from.x, this.to.y - this.from.y).multiplyScalar(dt * 0.8)
+    if (this.touchMode && radius === 0) this.v2.set(0, 0)   // POLISH: a finger jump while not painting injects no push
     u.u_vel.value.multiplyScalar(this.accelerationDissipation).add(this.v2)
 
     // live tuning → uniforms
     u.u_pushStrength.value = this.pushStrength
     u.u_curlScale.value = this.curlScale
     u.u_curlStrength.value = this.curlStrength
-    const f = settings.PAINT_DT_SCALED ? dt * 60 : 1 // parity: per-frame constants (see checklist note)
+    const f = settings.PAINT_DT_SCALED || this.touchMode ? dt * 60 : 1 // parity: per-frame constants (see checklist note)
     u.u_dissipations.value.set(Math.pow(this.velocityDissipation, f), Math.pow(this.weight1Dissipation, f), Math.pow(this.weight2Dissipation, f))
+    if (this.touchMode) {
+      // POLISH: on touch the fades run on time (a slow phone frame no longer stretches the trail) with a half-life of
+      // at most 0.6 s, and the velocity residue the 8-bit step used to strand snaps to rest
+      const hl = Math.pow(0.5, dt / 0.6), d = u.u_dissipations.value
+      d.set(Math.min(d.x, hl), Math.min(d.y, hl), Math.min(d.z, hl))
+    }
+    u.u_velSnap.value = this.touchMode ? 3 / 255 : 0
     if (this.useNoise !== ('USE_NOISE' in this.material.defines)) {
       if (this.useNoise) this.material.defines.USE_NOISE = ''; else delete this.material.defines.USE_NOISE
       this.material.needsUpdate = true

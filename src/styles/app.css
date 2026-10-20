@@ -49,7 +49,7 @@ html[data-bg='dark'] .pill { background: rgba(30, 31, 34, .55);  color: #fff; }
 .pill .roll span + span { position: absolute; top: 100%; left: 0; }
 @media (hover: hover) { .pill:hover .roll span { transform: translateY(-100%); } }
 .wave { width: 22px; height: 14px; display: block; }
-.pill:focus-visible, a:focus-visible, button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: none; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 6px; background-color: var(--c-black) !important; color: var(--c-white) !important; }
+/* A11Y (eng #27): focus is one outline ring, never an inverted fill; see the A11Y block at the end of this file */
 
 /* menu */
 .menu-scrim { position: fixed; inset: 0; z-index: 48; background: rgba(10,10,11,.18); backdrop-filter: blur(2px); }
@@ -176,8 +176,7 @@ html.no-gl .poster { position: absolute; inset: 0; background-size: cover; backg
   background-image: repeating-linear-gradient(to bottom, rgba(0,0,0,.07) 0 1px, transparent 1px var(--u)); }
 .grid-debug > i { background: rgba(0,0,0,.05); }
 
-.skip-link { position: fixed; left: var(--pad-x); top: var(--s2); z-index: 10000; padding: 10px 16px; border-radius: 99px; background: var(--c-black); color: var(--c-white); font-size: var(--fs-small); text-decoration: none; transform: translateY(-200%); transition: transform var(--dur-ui) var(--ease); }
-.skip-link:focus { transform: none; }
+/* skip link: see the A11Y block at the end of this file */
 
 /* ---- Lab (north-star frame: centred reel = star, giant name bottom-left, small caption right) ---- */
 .lab { height: 280vh; }  /* SECTION CUT: the dive's work tail, 3 slides (was its own 560vh chapter of 5) */
@@ -199,7 +198,6 @@ html.slot-on .lab .card { width: clamp(240px, min(46vw, 92vh, (100vh - var(--lab
 .card__label { position: absolute; left: 0; right: 0; bottom: 0; display: flex; justify-content: space-between; padding: 14px 16px; font-size: var(--fs-small); color: #fff; letter-spacing: .01em; }
 .card__label--tex { position: absolute; width: 640px; height: 400px; padding: 18px 20px; display: flex; align-items: flex-end; justify-content: space-between; font: 400 15px/1 var(--font); color: #fff; background: transparent; }
 html.lab-gl .lab .card__dom { opacity: 0; }
-.card:focus-visible::after { content: ''; position: absolute; left: 0; right: 0; bottom: -14px; height: 2px; background: var(--c-white); }
 /* W19 (visual P0-1 'card goes black after close'): focus returns to the slide's card on close, and the global
    [tabindex]:focus-visible rule painted the whole card black (!important) over the GL reel; a card's focus is the white
    rule under it, never a fill */
@@ -342,3 +340,66 @@ html.slot-on :is(.hero__row, .dive__title, .dive__cap, .lab__foot, .systems__eye
 .overlay__link.ov-rise { display: inline-flex; }
 .overlay__line .ov-line { padding-bottom: .1em; margin-bottom: -.1em; }
 .overlay__line .ov-line > * { transform-origin: 0% 100%; }
+
+/* ── A11Y (a11y lane, eng #12 #27 #28 + the header menu button) ─────────────────────────────────────────────
+   Shifat's rules: no UI shadows, borders or gradients, so focus is ONE outline ring. It takes the element's own text
+   colour (ink on light frames, white on dark frames, white inside the menu panel), so it always reads against what is
+   behind it, and it never inverts or fills the control. */
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible, .pill:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; text-decoration: none; }
+a:focus:not(:focus-visible), button:focus:not(:focus-visible), [tabindex]:focus:not(:focus-visible) { outline: none; }
+/* a section or #main that takes focus programmatically (skip link, menu, deep link) shows no ring around the page */
+main:focus, section:focus, [tabindex='-1']:focus { outline: none; }
+/* lab cards (#12): announced as buttons; a 2 px ring 4 px off the card edge in the frame's ink (white on the dark dive) */
+.lab .card:focus-visible { outline: 2px solid var(--c-ink); outline-offset: 4px; }
+html[data-bg='dark'] .lab .card:focus-visible { outline-color: var(--c-white); }
+/* skip link (#28): off-screen until focused, then on screen at once (no transition), above the intro curtain,
+   the wrap veil and the menu */
+.skip-link { position: fixed; left: var(--pad-x); top: var(--s2); z-index: 2147483600; padding: 10px 16px; border-radius: 99px; background: var(--c-black); color: var(--c-white); font-size: var(--fs-small); text-decoration: none; }
+.skip-link:not(:focus) { clip-path: inset(50%); width: 1px; height: 1px; padding: 0; overflow: hidden; white-space: nowrap; }
+.skip-link:focus-visible { outline-color: var(--c-black); }
+/* header menu button: the same B/W pill; it stays above the open panel as its close (the header sits over the menu) */
+.pill--menu .pill__txt { line-height: 1; }
+/* Shifat 18:19Z (one CTA on the page): the header's sound and menu buttons are quiet controls, not CTA pills: no fill,
+   no blur, just the icon (and the word on wide screens) in the frame's ink; over the open menu panel they read white */
+.header .pill--quiet, html[data-bg='dark'] .header .pill--quiet { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; padding: 0 10px; }
+.header .pill--menu[aria-expanded='true'] { color: var(--c-white); }
+.menu { color: var(--c-white); }
+@media (max-width: 400px) { .pill--menu .pill__txt { display: none; } .pill--menu { padding: 0 12px; } }
+/* reduced-motion / no-GL page (#20): the project links beside the CTA; the GL page reaches them through the cards */
+.a11y-work { display: none; }
+html.no-gl .a11y-work { display: block; margin-top: var(--s4); font-size: var(--fs-small); }
+.a11y-work__label { margin: 0 0 var(--s1); color: var(--c-silver-2); }
+.a11y-work ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--s1) var(--s3); }
+.a11y-work a { color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+@media (hover: hover) { .a11y-work a:hover { text-decoration: underline; text-underline-offset: 4px; } }
+/* ── TYPE (Shifat 18:06Z: no orphan words, lines optically balanced, site-wide) ──────────────────────────────
+   headlines, eyebrows and the CTA balance their lines; subs, body and card text avoid a lone last word. The last
+   two words of DOM copy are also joined by a non-breaking space (dom/a11y/noOrphans.ts) for older Safari. */
+h1, h2, h3, .slot__title, .slot__eyebrow, .eyebrow, .hero__title, .dive__title, .systems__title, .contact__title, .lab__name, .overlay__title, .big-btn, .menu a { text-wrap: balance; }
+p, li, figcaption, .slot__body, .hero__sub, .dive__cap, .systems__lede, .systems__note, .lab__cap, .card__label, .overlay__blurb, .journey__beat, .site-footer__name { text-wrap: pretty; }
+/* ── TYPE SCALE + PHONE STACK (Shifat 18:09Z) ──────────────────────────────────────────────────────────────
+   one type scale, 56 / 20 / 12, Inter 400. Every overline/eyebrow is 12px. The text row lives in this file (W17 slot +
+   W19 text-block rule above); desktop (≥769) keeps it: flex row, space-between, align flex-end, gap 40px. On phones
+   and small tablets (≤768) the block stacks overline → headline → sub on ONE left edge (the page's --pad-x), left-
+   aligned, no centring or space-between left over; the CTA row joins the same edge. Layout only: timing and masks
+   are untouched. */
+:root { --fs-small: 12px; }
+.slot__eyebrow, .eyebrow, .systems__eyebrow { font-size: 12px; font-weight: 400; }
+@media (max-width: 768px) {
+  .slot__beat { flex-direction: column; align-items: flex-start; justify-content: flex-end; gap: 16px; }
+  .slot__eyebrow { left: 0; margin: 0 0 16px; text-align: left; }
+  .slot__title { font-size: 56px; text-align: left; margin: 0; align-self: flex-start; }
+  .slot__body { flex: 0 0 auto; margin: 0; font-size: 20px; max-width: 34ch; text-align: left; align-self: flex-start; }   /* the grid-era align-self: end pushed the sub to the right edge in the column */
+  html.cta-gl .contact .contact__row, .contact .contact__row { grid-column: 1 / -1; justify-self: start; text-align: left; }
+}
+
+/* W19 (Shifat 19:08Z "Scroll progress bar must have glowing success green color"; 19:09Z: a UI-success green, not the button's): --success with a soft glow.
+   An explicit exception to the no-shadow rule, for the progress bars only. No layout change (glow is paint only). */
+:root { --success: #22c55e; --c-success: var(--success); --c-success-glow-1: rgba(34, 197, 94, .6); --c-success-glow-2: rgba(34, 197, 94, .3); }
+.level { overflow: visible; }
+.level__fill { background: var(--c-success); border-radius: 2px; box-shadow: 0 0 8px var(--c-success-glow-1), 0 0 16px var(--c-success-glow-2); }
+.site-footer .overscroll__track { overflow: visible; }
+.site-footer .overscroll__fill { background: var(--c-success); box-shadow: 0 0 8px var(--c-success-glow-1), 0 0 16px var(--c-success-glow-2); }
+/* W19 (Shifat 19:09Z "No green button please"): the one CTA stays black/white; hover inverts it (no colour) */
+@media (hover: hover) { .contact .big-btn { transition: background-color var(--dur-ui) var(--ease), color var(--dur-ui) var(--ease), box-shadow var(--dur-ui) var(--ease); }
+  .contact .big-btn:hover { background: #000; color: #fff; box-shadow: inset 0 0 0 1px #fff; } .contact .big-btn:hover i { background: #fff; color: #000; } }

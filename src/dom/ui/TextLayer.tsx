@@ -6,6 +6,8 @@ import { props } from '../../state/props'
 import { settings, browser } from '../../services/settings'
 import { clamp } from '../../core/math'
 import { PROJECTS, PHRASES } from '../../content/site'
+import { SrHeadings } from '../a11y/SrHeadings'
+import { noOrphan, noOrphanLines } from '../a11y/noOrphans'
 import { dive } from '../../gl/stages/dive/diveState'
 import { ufx, textMaterial, type UfxItem } from '../../gl/ufx/ufx'
 import { rasterLine } from '../../gl/ufx/UfxText'
@@ -257,12 +259,14 @@ export function TextLayer() {
         {BEATS.map((b) => (
           <div key={b.id} className="slot__beat" data-beat={b.id}>
             <p className="slot__eyebrow" data-role="eyebrow">{b.eyebrow}</p>
-            <p className="slot__title" data-role="title">{b.title.map((t, i) => <span key={i}>{t}{i < b.title.length - 1 && <br />}</span>)}</p>
-            <p className="slot__body" data-role="body">{b.body}</p>
+            <p className="slot__title" data-role="title">{noOrphanLines(b.title).map((t, i, a) => <span key={i}>{t}{i < a.length - 1 && <br />}</span>)}</p>
+            <p className="slot__body" data-role="body">{noOrphan(b.body)}</p>
           </div>
         ))}
       </div>
       <p className="sr-only" aria-live="polite" ref={live} />
+      {/* A11Y (eng #19): sr-only heading copies of the beats, placed inside their sections (no visual change) */}
+      <SrHeadings />
     </div>
   )
 }

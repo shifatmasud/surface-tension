@@ -10,6 +10,8 @@ function colorize(g: THREE.BufferGeometry, c: THREE.Color) {
   g.setAttribute('color', new THREE.BufferAttribute(a, 3)); return g
 }
 const C = (h: string) => new THREE.Color(h)
+/** ENG #17 (PERF lane): toNonIndexed() on an already non-indexed geometry (Icosahedron/Polyhedron) logs a warning on every load */
+const ni = (g: THREE.BufferGeometry) => (g.index ? g.toNonIndexed() : g)
 
 /** cheap 3D value noise (deterministic) for organic canopy displacement */
 function vnoise(x: number, y: number, z: number) {
@@ -48,10 +50,10 @@ function softPart(g: THREE.BufferGeometry, centre: THREE.Vector3, sy: number, k:
     col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b
   }
   g.setAttribute('color', new THREE.BufferAttribute(col, 3))
-  return g.toNonIndexed()
+  return ni(g)
 }
 function trunk(h: number, r0: number, r1: number) {
-  const g = new THREE.CylinderGeometry(r1, r0, h, 7, 1, true).translate(0, h / 2, 0).toNonIndexed()
+  const g = ni(new THREE.CylinderGeometry(r1, r0, h, 7, 1, true).translate(0, h / 2, 0))
   g.deleteAttribute('uv'); g.computeVertexNormals()
   return colorize(g, C('#4a3324'))
 }
@@ -64,7 +66,7 @@ function pineGeometry(low: boolean) {
     const f = t / (tiers - 1), R = THREE.MathUtils.lerp(1.3, 0.42, f), h = THREE.MathUtils.lerp(1.75, 1.2, f), y = 0.95 + t * 0.6
     const prof = [new THREE.Vector2(0.001, h), new THREE.Vector2(R * 0.35, h * 0.72), new THREE.Vector2(R * 0.7, h * 0.36), new THREE.Vector2(R, 0.02),
       new THREE.Vector2(R * 0.92, -0.06), new THREE.Vector2(R * 0.45, 0.12), new THREE.Vector2(0.001, 0.2)]
-    const g = new THREE.LatheGeometry(prof, seg).toNonIndexed()
+    const g = ni(new THREE.LatheGeometry(prof, seg))
     const p = g.attributes.position as THREE.BufferAttribute, ph = t * 1.7
     for (let i = 0; i < p.count; i++) {
       const x = p.getX(i), z = p.getZ(i), r = Math.hypot(x, z), a = Math.atan2(z, x)
@@ -85,7 +87,7 @@ function roundGeometry(low: boolean) {
     [0.45, 3.35, -0.3, 0.62], [-0.45, 3.25, 0.35, 0.6], [0, 1.95, 0, 0.7],
   ]
   ;(low ? blobs.slice(0, 5) : blobs).forEach(([x, y, z, r], i) => {
-    const g = new THREE.IcosahedronGeometry(r, d).translate(x, y, z).toNonIndexed()
+    const g = ni(new THREE.IcosahedronGeometry(r, d).translate(x, y, z))
     parts.push(softPart(g, cen, 0.85, 0.68, C('#2a6a2e'), C('#79c25a'), 1.7, 3.9, 0.16, i * 3.1))
   })
   const g = mergeGeometries(parts)!; return g
@@ -102,7 +104,7 @@ export function buildForest(low: boolean, material: THREE.Material, groundMateri
   const group = new THREE.Group()
   // ground
   const seg = low ? 48 : 80
-  const ground = new THREE.PlaneGeometry(360, 360, seg, seg).rotateX(-Math.PI / 2).toNonIndexed()
+  const ground = ni(new THREE.PlaneGeometry(360, 360, seg, seg).rotateX(-Math.PI / 2))
   const pos = ground.attributes.position as THREE.BufferAttribute
   const col = new Float32Array(pos.count * 3), r = rng(7)
   const g0 = C('#2a8040'), g1 = C('#4aa34e'), g2 = C('#1d5a38'), tmp = new THREE.Color()
@@ -121,11 +123,9 @@ export function buildForest(low: boolean, material: THREE.Material, groundMateri
   // trees: composed in depth layers, not scattered — clusters framing an open clearing, a backlit sky gap behind
   const rand = rng(42)
   type Cl = [number, number, number, number, number, number] // cx, cz, radius, count, minScale, maxScale
-  const clusters: Cl[] = low ? [
-    [-8.5, 2.5, 1.6, 2, 1.9, 2.3], [9.5, 0.5, 1.2, 1, 1.6, 1.8],
-    [-13, -12, 3.5, 4, 1.3, 1.7], [11, -9, 3, 3, 1.2, 1.6], [5, -24, 3, 3, 1.1, 1.4],
-    [-30, -40, 7, 6, 1.4, 1.9], [26, -44, 8, 6, 1.4, 1.9], [-4, -62, 9, 5, 1.6, 2.0],
-  ] : [
+  // PERF lane (eng #5): one tree layout on every tier (phones used to get fewer clusters; the foliage helper's trees
+  // replace these meshes, but the spots still seed the first shadow pass)
+  const clusters: Cl[] = [
     [-8.5, 2.5, 1.8, 3, 1.8, 2.4], [9.5, 0.5, 1.4, 2, 1.5, 1.9],
     [-13, -12, 4, 6, 1.2, 1.7], [11, -9, 3.5, 5, 1.1, 1.6], [5, -24, 3.5, 4, 1.0, 1.4], [-6, -30, 3, 3, 1.0, 1.3],
     [-30, -40, 8, 10, 1.3, 1.9], [26, -44, 9, 10, 1.3, 1.9], [-4, -62, 10, 9, 1.5, 2.0], [50, -70, 12, 8, 1.6, 2.2], [-55, -66, 12, 8, 1.6, 2.2],

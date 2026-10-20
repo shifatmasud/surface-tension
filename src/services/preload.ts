@@ -55,15 +55,32 @@ export const preload = {
  * (linear output, no tone-mapping) and nothing recompiles on first use. Resolves when the driver reports every
  * program linked (at once without KHR_parallel_shader_compile), or after 6 s at the latest.
  */
-export function warmCompile(gl: THREE.WebGLRenderer, root: THREE.Object3D, camera: THREE.Camera, scene: THREE.Scene, target: THREE.WebGLRenderTarget | null): Promise<void> {
+export function warmCompile(gl: THREE.WebGLRenderer, root: THREE.Object3D, camera: THREE.Camera, scene: THREE.Scene, target: THREE.WebGLRenderTarget | null, report?: (f: number) => void): Promise<void> {
   const prev = gl.getRenderTarget()
+  const before = new Set(gl.info.programs ?? [])
   let p: Promise<unknown>
   try {
     gl.setRenderTarget(target)
     p = (gl as any).compileAsync ? (gl as any).compileAsync(root, camera, scene) : Promise.resolve(gl.compile(root, camera, scene))
   } catch (e) { p = Promise.resolve(); console.warn('[preload] warm', e) }
   finally { gl.setRenderTarget(prev) }
-  return Promise.race([p.then(() => undefined, () => undefined), new Promise<void>((r) => setTimeout(r, 6000))])
+  // DIAG: without KHR_parallel_shader_compile (Chrome on Windows/ANGLE-D3D11, many Androids) compileAsync resolves at
+  // once and every link is paid by the FIRST real frame instead: measured on live at 1440 the counter read 100 % of
+  // the GPU work at 1.3 s, then frames of 1.5 s and 4.8 s froze it at 28 and it jumped to 98. Here each new program's
+  // link status is read one per frame (the call that blocks), counted as progress, so the stall is spread and shown.
+  const linkEach = () => new Promise<void>((resolve) => {
+    if (gl.extensions.has('KHR_parallel_shader_compile')) { resolve(); return }
+    const todo = (gl.info.programs ?? []).filter((q) => !before.has(q))
+    let i = 0
+    const step = () => {
+      if (i >= todo.length) { resolve(); return }
+      try { (todo[i] as any).getUniforms() } catch (e) { console.warn('[preload] link', e) }
+      i++; report?.(i / todo.length)
+      requestAnimationFrame(step)
+    }
+    requestAnimationFrame(step)
+  })
+  return Promise.race([p.then(linkEach, linkEach), new Promise<void>((r) => setTimeout(r, 10000))])
 }
 ;(window as any).__preload = preload
 

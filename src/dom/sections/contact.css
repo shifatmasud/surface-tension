@@ -12,9 +12,6 @@ html.cta-gl .contact__row { grid-column: 1 / -1; justify-self: center; }
 .contact__cta { display: flex; flex-direction: column; gap: 14px; align-items: stretch; width: clamp(280px, 24vw, 420px); }
 .contact .big-btn { background: #fff; color: #000; }
 .contact .big-btn i { background: #000; color: #fff; }
-.contact .form input { background: #161618; color: #fff; }
-.contact .form input::placeholder { color: #a9adb3; }
-.contact .pill { background: #fff; color: #000; }
 html.no-gl .contact { height: auto; min-height: 100vh; background: #000; }
 html.no-gl .contact__inner { position: relative; height: auto; min-height: 100vh; }
 @media (min-width: 1200px) and (min-aspect-ratio: 13/10) {
@@ -29,8 +26,9 @@ html.no-gl .contact__inner { position: relative; height: auto; min-height: 100vh
 @media (max-width: 812px) { .contact__title { font-size: clamp(64px, 19vw, 132px); } }
 
 /* sticky footer: the CTA (canvas + DOM) slides up over it like a curtain; it never moves */
-.footer-spacer { height: calc(var(--footer-h) + 40vh); }  /* the reveal, then the back-to-the-surface bar fills */
-:root { --footer-h: 100vh; }
+.footer-spacer { height: calc(var(--footer-h) + 4px); }  /* W19: the bar fills during the reveal itself (Contact.tsx), so no extra 40vh */  /* the reveal, then the back-to-the-surface bar fills */
+:root { --footer-h: 50vh; }   /* W19 (Shifat 19:06Z): half the viewport, not full */
+@media (max-width: 760px) { :root { --footer-h: 50svh; } .site-footer { padding-top: var(--s5, 32px); } .site-footer__top { row-gap: var(--s3, 16px); } }
 .site-footer { position: fixed; left: 0; right: 0; bottom: 0; height: var(--footer-h); z-index: -1; background: var(--c-paper); color: var(--c-ink);
   display: flex; flex-direction: column; justify-content: space-between; padding: calc(var(--s7) * 0.7) var(--pad-x) var(--pad-y); font-size: var(--fs-small); }
 .site-footer .overscroll__bar { display: grid; gap: var(--s2); width: min(100%, 520px); color: var(--c-ink); }
@@ -50,7 +48,7 @@ html:not(.is-lifted) .site-footer { visibility: hidden; }
 .site-footer__time { grid-column: 10 / -1; display: grid; gap: 6px; font-size: var(--fs-body); }
 .site-footer__time > span:first-child { font-size: var(--fs-small); color: var(--c-silver-3); }
 .site-footer__bottom { display: flex; justify-content: space-between; align-items: center; gap: var(--s3); color: var(--c-silver-3); }
-.site-footer__top-btn { font: inherit; color: var(--c-ink); background: none; border: 0; padding: 8px 0; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.site-footer__top-link { color: var(--c-ink); text-decoration: none; padding: 8px 0; display: inline-flex; align-items: center; gap: 8px; }
 @media (max-width: 812px) {
   .site-footer { padding-top: var(--s4); }
   .site-footer__name, .site-footer__links, .site-footer__time { grid-column: 1 / -1; }

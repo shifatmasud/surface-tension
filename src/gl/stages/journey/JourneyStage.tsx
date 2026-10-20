@@ -12,7 +12,7 @@ import { journey } from './journeyState'
 import { Crewmate, CREW_HEIGHT, CREW_CENTER_Y, crewMaterials } from './crewmate'
 import { makeEnvs } from './env'
 import { buildForest, buildShadows, longShadowGeometry, longShadowMaterial } from './forest'
-import { buildGrass, buildSunFan, buildMist, buildMotes } from './forestFx'
+import { buildSunFan, buildMist, buildMotes } from './forestFx'
 import { buildFoliage } from './foliage' // FOLIAGE HOOK (foliage helper): fluffy grass + trees
 import { buildFireflies, buildCanopy } from './nightFx'
 import { buildTunnel } from './tunnel'
@@ -311,11 +311,15 @@ export function JourneyStage(): JSX.Element {
     }
 
     // ---- render the inner world into the screen texture (offscreen only; the main frame is the post chain's)
-    const prev = gl.getRenderTarget()
-    gl.setRenderTarget(S.rt)
-    gl.clear()
-    gl.render(S.inner, S.icam)
-    gl.setRenderTarget(prev)
+    // POLISH (perf cross-lane A): once the CTA holds (journey.cta = 1) the camera rests on the wall, past the tablet: the
+    // screen and its shards are out of frame, so the inner world (forest + 100k blades) is not drawn there
+    if (journey.cta < 0.999) {
+      const prev = gl.getRenderTarget()
+      gl.setRenderTarget(S.rt)
+      gl.clear()
+      gl.render(S.inner, S.icam)
+      gl.setRenderTarget(prev)
+    }
   }, group)
 
   return (
@@ -361,7 +365,7 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   let seed = 3; const r = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
   const MWN = new THREE.Vector3(0.55, 0.83, 0).normalize() // the band's pole: it crosses the space shots on a diagonal
   const mwA = new THREE.Vector3(0, 0, -1), mwB = new THREE.Vector3().crossVectors(MWN, mwA).normalize()
-  const N = low ? 2200 : 6500
+  const N = 6500 // PERF HOOK (eng #5): one star count on every tier; phones pay in point size (starPr), not in stars
   const sp = new Float32Array(N * 3), ss_ = new Float32Array(N), sc = new Float32Array(N * 3)
   const temp = [new THREE.Color('#9fbfff'), new THREE.Color('#cadaff'), new THREE.Color('#f4f6ff'), new THREE.Color('#fff4e3'), new THREE.Color('#ffd9a8'), new THREE.Color('#ffb98a')]
   const tw = [0.08, 0.2, 0.36, 0.2, 0.11, 0.05]
@@ -388,7 +392,7 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   const starMat = starMaterial(starPr)
   const stars = new THREE.Points(sg, starMat); stars.frustumCulled = false; stars.renderOrder = -9
   // the bright few, placed in the part of the sky the space shots look at (behind and around the crewmate, not on it)
-  const GN = low ? 7 : 12
+  const GN = 12 // PERF HOOK (eng #5): the same bright stars on every tier
   const gp = new Float32Array(GN * 3), gs = new Float32Array(GN), gc = new Float32Array(GN * 3), ga = new Float32Array(GN)
   for (let i = 0; i < GN; i++) {
     const az = -Math.PI / 2 + (r() - 0.5) * 2.6, el = (r() - 0.35) * 1.0
@@ -473,7 +477,7 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   const shardMat = shatterMaterial(rt.texture)
   const shards = new THREE.Mesh(new THREE.BufferGeometry(), shardMat)
   shards.position.z = SCREEN_Z + 0.002; shards.frustumCulled = false; shards.visible = false
-  const glints = buildGlints(tier === 'low' ? 160 : tier === 'mid' ? 320 : 520, Math.min(props.dpr, 2))
+  const glints = buildGlints(320, Math.min(props.dpr, 2) * (tier === 'low' ? 0.8 : 1)) // PERF HOOK (eng #5): one glint count; phones get smaller sprites
   glints.points.visible = false
   // the room behind the device: a graphite → deep-blue studio wash that melts into the page colour at its edges
   const backdropMat = backdropMaterial()

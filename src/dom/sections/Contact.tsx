@@ -7,13 +7,27 @@ import { visuals } from '../../gl/systems/visuals'
 import { props } from '../../state/props'
 import { clamp } from '../../core/math'
 import { SITE } from '../../content/site'
-import { ArrowUpRight, GithubLogo, XLogo, PaperPlaneTilt, ArrowUp } from '@phosphor-icons/react'
+import { ArrowUpRight, GithubLogo, XLogo, ArrowUp } from '@phosphor-icons/react'
 import { scroll } from '../../services/scroll'
 import { audio } from '../../services/audio'
 import { settings } from '../../services/settings'
 import { journey } from '../../gl/stages/journey/journeyState'
 import './contact.css'
 import { Logo } from '../../assets/logo/Logo'
+import { ProjectLinks } from '../a11y/ProjectLinks'
+import { noOrphan } from '../a11y/noOrphans'
+
+/** W19: the fixed footer's height (50vh / 50svh since 19:06Z), cached by a ResizeObserver so the frame loop reads no layout */
+let footH = 0
+let footObs: ResizeObserver | null = null
+function footerH(vh: number) {
+  if (!footObs && typeof ResizeObserver !== 'undefined') {
+    const el = document.querySelector('.site-footer') as HTMLElement | null
+    if (el) { footH = el.offsetHeight; footObs = new ResizeObserver(() => { footH = el.offsetHeight }); footObs.observe(el) }
+  }
+  return footH > 0 ? footH : vh
+}
+
 
 function DhakaClock() {
   const [t, setT] = useState([0, 0, 0])
@@ -35,7 +49,6 @@ function DhakaClock() {
 export function Contact() {
   const ref = useRef<HTMLElement>(null)
   const l1 = useRef<HTMLSpanElement>(null), l2 = useRef<HTMLSpanElement>(null)
-  const [msg, setMsg] = useState('')
   useSection(ref, (range) => {
     // same camera as the journey (one continuous scene); its own calm look: no bloom on the white type, no vignette
     const st = visuals.register('contact', () => journey.pose, {
@@ -60,22 +73,19 @@ export function Contact() {
         props.resurface = clamp(range.progress)
         // sticky footer: once the section's bottom passes the bottom of the screen, the whole scene (canvas + DOM)
         // travels up with the scroll and uncovers the fixed footer beneath
-        const k0 = Math.max(0, vh - (top + range.height)), k = Math.round(Math.min(k0, vh + 2))
+        // W19 (Shifat 19:06Z footer at half height): the footer's own height, not a full viewport
+        const fh = footerH(vh)
+        const k0 = Math.max(0, vh - (top + range.height)), k = Math.round(Math.min(k0, fh + 2))
         if (k !== lastK && canvasEl) { lastK = k; canvasEl.style.transform = k > 0 ? `translate3d(0, ${-k}px, 0)` : '' }
         // once the footer is fully uncovered, keep scrolling: the flat bar fills and floats you back to the surface
-        const f = clamp((k0 - vh) / (vh * 0.4))
+        // W19: the bar fills over the second half of the footer's reveal and wraps as it lands (no empty band above a half-height footer)
+        const f = clamp((k0 - 0.45 * fh) / (0.5 * fh))
         props.overscroll = f
         footerBar.el?.style.setProperty('--f', f.toFixed(3))
         if (f > 0.985 && !fired) { fired = true; audio.swell(false); scroll.wrapToTop(); setTimeout(() => (fired = false), 900) }
       },
     }
   })
-  const send = (e: React.FormEvent) => {
-    e.preventDefault()
-    const text = encodeURIComponent(msg || 'Hi Shifat!')
-    if (SITE.email) location.href = `mailto:${SITE.email}?subject=Hello%20from%20your%20portfolio&body=${text}`
-    else window.open(`${SITE.x}`, '_blank', 'noopener')
-  }
   return (
     <>
       <section id="contact" className="section contact" ref={ref} aria-labelledby="contact-title">
@@ -87,11 +97,8 @@ export function Contact() {
                 <a className="big-btn" href={SITE.email ? `mailto:${SITE.email}` : SITE.x} target={SITE.email ? undefined : '_blank'} rel="noreferrer" data-cursor onMouseEnter={() => audio.tick()}>
                   {SITE.email ? 'Write to me' : 'Say hi on X'} <i><ArrowUpRight size={20} weight="bold" /></i>
                 </a>
-                <form className="form" onSubmit={send} data-no-drop>
-                  <label className="sr-only" htmlFor="msg">Drop me a line</label>
-                  <input id="msg" placeholder="Drop me a line…" value={msg} onChange={(e) => setMsg(e.target.value)} />
-                  <button className="pill" type="submit" aria-label="Send"><PaperPlaneTilt size={16} weight="bold" /></button>
-                </form>
+                {/* POLISH (Shifat 18:19Z/18:20Z "only one clean CTA button"): the message form and its send pill are gone */}
+                <ProjectLinks />
               </div>
             </div>
           </div>
@@ -109,17 +116,18 @@ export function Footer() {
   return createPortal(
     <footer className="site-footer" aria-label="Footer">
       <div className="site-footer__top">
-        <p className="site-footer__name"><span className="site-footer__lockup" aria-label={SITE.name}><span className="site-footer__mark" aria-hidden="true"><Logo size="100%" /></span><span aria-hidden="true">Shifat</span></span><br /><span>{SITE.role}, {SITE.city}.</span></p>
+        <p className="site-footer__name"><span className="site-footer__lockup" role="img" aria-label={SITE.name}><span className="site-footer__mark" aria-hidden="true"><Logo size="100%" /></span><span aria-hidden="true">Shifat</span></span><br /><span>{SITE.role}, {SITE.city}.</span></p>
         <nav className="site-footer__links" aria-label="Elsewhere">
           <a href={SITE.github} target="_blank" rel="noreferrer" data-cursor><GithubLogo size={16} /> GitHub</a>
           <a href={SITE.x} target="_blank" rel="noreferrer" data-cursor><XLogo size={16} /> X / Twitter</a>
         </nav>
         <div className="site-footer__time"><span>Local time, {SITE.city}</span><DhakaClock /></div>
       </div>
-      <div className="overscroll__bar" aria-hidden="true"><p className="overscroll__label">Keep scrolling — back to the surface</p><div className="overscroll__track"><div className="overscroll__fill" ref={(e) => { footerBar.el = e }} /></div></div>
+      <div className="overscroll__bar" aria-hidden="true"><p className="overscroll__label">{noOrphan('Keep scrolling — back to the surface')}</p><div className="overscroll__track"><div className="overscroll__fill" ref={(e) => { footerBar.el = e }} /></div></div>
       <div className="site-footer__bottom">
         <span>© <Odometer value={new Date().getFullYear()} digits={4} /> {SITE.name}. Surface Tension, portfolio prototype.</span>
-        <button className="site-footer__top-btn" type="button" data-cursor onClick={() => { audio.swell(false); scroll.scrollTo(0, { duration: 3.2 }) }}>Back to the surface <ArrowUp size={14} weight="bold" /></button>
+        {/* POLISH (one CTA button): a plain text link, not a button */}
+        <a className="site-footer__top-link" href="#hero" data-cursor onClick={(e) => { e.preventDefault(); audio.swell(false); scroll.scrollTo(0, { duration: 3.2 }) }}>Back to the surface <ArrowUp size={14} weight="bold" /></a>
       </div>
     </footer>, document.body)
 }

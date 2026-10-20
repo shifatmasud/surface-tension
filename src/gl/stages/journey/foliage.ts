@@ -9,7 +9,8 @@ import { grassVert, grassFrag, floorVert, floorFrag, treeVert, treeFrag } from '
  *
  *  - grass: dense instanced blades grown in tufts (one draw), each tuft a soft dome; wind gusts roll across the
  *    field, tips transmit the low sun, the turf is darker at the roots, and the blades part around the crewmate's
- *    feet. LOD by tier (~100k / 45k / 8k), far blades widen and sink into the floor before the field ends.
+ *    feet. Same 100k blades on every tier, cut into 12 frustum-culled chunks with a 3-step distance LOD (PERF lane,
+ *    eng #10); far blades widen and sink into the floor before the field ends.
  *  - meadow floor: the ground re-shaded to the turf's own colours, so there are no dark gaps between blades and the
  *    far meadow reads as grass seen from a grazing angle.
  *  - trees: fewer, better, composed to frame the crewmate (a clear sky gap behind it). Each crown is a cluster of
@@ -58,52 +59,113 @@ function buildFluffyGrass(o: FoliageOptions, U: U) {
   const segs = tier === 'high' ? 5 : tier === 'mid' ? 3 : 2
   const range = 30
   // the blade: a tapered strip with a rounded tip (x across -0.5..0.5, y 0..1)
-  const v: number[] = []
   const wAt = (y: number) => Math.pow(1 - y, 0.75) * (0.9 + 0.1 * Math.sin(y * 3))
-  for (let i = 0; i < segs; i++) {
-    const y0 = i / segs, y1 = (i + 1) / segs, w0 = wAt(y0) * 0.5, w1 = wAt(y1) * 0.5
-    if (i < segs - 1) v.push(-w0, y0, 0, w0, y0, 0, w1, y1, 0, -w0, y0, 0, w1, y1, 0, -w1, y1, 0)
-    else v.push(-w0, y0, 0, w0, y0, 0, 0, 1, 0)
+  const blade = (n: number) => {
+    const v: number[] = []
+    for (let i = 0; i < n; i++) {
+      const y0 = i / n, y1 = (i + 1) / n, w0 = wAt(y0) * 0.5, w1 = wAt(y1) * 0.5
+      if (i < n - 1) v.push(-w0, y0, 0, w0, y0, 0, w1, y1, 0, -w0, y0, 0, w1, y1, 0, -w1, y1, 0)
+      else v.push(-w0, y0, 0, w0, y0, 0, 0, 1, 0)
+    }
+    return v
   }
-  const g = new THREE.InstancedBufferGeometry()
-  g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3))
+  // ENG #10 (PERF lane): distance LOD without changing the count. One vertex buffer holds the blade at three
+  // resolutions back to back (tier segs | about half | a single triangle); each chunk draws the sub-range its
+  // distance asks for (drawRange start/count on an instanced draw), so far blades cost 3 verts instead of 9–27
+  const lodSegs = [segs, Math.max(1, Math.ceil(segs / 2)), 1]
+  const lodV = lodSegs.map(blade)
+  const lodRange: [number, number][] = []
+  { let st = 0; for (const lv of lodV) { lodRange.push([st, lv.length / 3]); st += lv.length / 3 } }
+  const posAttr = new THREE.Float32BufferAttribute(lodV.flat(), 3)
   const off = new Float32Array(count * 4), prm = new Float32Array(count * 4), clump = new Float32Array(count * 4)
+  const band = new Uint8Array(count)
   const r = rng(1311)
   // the landing camera sits around (-0.6, 1, 7.4) looking down -z at the clearing: fill that wedge, denser near
   const camX = -0.6, camZ = 7.6, spread = o.portrait ? 0.36 : 0.72
   const widthScale = 1.15 // PERF HOOK: one blade width for every tier (the count no longer differs)
+  // ENG #10: spatial chunks (by tuft, so a tuft never splits): 4 depth bands x 3 columns of the wedge. Each chunk is
+  // its own draw with a real bounding sphere, so three's frustum test drops the ones off screen (phones' narrow
+  // portrait frame, the descent shot, the close crewmate shots), and the band edges line up with the LOD steps
+  const BANDS = [5, 10, 17, Infinity], COLS = 3
   let i = 0
   while (i < count) {
     // one tuft (clump) of blades
     const d = 0.6 + Math.pow(r(), 1.9) * range
     const half = 1.0 + d * spread
-    const cx = camX + (r() * 2 - 1) * half, cz = camZ - d
+    const u = r() * 2 - 1
+    const cx = camX + u * half, cz = camZ - d
     const cr = (0.1 + r() * 0.14) * (1 + d * 0.02) * Math.sqrt(widthScale)
     const n = 10 + Math.floor(r() * 14)
     const tint = r()
     const nearCrew = THREE.MathUtils.smoothstep(Math.hypot(cx, cz - 0.6), 0.5, 3.2) // shorter turf at the feet
     const edge = 1 - THREE.MathUtils.smoothstep(-cz, 16, 24) * 0.35
     const hTuft = (0.27 + r() * 0.2) * (0.55 + 0.45 * nearCrew) * edge * (0.85 + 0.3 * THREE.MathUtils.smoothstep(d, 2, 18))
+    let bi = 0; while (d >= BANDS[bi]) bi++
+    const chunk = bi * COLS + Math.min(COLS - 1, Math.floor((u + 1) * 0.5 * COLS))
     for (let k = 0; k < n && i < count; k++, i++) {
       const a = r() * Math.PI * 2, rr = Math.sqrt(r()) * cr
       const x = cx + Math.cos(a) * rr, z = cz + Math.sin(a) * rr
       off.set([x, groundHeight(x, z) - 0.02, z, r()], i * 4)
       prm.set([hTuft * (0.65 + r() * 0.55), (0.024 + r() * 0.02) * widthScale, r() * Math.PI, 0.45 + r() * 0.45], i * 4)
       clump.set([cx, cz, cr, tint], i * 4)
+      band[i] = chunk
     }
   }
-  g.setAttribute('aOff', new THREE.InstancedBufferAttribute(off, 4))
-  g.setAttribute('aPrm', new THREE.InstancedBufferAttribute(prm, 4))
-  g.setAttribute('aClump', new THREE.InstancedBufferAttribute(clump, 4))
-  g.instanceCount = count
+  // sort the blades by chunk (counting sort, stable) into one buffer per attribute; each chunk views its slice
+  const NC = BANDS.length * COLS, cnt = new Int32Array(NC), start = new Int32Array(NC + 1)
+  for (let b = 0; b < count; b++) cnt[band[b]]++
+  for (let c = 0; c < NC; c++) start[c + 1] = start[c] + cnt[c]
+  const fill = start.slice(0, NC)
+  const sOff = new Float32Array(count * 4), sPrm = new Float32Array(count * 4), sClump = new Float32Array(count * 4)
+  for (let b = 0; b < count; b++) {
+    const t = fill[band[b]]++
+    sOff.set(off.subarray(b * 4, b * 4 + 4), t * 4); sPrm.set(prm.subarray(b * 4, b * 4 + 4), t * 4); sClump.set(clump.subarray(b * 4, b * 4 + 4), t * 4)
+  }
   const mat = new THREE.ShaderMaterial({
     side: THREE.DoubleSide, fog: true,
     uniforms: { ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), ...U, u_fadeFar: { value: range }, u_widen: { value: 0.05 }, u_fieldO: { value: new THREE.Vector2(camX, camZ) } },
     vertexShader: grassVert, fragmentShader: grassFrag,
   })
-  const mesh = new THREE.Mesh(g, mat)
-  mesh.frustumCulled = false
+  // LOD by the camera's distance to the chunk's nearest point: full blade within ~10 m (a blade there is still tens of
+  // px tall), the half blade to ~17 m, one triangle beyond (a few px tall, and the shader sinks it by 15–30 m anyway)
+  const LOD1 = 9, LOD2 = 16 // a hair inside the band edges (5 / 10 / 17 m), so the landing view steps exactly by band
+  const mesh = new THREE.Group()
   mesh.name = 'foliage-grass'
+  const lodStats = [0, 0, 0]
+  const box = new THREE.Box3(), cv = new THREE.Vector3(), cam = new THREE.Vector3(), inv = new THREE.Matrix4()
+  for (let c = 0; c < NC; c++) {
+    const a0 = start[c], a1 = start[c + 1]
+    if (a1 <= a0) continue
+    const g = new THREE.InstancedBufferGeometry()
+    g.setAttribute('position', posAttr)
+    g.setAttribute('aOff', new THREE.InstancedBufferAttribute(sOff.subarray(a0 * 4, a1 * 4), 4))
+    g.setAttribute('aPrm', new THREE.InstancedBufferAttribute(sPrm.subarray(a0 * 4, a1 * 4), 4))
+    g.setAttribute('aClump', new THREE.InstancedBufferAttribute(sClump.subarray(a0 * 4, a1 * 4), 4))
+    g.instanceCount = a1 - a0
+    // a real bounding sphere from the roots, grown by the tallest blade plus its bend (the shader only ever shortens)
+    box.makeEmpty()
+    let hMax = 0
+    for (let b = a0; b < a1; b++) { box.expandByPoint(cv.set(sOff[b * 4], sOff[b * 4 + 1], sOff[b * 4 + 2])); hMax = Math.max(hMax, sPrm[b * 4]) }
+    const roots = box.clone()
+    box.expandByVector(cv.set(hMax * 1.3 + 0.2, hMax * 1.3 + 0.2, hMax * 1.3 + 0.2))
+    g.boundingBox = box.clone()
+    g.boundingSphere = box.getBoundingSphere(new THREE.Sphere())
+    g.setDrawRange(lodRange[0][0], lodRange[0][1])
+    const m = new THREE.Mesh(g, mat)
+    m.frustumCulled = true
+    m.name = 'foliage-grass-' + c
+    m.onBeforeRender = (_r, _s, camera) => {
+      // the camera in the field's own space, against the box of the chunk's roots (a sphere around a wide far chunk
+      // reaches far too close to the lens and kept the whole field at full detail)
+      cam.setFromMatrixPosition(camera.matrixWorld).applyMatrix4(inv.copy(m.matrixWorld).invert())
+      const dn = roots.distanceToPoint(cam)
+      const L = dn < LOD1 ? 0 : dn < LOD2 ? 1 : 2
+      g.drawRange.start = lodRange[L][0]; g.drawRange.count = lodRange[L][1]
+      lodStats[L] += a1 - a0
+    }
+    mesh.add(m)
+  }
+  ;(window as any).__grassLod = { segs: lodSegs, chunks: mesh.children.length, stats: lodStats, reset() { lodStats.fill(0) } } // QA
   return { mesh, material: mat, count }
 }
 

@@ -41,8 +41,9 @@ export function fractureCells(o: ShatterOpts) {
   let seed = 1771 + Math.round(o.impact.x * 13 + o.impact.y * 7)
   const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
   const hw = o.sw / 2, hh = o.sh / 2
-  const NR = o.tier === 'low' ? 13 : o.tier === 'mid' ? 18 : 24
-  const grow = o.tier === 'low' ? 1.62 : o.tier === 'mid' ? 1.48 : 1.36
+  // PERF lane (eng #5, same object count on every tier): one crack pattern, so every tier breaks into the same shards
+  const NR = 18
+  const grow = 1.48
   const far = Math.max(...[[-hw, -hh], [hw, -hh], [-hw, hh], [hw, hh]].map(([x, y]) => Math.hypot(x - o.impact.x, y - o.impact.y))) * 1.08
   const rings: number[] = [0]
   let r = 0.1 * Math.max(0.8, o.k)

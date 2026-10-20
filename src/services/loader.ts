@@ -93,17 +93,31 @@ class TaskManager {
   private queue: (() => void)[] = []
   total = 0; done = 0
   add(fn: () => void) { this.queue.push(fn); this.total++ }
-  /** PRELOAD: an async GPU task (parallel shader compile): it starts in its frame slot and counts as done when it resolves */
-  addAsync(fn: () => Promise<unknown>) {
+  /** PRELOAD: an async GPU task (parallel shader compile): it starts in its frame slot and counts as done when it
+   *  resolves. DIAG: it may report partial progress (0..1) while it runs, so a long warm-up moves the counter in steps */
+  private part = new Map<number, number>()
+  private seq = 0
+  addAsync(fn: (report: (f: number) => void) => Promise<unknown>) {
     this.total++
-    this.queue.push(() => { this.done-- ; let p: Promise<unknown>; try { p = fn() } catch (e) { p = Promise.resolve(); console.warn(e) } p.catch((e) => console.warn(e)).finally(() => { this.done++ }) })
+    const id = ++this.seq
+    const report = (f: number) => { if (this.part.has(id)) this.part.set(id, Math.min(0.999, Math.max(this.part.get(id)!, f))) }
+    this.queue.push(() => {
+      this.done--; this.part.set(id, 0)
+      let p: Promise<unknown>
+      try { p = fn(report) } catch (e) { p = Promise.resolve(); console.warn(e) }
+      p.catch((e) => console.warn(e)).finally(() => { this.part.delete(id); this.done++ })
+    })
   }
   update() {
     const t0 = performance.now()
     // run tasks until ~6ms of the frame is used — keeps the intro animation smooth
     while (this.queue.length && performance.now() - t0 < 6) { const f = this.queue.shift()!; try { f() } catch (e) { console.warn(e) } this.done++ }
   }
-  get progress() { return this.total ? this.done / this.total : 1 }
+  get progress() {
+    if (!this.total) return 1
+    let p = 0; for (const v of this.part.values()) p += v
+    return Math.min(1, (this.done + p) / this.total)
+  }
   get idle() { return this.queue.length === 0 }
 }
 export const taskManager = new TaskManager()

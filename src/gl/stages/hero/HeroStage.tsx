@@ -55,6 +55,20 @@ export function HeroStage() {
   const gemGeo = useMemo(() => brilliantGeometry(1), [])
   const sheen = useMemo(() => createGemSheen({ strength: 0.75 }), [])
   const sheenMesh = useRef<THREE.Mesh>(null!)
+  // DIAG: the refraction shader maps gl_FragCoord / resolution to the camera ray it takes its mip gradients from, and
+  // drei feeds it the CSS size. gl_FragCoord is in target pixels, so at DPR 2 (phones, retina) uv ran 0..2 (one mip
+  // too blurry, skewed across the stone) and in the 0.35–0.75× mirror / through-the-surface targets it ran 0..0.5
+  // (too sharp: crawling sparkle in the lake). Set it to the size of whatever target this draw lands in.
+  const gemRes = useMemo(() => {
+    const v = new THREE.Vector2()
+    return (r: THREE.WebGLRenderer) => {
+      const m = gemMesh.current; if (!m) return
+      const t = r.getRenderTarget()
+      if (t) v.set(t.width, t.height); else r.getDrawingBufferSize(v)
+      const u = (m.material as THREE.ShaderMaterial).uniforms?.resolution
+      if (u) u.value = v
+    }
+  }, [])
   fboHelper.track(water)
 
   // env capture for the gem (sky + lake, gem hidden), and the planar reflection of the gem for the lake
@@ -139,7 +153,12 @@ export function HeroStage() {
   // main camera, every frame its tip is in the water (the bob's dip, or the dive's sink); the lake samples it
   const under = useMemo(() => ({ rt: new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType }), scale: hi ? 0.6 : 0.4 }), [hi])
   useEffect(() => {
-    under.rt.setSize(Math.max(2, Math.floor(size.width * props.dpr * under.scale)), Math.max(2, Math.floor(size.height * props.dpr * under.scale)))
+    // DIAG: follows the governor too (it was sized once from props.dpr, so a DPR step left it at the old size)
+    // W19: follow the governor's MOVING rung only (noRest): the rest refinement toggles on every pointer stop/start, and
+    // re-allocating this target on each toggle cost the hero ~2x CPU in R5's perf tour
+    const fit = () => { const d = quality.dprFor(size.width, size.height, true); const w = Math.max(2, Math.floor(size.width * d * under.scale)), h = Math.max(2, Math.floor(size.height * d * under.scale)); if (w !== under.rt.width || h !== under.rt.height) under.rt.setSize(w, h) }
+    fit()
+    return quality.on(fit)
   }, [size, under])
   useEffect(() => { wu.u_underTex.value = under.rt.texture }, [under, wu])
 
@@ -163,6 +182,15 @@ export function HeroStage() {
       && (lakeOn || dive.gemOn)
       && !(props.stage === 'lab' && props.look.fade > 0.965)  // the lab fades the lake to 97 %: skip its 138k-tri water + reflection/env passes there
     group.current.visible = vis
+    // POLISH (rv-visual #15): the loop wrap jumps from the CTA (dive path holding the stone deep) straight to the top,
+    // where the dive no longer drives it; the last sink depth used to stay and hold the stone under the lake (an empty
+    // hero). Off the dive path the stone floats at its own hover, and it is re-surfaced while the footer is in view so
+    // the first frame after the wrap (under the veil) already has it up and its env re-captured.
+    if ((dive.gemMix <= 0 || props.overscroll > 0) && sink.depth !== 0) sink.depth = 0
+    // POLISH (Shifat 18:47Z "after footer to header warp loops back the stone disappear & appear jumps"): the wrap is a
+    // jump (more than half a screen in one frame); on that frame the stone's springs land ON their hero targets, so the
+    // first frame after the wrap is a normal hero frame (no tilt swing from the CTA pose, no lift settling)
+    const jumped = Math.abs(props.scrollDelta) > props.height * 0.5
     if (!vis) return
     waterMesh.current.visible = lakeOn; dome.visible = lakeOn
     waterInput.frame(camera, lakeOn)   // WATER HOOK: touch trails (even mid-scroll) + the sim's visibility
@@ -176,7 +204,9 @@ export function HeroStage() {
     const bob = Math.cos(st.phase)                     // -1 = lowest (touching)
     const pointer = input.everMoved ? input.mouseXY : { x: 0, y: 0 }
     // lifted while the hero cranes up; settles back onto the water for the contact bookend
-    const lift = st.lift.update(props.heroPin * 0.9 * (1 - Math.min(1, (props.resurface || 0) * 2.5)), dt)
+    const liftT = props.heroPin * 0.9 * (1 - Math.min(1, (props.resurface || 0) * 2.5))
+    if (jumped) st.lift.reset(liftT)   // POLISH: a jump lands on the pose
+    const lift = st.lift.update(liftT, dt)
     const tipY = 0.86 * gem.radius
     gem.pos.set(0, tipY - 0.07 + (bob * 0.5 + 0.5) * 0.045 + lift, 0)
     const ownY = gem.pos.y
@@ -195,6 +225,7 @@ export function HeroStage() {
     // hero: the classic three-quarter jewel view: crown, table and pavilion point all read (at -0.42 the camera
     // saw the stone side-on: a thin crown over a dark pavilion window; at 0 and above it reads as a flat oval). The statement's top-down shot was framed for -0.42
     const baseTilt = props.stage === 'contact' ? 0.2 : props.stage === 'statement' ? -0.42 : ((window as any).__heroTilt ?? -0.25)
+    if (jumped) { st.tiltX.reset(baseTilt - pointer.y * 0.1); st.tiltZ.reset(pointer.x * -0.12) }   // POLISH: a jump lands on the pose
     m.rotation.set(st.tiltX.update(baseTilt - pointer.y * 0.1, dt), st.spin, st.tiltZ.update(pointer.x * -0.12, dt), 'XYZ')
     sheenMesh.current.position.copy(m.position); sheenMesh.current.rotation.copy(m.rotation); sheenMesh.current.scale.copy(m.scale)
     if (bob < -0.985 && t - st.lastTouch > 2.5 && lift < 0.05) {
@@ -295,8 +326,11 @@ export function HeroStage() {
       <primitive object={studio} />
       <primitive object={uStudio.g} />
       <mesh ref={waterMesh} geometry={waterGeo} material={water} rotation-x={-Math.PI / 2} frustumCulled={false} />
-      <mesh ref={gemMesh} geometry={gemGeo} onUpdate={(o) => o.layers.enable(GEM_LAYER)}>
-        <MeshRefractionMaterial envMap={env.rt.texture as any} bounces={hi ? 3 : 2} ior={2.2} fresnel={0.85} aberrationStrength={hi ? 0.03 : 0.02} fastChroma={!hi} color={new THREE.Color(0.1, 0.34, 2.1)} toneMapped />
+      {/* DIAG: chroma was ±3 % IOR per channel on the high tier: R, G and B took different total-internal-reflection
+          paths, so whole facets came out pure green, dark red or black (A/B on live: 0 removes them). Now a thin
+          fast-chroma fringe (direction offset, one traced path) on every tier: the fire stays, the chips go */}
+      <mesh ref={gemMesh} geometry={gemGeo} onUpdate={(o) => o.layers.enable(GEM_LAYER)} onBeforeRender={gemRes}>
+        <MeshRefractionMaterial envMap={env.rt.texture as any} bounces={hi ? 3 : 2} ior={2.2} fresnel={0.85} aberrationStrength={hi ? 0.012 : 0.008} fastChroma color={new THREE.Color(0.1, 0.34, 2.1)} toneMapped />
       </mesh>
       <mesh ref={sheenMesh} geometry={gemGeo} material={sheen.material} renderOrder={2} onUpdate={(o) => o.layers.enable(GEM_LAYER)} />
     </group>

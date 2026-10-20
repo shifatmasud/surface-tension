@@ -21,13 +21,36 @@ export function Cursor() {
       dot.style.transform = `translate3d(${input.mousePixelXY.x - x}px, ${input.mousePixelXY.y - y}px, 0)`
     }
     gsap.ticker.add(tick)
+    // POLISH: touch never shows the cursor or its label ("DRAG" over a sticker). The last REAL pointer decides: the
+    // sticker layer re-dispatches a synthetic pointerover (pointerType '') when its label changes, so that one keeps
+    // the type of the pointer that caused it; a coarse-only device (no fine pointer at all) never shows it either.
+    const coarse = matchMedia('(pointer: coarse)'), fine = matchMedia('(any-pointer: fine)')
+    let lastType = coarse.matches && !fine.matches ? 'touch' : 'mouse'
+    const apply = () => {
+      const el = ref.current; if (!el) return
+      const touch = lastType === 'touch'
+      el.style.display = touch ? 'none' : ''
+      if (touch) { el.classList.remove('is-hover'); setLabel('') }
+    }
+    const seen = (e: PointerEvent) => {
+      if (!e.isTrusted || !e.pointerType || e.pointerType === lastType) return
+      lastType = e.pointerType; apply()
+    }
     const over = (e: PointerEvent) => {
+      seen(e)
+      if (lastType === 'touch') return
       const t = (e.target as HTMLElement).closest('[data-cursor],a,button,.card') as HTMLElement | null
       ref.current?.classList.toggle('is-hover', !!t)
       setLabel(t?.dataset.cursorLabel ?? '')
     }
+    const opts = { passive: true, capture: true }
     window.addEventListener('pointerover', over)
-    return () => { gsap.ticker.remove(tick); window.removeEventListener('pointerover', over) }
+    window.addEventListener('pointerdown', seen, opts); window.addEventListener('pointermove', seen, opts)
+    apply()
+    return () => {
+      gsap.ticker.remove(tick); window.removeEventListener('pointerover', over)
+      window.removeEventListener('pointerdown', seen, opts); window.removeEventListener('pointermove', seen, opts)
+    }
   }, [])
   return (
     <div className="cursor" ref={ref} aria-hidden>

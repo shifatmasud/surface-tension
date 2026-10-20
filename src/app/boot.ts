@@ -59,7 +59,8 @@ export const boot = {
    *  mounted as it enters the ±1 window around the current one (gl/Scene.tsx LaterStages). */
   progress() {
     const js = preload.files(), font = loader.progress
-    const gpu = engine.ready ? taskManager.progress : 0
+    // DIAG: the GPU share is the hero's program links AND the post chain's warm-up frames (they used to run after 100 %)
+    const gpu = engine.ready ? taskManager.progress * 0.5 + (engine.chain?.warmDone ? 1 : 0) * 0.5 : 0
     const next = preload.next(engine.ready)
     return settings.USE_GL ? js * 0.5 + font * 0.05 + gpu * 0.3 + next * 0.15 : js * 0.9 + font * 0.1
   },

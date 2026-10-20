@@ -69,10 +69,7 @@ export const settings = {
   RIPPLE_SIZE: tier === 'low' ? 128 : 256,
   BLOOM_HQ: tier === 'high',
   USE_BLOOM: tier !== 'low',
-  PARTICLES: tier === 'high' ? 128 : tier === 'mid' ? 96 : 64, // GPGPU grid side
-  FLIP_RES: tier === 'low' ? 40 : 64,
   HTML_TEXTURES: tier !== 'low' && !q.has('nohtml'),
-  TILE_COUNT: tier === 'low' ? 4 : 6,
   PAINT_DT_SCALED: q.has('paintdt'), // ch.14 parity: fades are per-frame by default, like the original
   MOBILE_WIDTH,
 }

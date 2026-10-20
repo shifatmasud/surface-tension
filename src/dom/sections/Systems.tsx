@@ -8,6 +8,7 @@ import { settings, browser } from '../../services/settings'
 import { clamp, mix } from '../../core/math'
 import { vfovFor, portrait } from '../../core/frame'
 import { sys, SYSTEMS_ORIGIN, TOKENS, type ControlId } from '../../gl/stages/systems/state'
+import { noOrphan } from '../a11y/noOrphans'
 
 const ease = (t: number) => t * t * (3 - 2 * t)
 const PAPER = new THREE.Color('#f7f7f8'), DIM = new THREE.Color('#c9ccd1')
@@ -81,8 +82,8 @@ export function Systems() {
         <div className="systems__row">
           <h2 className="systems__title" id="systems-title"><span className="systems__line"><span>Shade DS</span></span></h2>
           <div className="systems__copy">
-            <p className="systems__lede"><span className="systems__line"><span>A generative design system for teams who ship fast and want every screen to feel like one product.</span></span></p>
-            <p className="systems__note"><span className="systems__line"><span>Plus the tooling that hands it to agents: MCP servers and the Upsy OAuth bridge, so they can work inside real apps.</span></span></p>
+            <p className="systems__lede"><span className="systems__line"><span>{noOrphan('A generative design system for teams who ship fast and want every screen to feel like one product.')}</span></span></p>
+            <p className="systems__note"><span className="systems__line"><span>{noOrphan('Plus the tooling that hands it to agents: MCP servers and the Upsy OAuth bridge, so they can work inside real apps.')}</span></span></p>
           </div>
         </div>
       </div>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { setOdometer } from './Odometer'
 import { boot } from '../../app/boot'
@@ -13,6 +13,9 @@ export function Intro() {
   const [hidden, setHidden] = useState(false)
   const reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
   const count = useRef<HTMLDivElement>(null)
+  // DIAG: paint the reels before the first paint. Unpainted strips sit at their first glyph, so for the 2–3 frames
+  // between mount and the first rAF the counter read "000" (the shell had just shown e.g. "019"): a visible drop to zero
+  useLayoutEffect(() => { if (count.current) setOdometer(count.current, preload.shown() * 100, 3) }, [])
   useEffect(() => {
     // PRELOAD: continue from the number the static shell counter already reached (never count backwards); a repeat
     // visit keeps the counter short (its files come from cache; the brand moment stays, the wait does not)
@@ -30,7 +33,12 @@ export function Intro() {
       if (now - t0 > 12000 || (nearT && now - nearT > 3000)) real = 1
       const cap = Math.max(preload.shown(), Math.min(1, (now - t0) / minDur))
       const target = Math.min(real, cap)
-      eased = mix(eased, target, 1 - Math.exp(-7 * dt))
+      // DIAG: never backwards (the shell counter's number, a late-registered next-section asset or a re-weighted task
+      // can lower the target), and a bounded step: after a frame the main thread spent linking shaders the eased step
+      // was ~97 % of the gap at once (the counter jumped 32 → 98 in one frame on ANGLE/D3D11). 6 points per frame at
+      // 60 fps; on a slow GPU (long frames) up to 30 points, so the roll never takes more than a few frames
+      const next = mix(eased, target, 1 - Math.exp(-7 * dt))
+      eased = Math.max(eased, Math.min(next, eased + Math.max(0.06, dt * 0.6)))
       if (target >= 1 && (eased > 0.995 || now - t0 > 12000)) eased = 1
       if (count.current) setOdometer(count.current, eased * 100, 3)
       logo3d.progress(eased) // logo3d hook

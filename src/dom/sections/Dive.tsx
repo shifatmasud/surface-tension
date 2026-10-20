@@ -12,6 +12,7 @@ import { sections } from '../../app/sections'
 import { TOOLS } from '../../content/site'
 import { pool } from '../../gl/systems/pool'
 import { browser } from '../../services/settings'
+import { noOrphan } from '../a11y/noOrphans'
 
 /** dive progress where the work (lab) takes over, and where the scene ends under the Shade DS card */
 export const U_LAB = 0.88, U_END = 1.0
@@ -138,7 +139,7 @@ export function Dive() {
         </ul>
         <div className="dive__foot">
           <h2 className="dive__title" id="dive-title"><span className="dive__line" ref={line}>Under the surface</span></h2>
-          <p className="dive__cap" ref={cap}>Shaders, physics and the GPU. The part of the work you feel before you see it.</p>
+          <p className="dive__cap" ref={cap}>{noOrphan('Shaders, physics and the GPU. The part of the work you feel before you see it.')}</p>
         </div>
       </div>
     </section>
