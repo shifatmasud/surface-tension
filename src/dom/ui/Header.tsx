@@ -9,7 +9,8 @@ import { Logo } from '../../assets/logo/Logo'
 import { HOUSE } from '../../core/house'
 
 const LINKS = [
-  { id: 'hero', label: 'Surface' }, { id: 'statement', label: 'Statement' }, { id: 'dive', label: 'Dive' }, { id: 'lab', label: 'Work' },
+  // SECTION CUT (Shifat 15:41Z): Statement removed; Work is the dive's project slides (DOM id stays 'lab' for the card morph)
+  { id: 'hero', label: 'Surface' }, { id: 'dive', label: 'Dive' }, { id: 'lab', label: 'Work' },
   { id: 'systems', label: 'Shade DS' }, { id: 'journey', label: 'Journey' }, { id: 'contact', label: 'Say hi' },
 ]
 

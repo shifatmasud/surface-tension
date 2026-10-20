@@ -8,6 +8,7 @@ import { input } from '../../../services/input'
 import { SYSUI_LAYER } from '../hero/HeroStage'
 import { dive, SYS_C, TAB_F } from './diveState'
 import { AtomField } from './Atom'
+import { TabletWindow } from '../journey/tabletWindow'; import { tabletPose } from '../../world/handoff' // TABLET HOOK: the live 3D window (journey/tabletWindow.ts) + the tablet's pose (world/handoff.ts)
 /** QA: ?atom holds the sequence at the atom, ?drum at the drum; window.__morph (0..1) pins it */
 const ss = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
 const QS = typeof location !== 'undefined' ? location.search : ''
@@ -329,7 +330,7 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
     // a cold rim from behind and above: every part gets a lit edge against the deep
     const rim = new THREE.DirectionalLight('#e4edf5', 2.0); rim.position.set(-3, 4, -9)
     const hemi = new THREE.HemisphereLight('#cfd8e0', '#040506', 0.6)
-    const tablet = makeTablet(M)
+    const tablet = makeTablet(M); new TabletWindow(gl, tablet) // TABLET HOOK: swaps the glass for the portal; disposed with the painted material
     const atom = new AtomField(gl)
     atom.setTargets(items.map((it) => it.g))
     // the parts fade in as the particles settle on them: every part material can be faded (opaque ones keep depth)
@@ -407,10 +408,9 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
     const tb = built.tablet, tu = (tb.userData.mat as THREE.ShaderMaterial).uniforms
     tb.visible = dive.push > 0.001
     if (tb.visible) {
-      const k1 = ss(0.0, 0.5, dive.push)
-      tb.position.set(TAB_F.x, TAB_F.y - 3.4 * (1 - k1) + Math.sin(props.time * 0.9) * 0.05 * (1 - ss(0.6, 1, dive.push)), TAB_F.z)
-      tb.rotation.set(-0.18 * (1 - k1) + Math.sin(props.time * 0.7) * 0.02, Math.PI + 0.1 * (1 - k1) + Math.sin(props.time * 0.5) * 0.025, Math.sin(props.time * 0.6) * 0.015)
+      tabletPose(dive.push, tb) // TABLET HOOK: the tablet's pose (rise + bob; with the fixed lens, its travel to the camera — WORLD-MAP §5)
       tu.u_time.value = props.time; tu.u_portrait.value = props.height > props.width * 1.05 ? 1 : 0; tu.u_fill.value = ss(0.6, 1.0, dive.push); tu.u_on.value = ss(0.15, 0.6, dive.push); tu.u_sweep.value = -0.6 + 2.4 * ss(0.3, 0.75, dive.push)
+      ;(tb.userData.tw as TabletWindow | undefined)?.update(state.camera, dive.push) // TABLET HOOK: render the 3D picture through the glass from this pass's camera
     }
     const t = props.time, dt = Math.min(props.dt, 0.05)
     s.rotation.y = t * 0.035 + dive.sys * 1.9

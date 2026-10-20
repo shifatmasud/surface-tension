@@ -10,18 +10,17 @@ export const SITE = {
   email: '' as string,
   publicRepos: 118, // GitHub API, 19 Oct 2026
 }
-export const STATEMENT = [
-  ['I design systems', 'that feel ', ['physical'], '.'],
-  ['Interfaces with weight.', 'Water with ', ['logic'], '.'],
-  ['Built in code,', 'tuned by hand.'],
+/** SECTION CUT (Shifat 15:41Z): the Statement section is gone; its line plays in the global text slot during the dive's
+ *  descent (dom/ui/TextLayer.tsx). Kept as data so the copy lives in one place. */
+export const PHRASES = [
+  { t: ['Pixels', 'with mass.'], c: 'Springs, buoyancy and damping, written by hand, so an interface pushes back when you touch it.' },
 ]
 export type Project = { id: string; role: string; no: string; title: string; year: string; tags: string[]; blurb: string; url: string; media: string; poster: string; depth?: string; color: boolean; client?: string }
 // Serial position: the strongest, most on-theme piece first, the most tactile last.
+// SECTION CUT (Shifat 15:41Z): the Lab is no longer its own chapter; its best three pieces are the dive's work slides.
 export const PROJECTS: Project[] = [
   { id: 'water', role: 'Design & GPU simulation', no: '01', title: 'Water Sim', year: '2025', tags: ['WebGL', 'GPGPU', 'R3F'], blurb: 'A height-field you can stir, with refraction and caustics, running in a browser tab.', url: 'https://hybrid-water-sim.vercel.app', media: 'media/water-sim-color.mp4', poster: 'media/water-sim-color.webp', depth: 'media/water-sim-depth.webp', color: true },
-  { id: 'audio', role: 'Design & audio-reactive GL', no: '02', title: 'Audio Viz', year: '2025', tags: ['Web Audio', 'GLSL'], blurb: 'FFT bands and beat detection drive every frame; the music is the timeline.', url: 'https://ncs-style-audio-viz.vercel.app', media: 'media/audio-viz-color.mp4', poster: 'media/audio-viz-color.webp', color: false },
-  { id: 'geo', role: 'Design & game dev', no: '03', title: 'Geo-Slash', year: '2025', tags: ['MediaPipe', 'Game'], blurb: 'A slicing game where your webcam is the controller: hand tracking in real time.', url: 'https://geo-slash.vercel.app', media: 'media/geo-slash-color.mp4', poster: 'media/geo-slash-color.webp', depth: 'media/geo-slash-depth.webp', color: true },
-  { id: 'fluid', role: 'Design & physics', no: '04', title: 'Fluid Matter', year: '2025', tags: ['Physics', 'WebGL'], blurb: 'Rigid shapes in a stable-fluids field: fling them and they keep their momentum.', url: 'https://fluid-matter-physics.vercel.app', media: 'media/fluid-matter-color.mp4', poster: 'media/fluid-matter-color.webp', color: true },
-  { id: 'jelly', role: 'Design & interaction', no: '05', title: 'Jelly Drag', year: '2025', tags: ['Soft body', 'Shaders'], blurb: 'Soft-body UI: drag it and it squashes, overshoots and settles like the real thing.', url: 'https://jelly-drag.vercel.app', media: 'media/jelly-drag-color.mp4', poster: 'media/jelly-drag-color.webp', depth: 'media/jelly-drag-depth.webp', color: true },
+  { id: 'geo', role: 'Design & game dev', no: '02', title: 'Geo-Slash', year: '2025', tags: ['MediaPipe', 'Game'], blurb: 'A slicing game where your webcam is the controller: hand tracking in real time.', url: 'https://geo-slash.vercel.app', media: 'media/geo-slash-color.mp4', poster: 'media/geo-slash-color.webp', depth: 'media/geo-slash-depth.webp', color: true },
+  { id: 'jelly', role: 'Design & interaction', no: '03', title: 'Jelly Drag', year: '2025', tags: ['Soft body', 'Shaders'], blurb: 'Soft-body UI: drag it and it squashes, overshoots and settles like the real thing.', url: 'https://jelly-drag.vercel.app', media: 'media/jelly-drag-color.mp4', poster: 'media/jelly-drag-color.webp', depth: 'media/jelly-drag-depth.webp', color: true },
 ]
 export const TOOLS = ['React', 'R3F', 'GLSL', 'GSAP', 'Framer Motion', 'TSL / WebGPU', 'Figma', 'TypeScript']

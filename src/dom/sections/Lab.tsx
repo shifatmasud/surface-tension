@@ -10,7 +10,11 @@ import { labGL } from '../../gl/stages/lab/labGL'
 import './lab.css'
 
 /**
- * S3 — Lab (inside the water scene: the projects float over the sand, under the caustics). Pinned; vertical scroll slides the shelf sideways. North-star frame: the centred reel is
+ * SECTION CUT (Shifat 15:41Z): no longer a chapter of its own. This is the dive's WORK tail: the three best pieces
+ * float as slides in the dive's water (the dive keeps the camera; Dive.tsx reads this range as dive.u U_LAB → U_END).
+ * The DOM id and section name stay 'lab' so the GL cards (labGL), the card morph (ProjectOverlay) and the stage
+ * checks keep working unchanged; nav calls it "Work".
+ * Was: S3 — Lab (inside the water scene: the projects float over the sand, under the caustics). Pinned; vertical scroll slides the shelf sideways. North-star frame: the centred reel is
  * the star (upper ~60 %), its name huge on the bottom margin (mask slide-up per card), one specific
  * line + tags as the small caption on the right, the count rolling as an odometer.
  */
@@ -58,7 +62,7 @@ export function Lab() {
   })
   const cur = PROJECTS[active]
   return (
-    <section id="lab" className="section lab" ref={ref} aria-label="Lab: selected experiments">
+    <section id="lab" className="section lab" ref={ref} aria-label="Selected work">
       <div className="sticky lab__inner">
         <p className="lab__count" aria-hidden><Odometer value={active + 1} digits={2} play={seen} /> <span>/ <Odometer value={PROJECTS.length} digits={2} play={seen} delay={0.15} /></span></p>
         <div className="lab__track" ref={track}>

@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { WL_EDGE } from '../water/waterline'
-import { shared } from '../../state/props'
+import { shared, props } from '../../state/props'
+import { waterInput } from '../water/waterInput'
 import { sky, SKY_PARS } from '../shaders/sky'
 import { settings } from '../../services/settings'
 
@@ -33,9 +34,12 @@ export function createWaterMaterial() {
     u_reflOn: { value: 0 },
     u_gemReflK: { value: 0.8 },                                        // extra gem-reflection weight above Fresnel (tried 0.32/0.55 on 10-20: reads as a flat disc, off)
     u_bedDepth: { value: 1.6 },
-    u_absorb: { value: new THREE.Vector3(0.9, 0.72, 0.6) },      // σ_a per metre (clear lake water, red first)
+    u_absorb: { value: new THREE.Vector3(0.11, 0.1, 0.1) },     // σ_a per metre (WATER LANE: clear water, red first, kept near-neutral for the B/W palette)
+    u_sigS: { value: new THREE.Vector3(0.095, 0.1, 0.105) },      // σ_s per metre (single scattering; the veil greys/cools with thickness)
+    u_cauRipple: { value: 1 },                                     // gain of the sim's lensing on the bed (ripple caustics)
+    u_refrK: { value: 1 },                                         // screen-space refraction strength of the submerged stone
     u_scatter: { value: new THREE.Color('#d5e3ec') },                // in-scatter colour: a pastel teal (shallow) that deepens with path length
-    u_bedColor: { value: new THREE.Color('#ece8e0') },               // pale warm sand (foreground warm, depth cool)
+    u_bedColor: { value: new THREE.Color('#e8e9ea') },   // W19 (Tab 17:38Z): neutral pale bed (B/W/silver palette)               // pale warm sand (foreground warm, depth cool)
     u_cau: { value: 1 },
     u_gem: { value: new THREE.Vector4(0, 0.5, 0, 0) },               // xyz diamond centre, w = caustic strength
     u_gemTint: { value: new THREE.Color('#2f63ff') },
@@ -79,7 +83,7 @@ export function createWaterMaterial() {
       uniform sampler2D u_rippleTexture; uniform vec2 u_rippleTexel; uniform float u_poolSize, u_rippleAmp, u_time, u_swell, u_rippleShade;
       uniform vec3 u_rippleGate;
       uniform sampler2D u_reflTex; uniform float u_reflOn; uniform float u_gemReflK;
-      uniform float u_bedDepth; uniform vec3 u_absorb; uniform vec3 u_scatter; uniform vec3 u_bedColor;
+      uniform float u_bedDepth, u_cauRipple, u_refrK; uniform vec3 u_absorb, u_sigS; uniform vec3 u_scatter; uniform vec3 u_bedColor;
       uniform vec4 u_gem; uniform vec3 u_gemTint; uniform float u_touch, u_glint, u_dbg, u_underOn, u_cau; uniform sampler2D u_underTex; uniform vec2 u_resolution; uniform float u_fogNear, u_fogFar;
       uniform float u_wlClip;   // W18-DIVE OVER-UNDER: -1 off, else the lens waterline (screen y); the lake draws above it only
       ${WL_EDGE}
@@ -112,6 +116,52 @@ export function createWaterMaterial() {
         return vec3(va + u.x * (vb - va) + u.y * (vc - va) + u.x * u.y * (va - vb - vc + vd),
           ga + u.x * (gb - ga) + u.y * (gc - ga) + u.x * u.y * (ga - gb - gc + gd) + du * (u.yx * (va - vb - vc + vd) + vec2(vb, vc) - va));
       }
+      // ---- WATER LANE helpers ---------------------------------------------------------------------
+      #if HI
+        const float GWCAP = 0.62;
+      #else
+        const float GWCAP = 0.5;   // phones: the stone's mirror image stays a hint (review P2)
+      #endif
+      // octave anti-aliasing: 1 while the octave's lattice is well above the pixel footprint, 0 near Nyquist
+      float octAA(float fp, float freq){ return 1.0 - smoothstep(0.12, 0.42, fp * freq); }
+      // the sim's Laplacian (texel units) at uv, s texels apart
+      float rLap(vec2 uv, float s){
+        vec2 tx = u_rippleTexel * s;
+        return texture2D(u_rippleTexture, uv + vec2(tx.x, 0.0)).r + texture2D(u_rippleTexture, uv - vec2(tx.x, 0.0)).r
+             + texture2D(u_rippleTexture, uv + vec2(0.0, tx.y)).r + texture2D(u_rippleTexture, uv - vec2(0.0, tx.y)).r
+             - 4.0 * texture2D(u_rippleTexture, uv).r;
+      }
+      // the lake bed, so refraction has something to bend: long-crested sand ripples (warped), a fine grain, and
+      // scattered rounded pebbles in soft silver greys with a contact shadow. One cell lookup per pebble layer: each
+      // pebble sits inside its own 0.42 m cell (centre jitter 0.3–0.7, radius ≤ 0.26), so no neighbour search.
+      // w = footprint on the bed (m), for edge softening.
+      vec3 bedAlbedo(vec2 p, float w, float pf){
+        vec2 q = p + 0.4 * vec2(gnoise(p * 0.45).x, gnoise(p * 0.45 + 7.3).x);
+        float rip = sin(dot(q, vec2(0.55, -0.83)) * 10.0 + 1.6 * gnoise(q * 0.9).x);
+        float s = 0.91 + 0.05 * rip * (1.0 - smoothstep(0.1, 0.3, w * 1.6)) + 0.05 * gnoise(p * 2.7).x
+                + 0.03 * gnoise(p * 9.0).x * (1.0 - smoothstep(0.03, 0.1, w));
+        vec3 c = u_bedColor * s;
+        if (pf <= 0.0) return c;
+        // stones, not droplets (review P1): darker than or equal to the sand, matte (a faint top light only), a soft
+        // shadow on the side away from the sun, sparse and varied in size, fading out with distance (pf)
+        vec2 cs = p / 0.42, ci = floor(cs);
+        vec2 hh = fract(sin(vec2(dot(ci, vec2(12.9898, 78.233)), dot(ci, vec2(39.35, 11.13)))) * 43758.5453);
+        float h3 = fract(sin(dot(ci, vec2(93.9, 67.3))) * 15731.7);
+        vec2 dc = fract(cs) - (0.3 + 0.4 * hh);
+        float an = h3 * 6.2831; mat2 rot = mat2(cos(an), -sin(an), sin(an), cos(an));
+        vec2 d = rot * dc; d.x *= 0.8 + 0.45 * hh.x;
+        float rad = 0.06 + 0.2 * hh.y * hh.y;
+        float dl = length(d) - rad;
+        float present = step(0.84, h3) * pf;
+        float ew = max(w / 0.42, 0.012);
+        float m = (1.0 - smoothstep(-ew, ew, dl)) * present;
+        vec2 so = (rot * (dc + normalize(u_sunDir.xz + 1e-4) * rad * 0.35)); so.x *= 0.8 + 0.45 * hh.x;
+        float sh = (1.0 - smoothstep(-0.02, 0.07, length(so) - rad)) * present;
+        vec3 pc = u_bedColor * mix(0.74, 0.93, fract(h3 * 7.13)) * (0.94 + 0.06 * sqrt(max(0.0, 1.0 - pow(length(d) / rad, 2.0))))
+                * (0.95 + 0.05 * gnoise(p * 31.0 + h3 * 9.0).x);   // close to the sand's value, mottled: stones, not holes
+        c *= 1.0 - sh * (1.0 - m) * 0.08;
+        return mix(c, pc, m);
+      }
       // ---- caustics: two drifting ridged-cell layers multiplied (bright thin network, fresh) ---
       float cells(vec2 p, float t){
         vec2 i = floor(p), f = fract(p); float d1 = 8.0, d2 = 8.0;
@@ -123,14 +173,16 @@ export function createWaterMaterial() {
         return d2 - d1;
       }
       float caustic(vec2 p, float t){
-        float a = 1.0 - smoothstep(0.0, 0.16, cells(p * 1.15, t * 0.55));
+        // WATER LANE: domain-warped so the network reads as focused light, not Voronoi tiles; softer filaments
+        p += 0.4 * vec2(gnoise(p * 0.35 + t * 0.06).x, gnoise(p * 0.35 + 5.2 - t * 0.05).x);
+        float a = 1.0 - smoothstep(0.0, 0.26, cells(p * 1.15, t * 0.55));
         #if HI
-          float b = 1.0 - smoothstep(0.0, 0.2, cells(p * 1.9 + 3.1, -t * 0.42));
-          return a * 0.75 + a * b * 1.4 + 0.08;
+          float b = 1.0 - smoothstep(0.0, 0.3, cells(p * 1.9 + 3.1, -t * 0.42));
+          return a * a * 0.6 + a * b * 1.1 + 0.12;
         #else
           // phones: one layer, but soft-edged and modulated so it reads as focused light, not cracked tiles
           float s = 1.0 - smoothstep(0.0, 0.3, cells(p * 1.15, t * 0.55));
-          return s * s * (0.7 + 0.6 * sin(p.x * 0.7 + p.y * 0.5 + t)) + 0.1;
+          return s * s * (0.5 + 0.4 * sin(p.x * 0.7 + p.y * 0.5 + t)) + 0.2;   // WATER LANE: softer on phones
         #endif
       }
 
@@ -139,31 +191,34 @@ export function createWaterMaterial() {
         vec3 V = normalize(cameraPosition - v_world);
         float dist = length(cameraPosition - v_world);
         // ---- normal ----
+        // WATER LANE: derivative-aware detail. fp = the pixel's footprint on the water in metres; each octave fades as
+        // its wavelength approaches two pixels (no shimmer at grazing angles), and the sim's ripples fade once a pixel
+        // spans its texels. The old fixed distance fade stays only as a far backstop.
+        float fp = max(length(fwidth(v_world.xz)), 1e-4);
         vec2 g = swellGrad(v_world.xz);
         vec2 rg = vec2(0.0); float rlap = 0.0;
-        if (v_rmask > 0.0) {
+        float cellM = 2.0 * u_poolSize * u_rippleTexel.x;                  // central-difference span of the sim (m)
+        float rAA = 1.0 - smoothstep(0.6, 1.8, fp / cellM);
+        if (v_rmask > 0.0 && rAA > 0.0) {
           float hx = texture2D(u_rippleTexture, v_ruv + vec2(u_rippleTexel.x, 0.0)).r - texture2D(u_rippleTexture, v_ruv - vec2(u_rippleTexel.x, 0.0)).r;
           float hy = texture2D(u_rippleTexture, v_ruv + vec2(0.0, u_rippleTexel.y)).r - texture2D(u_rippleTexture, v_ruv - vec2(0.0, u_rippleTexel.y)).r;
-          float cell = 2.0 * u_poolSize * u_rippleTexel.x;
-          rg = vec2(hx, -hy) * u_rippleAmp * v_rmask / cell;
-          float h0 = texture2D(u_rippleTexture, v_ruv).r;
-          rlap = (texture2D(u_rippleTexture, v_ruv + vec2(u_rippleTexel.x, 0.0)).r + texture2D(u_rippleTexture, v_ruv - vec2(u_rippleTexel.x, 0.0)).r
-                + texture2D(u_rippleTexture, v_ruv + vec2(0.0, u_rippleTexel.y)).r + texture2D(u_rippleTexture, v_ruv - vec2(0.0, u_rippleTexel.y)).r - 4.0 * h0) * u_rippleAmp * v_rmask;
+          rg = vec2(hx, -hy) * u_rippleAmp * v_rmask * rAA / cellM;
+          rlap = rLap(v_ruv, 1.0) * u_rippleAmp * v_rmask * rAA;
           g += rg;
         }
-        float detailFade = 1.0 - smoothstep(6.0, 26.0, dist);
+        float detailFade = 1.0 - smoothstep(14.0, 40.0, dist);
         vec2 wind = vec2(0.32, 0.11) * u_time;
         // cat's paws: wind gusts drift across the lake, so the fine chop comes and goes in soft patches (calm glassy
         // lanes beside rougher ones) instead of one uniform texture: the cue that sells real water at a glance
         float gust = 0.5 + 0.5 * gnoise(v_world.xz * 0.16 + vec2(u_time * 0.05, -u_time * 0.02)).x;
         float gustK = mix(0.45, 1.5, smoothstep(0.25, 0.8, gust));
         vec3 n1 = gnoise(v_world.xz * 2.1 + wind);
-        g += n1.yz * 0.05 * detailFade * gustK;
+        g += n1.yz * 0.05 * detailFade * gustK * octAA(fp, 2.1);
         #if HI
           vec3 n2 = gnoise(v_world.xz * 5.3 - wind * 1.7 + 9.0);
-          g += n2.yz * 0.012 * detailFade * detailFade * gustK;
+          g += n2.yz * 0.012 * detailFade * gustK * octAA(fp, 5.3);
           vec3 n3 = gnoise(v_world.xz * 13.0 + wind * 2.6 - 4.0);
-          g += n3.yz * 0.005 * detailFade * detailFade * gustK;
+          g += n3.yz * 0.005 * detailFade * gustK * octAA(fp, 13.0);
         #endif
         vec3 N = normalize(vec3(-g.x, 1.0, -g.y));
         vec3 col;
@@ -192,44 +247,81 @@ export function createWaterMaterial() {
             // (x) that varies along the view depth (z), growing away from the waterline
             float band = gnoise(vec2(v_world.x * 2.0, v_world.z * 22.0 - u_time * 1.1)).x + 0.5 * gnoise(vec2(v_world.x * 4.0 + 7.0, v_world.z * 41.0 + u_time * 1.6)).x;
             float away = clamp(length(v_world.xz - u_gem.xz) * 1.6, 0.25, 1.0);
-            ruv.x += band * 0.0075 * away * ruv.w;
-            vec2 sv = vec2(0.0, 0.0016) * (1.0 + 4.0 * length(rg));
+            ruv.x += band * 0.0035 * away * ruv.w * octAA(fp, 6.0);   // WATER LANE: gentler bands (0.0075 read as a jagged mosaic)
+            vec2 sv = vec2(0.0, 0.0008) * (1.0 + 4.0 * length(rg));   // WATER LANE: half the smear (it read as a blur blob)
             vec4 pr = texture2DProj(u_reflTex, ruv) * 0.28;
             pr += (texture2DProj(u_reflTex, ruv + vec4(sv, 0.0, 0.0) * ruv.w) + texture2DProj(u_reflTex, ruv - vec4(sv, 0.0, 0.0) * ruv.w)) * 0.22;
             pr += (texture2DProj(u_reflTex, ruv + vec4(sv * 2.6, 0.0, 0.0) * ruv.w) + texture2DProj(u_reflTex, ruv - vec4(sv * 2.6, 0.0, 0.0) * ruv.w)) * 0.14;
             gemR = vec4(pr.rgb / max(pr.a, 1e-3), pr.a);
           }
-          // refraction to the bed (analytic ray-plane)
+          // ---- REFRACTION (WATER LANE; Shifat 16:22Z "Refraction too") ------------------------------------
+          // Snell through the full wave + ripple normal (η = 1/1.333) down to a textured bed (sand ripples, pebbles),
+          // so every swell and every trail visibly bends what lies beneath, in a still frame. Sunlight reaches the
+          // bed through the same surface: a caustic network plus true focusing by the live ripple sim (a trail is
+          // drawn on the bed in light), with red/blue focusing apart (dispersion). Beer–Lambert over the path tints
+          // by thickness; single scattering adds the veil (σs/σt·(1−e^(−σt·L)), so it greys/cools, never milks).
+          float underA = 0.0;   // how much of this pixel is the submerged stone (its reflection yields there)
           vec3 T = refract(-V, N, 1.0 / 1.333);
+          T.y = min(T.y, -0.05);   // grazing views (fixed near-horizontal lens): a back-tilted facet never refracts upward
           float depthHere = u_bedDepth + smoothstep(3.0, 20.0, length(v_world.xz - cameraPosition.xz)) * 2.0; // shelves away from the viewer
           float tb = (depthHere + v_world.y) / max(-T.y, 0.05);
           vec3 bed = v_world + T * tb;
-          // sun into the water (refracted), down to the bed: light path for Beer–Lambert
-          vec3 Ls = refract(-u_sunDir, vec3(0, 1, 0), 1.0 / 1.333);
-          float ls = u_bedDepth / max(-Ls.y, 0.1);
-          vec2 cp = bed.xz - Ls.xz * ls * 0.0 + N.xz * 0.6;              // the surface normal shimmers the pattern
-          float cau = caustic(cp * 3.4, u_time * 0.7);
-          float sand = 0.82 + 0.18 * gnoise(bed.xz * 0.7).x;
-          float cauFade = (1.0 - smoothstep(3.0, 11.0, dist)) * 0.34 * u_cau;  // shallow-bed caustics through clear water: the instant 'water' read
-          vec3 sunOnBed = u_sunColor * (0.55 + cauFade * (cau - 0.4)) * exp(-u_absorb * ls);
-          vec3 amb = mix(u_skyMid, u_skyHorizon, 0.4) * 0.35;
-          vec3 bedCol = u_bedColor * sand * (sunOnBed + amb);
+          vec3 Ls = refract(-u_sunDir, vec3(0, 1, 0), 1.0 / 1.333);       // sunlight inside the water
+          float ls = depthHere / max(-Ls.y, 0.1);
+          vec2 cp = bed.xz + N.xz * depthHere * 0.35;                      // the local normal shears the network
+          float cau = caustic(cp * 2.0, u_time * 0.7);
+          float focus = 1.0; vec3 focusC = vec3(1.0);
+          {
+            // where the sun ray that lands here crossed the surface, the sim's curvature acts as a lens: a crest
+            // converges, a trough spreads (thin-lens: I ≈ 1 / (1 + d·κ·(1 − 1/n)))
+            vec2 entry = bed.xz - Ls.xz * ls;
+            vec2 euv = vec2(entry.x, -entry.y) / u_poolSize + 0.5;
+            float em = smoothstep(0.0, 0.08, euv.x) * smoothstep(0.0, 0.08, euv.y) * smoothstep(1.0, 0.92, euv.x) * smoothstep(1.0, 0.92, euv.y);
+            if (em > 0.0 && rAA > 0.0) {
+              float kf = depthHere * 0.25 * u_rippleAmp * em * rAA * u_cauRipple * 4.0 / (cellM * cellM);
+              float lc = rLap(euv, 1.0);
+              focus = 1.0 / max(1.0 + lc * kf, 0.35);
+              #if HI
+                vec2 dd = (Ls.xz / max(-Ls.y, 0.1)) * depthHere * 0.02 / u_poolSize * vec2(1.0, -1.0);
+                focusC = vec3(1.0 / max(1.0 + rLap(euv - dd, 1.0) * kf * 0.96, 0.35), focus, 1.0 / max(1.0 + rLap(euv + dd, 1.0) * kf * 1.06, 0.35)) / max(focus, 1e-3);
+              #endif
+            }
+          }
+          vec3 alb = bedAlbedo(bed.xz, fp * (1.0 + tb / max(dist, 0.1)), 1.0 - smoothstep(3.0, 10.0, dist));
+          float cauFade = (1.0 - smoothstep(2.0, 8.0, dist)) * u_cau;    // shallow-bed caustics through clear water
+          float cauL = 0.9 + cauFade * (cau - 0.32) * 0.32;              // a soft network, not a pool-tile cliché
+          vec3 sunOnBed = u_sunColor * max(-Ls.y, 0.0) * cauL * focus * focusC * exp(-u_absorb * ls);
+          vec3 amb = mix(u_skyMid, u_skyHorizon, 0.4) * 0.42 * exp(-u_absorb * depthHere);
+          vec3 bedCol = alb * (sunOnBed * 1.15 + amb);
           // the diamond focuses blue light into a soft, rippling caustic under itself
           vec2 gd = bed.xz - (u_gem.xz + Ls.xz * (u_gem.y + u_bedDepth) / max(-Ls.y, 0.1));
           float gemSpot = exp(-dot(gd, gd) * 5.0) * (0.6 + 0.8 * cau);
           bedCol += u_gemTint * gemSpot * u_gem.w * 0.0;
           float L = tb;                                                    // path length through water
           vec3 Tr = exp(-u_absorb * L);
-          vec3 inscatter = u_scatter * (u_sunColor * 0.75 + amb) * (1.0 - exp(-(u_absorb + 0.06) * L));
+          vec3 sigT = u_absorb + u_sigS;
+          vec3 inscatter = u_scatter * (u_sunColor * 0.7 + amb) * (u_sigS / sigT) * (1.0 - exp(-sigT * L));
           vec3 refr = bedCol * Tr + inscatter;
-          // the stone where it is under the surface (its dipping tip, or all of it as it sinks): seen through the water,
-          // wobbled by the surface normal, dimmed and cooled by absorption over the path, with the in-scatter veil on top
+          // the stone where it is under the surface, seen THROUGH the water (screen-space refraction): the offset is
+          // the refracted ray's lateral shift over the stone's depth, so a deeper stone and a steeper ripple bend it
+          // more; the three channels refract apart (a fine fringe that widens on ripple crests); sunlight through the
+          // waves plays over the submerged facets (caustics); absorption cools it with depth
           if (u_underOn > 0.5) {
-            vec2 suv = gl_FragCoord.xy / u_resolution + N.xz * vec2(0.035, 0.05);
-            vec4 ug = texture2D(u_underTex, suv);
-            float gd = max(0.0, -(u_gem.y - 0.25)) + 0.08;
-            vec3 Tg = exp(-u_absorb * gd * 0.9);
-            refr = mix(refr, ug.rgb / max(ug.a, 1e-3) * Tg + inscatter * (1.0 - Tg.g) * 0.45, clamp(ug.a, 0.0, 1.0) * 0.95);
+            float gdp = max(0.0, -(u_gem.y - 0.25)) + 0.08;
+            vec2 suv = gl_FragCoord.xy / u_resolution;
+            // the ripple slope drives the bend (review P1: the swell alone barely moved it), clamped so it never tears
+            vec2 off = (N.xz * vec2(0.035, 0.05) + rg * 0.25) * (0.7 + 2.2 * gdp) * u_refrK;
+            off *= min(1.0, 0.06 / max(length(off), 1e-4));
+            float disp = 0.15 + 1.2 * min(length(rg), 0.4);
+            vec4 ug = texture2D(u_underTex, suv + off);
+            vec4 ugR = texture2D(u_underTex, suv + off * (1.0 - disp));
+            vec4 ugB = texture2D(u_underTex, suv + off * (1.0 + disp));
+            vec3 sc = vec3(ugR.r / max(ugR.a, 1e-3), ug.g / max(ug.a, 1e-3), ugB.b / max(ugB.a, 1e-3));
+            sc = mix(ug.rgb / max(ug.a, 1e-3), sc, step(0.02, min(ugR.a, ugB.a)));
+            sc *= mix(1.0, (0.78 + 0.4 * cauL) * focus, 0.65 * clamp(gdp * 3.0, 0.3, 1.0));
+            vec3 Tg = exp(-u_absorb * gdp * 0.9);
+            refr = mix(refr, sc * Tg + inscatter * (1.0 - Tg.g) * 0.45, clamp(ug.a, 0.0, 1.0) * 0.95);
+            underA = clamp(ug.a, 0.0, 1.0);
           }
           col = mix(refr, refl, F);
           // sun glints: a tight lobe (sparkle) + a broad one (glitter path)
@@ -238,7 +330,18 @@ export function createWaterMaterial() {
           // the glitter path belongs to grazing views; seen from above it breaks into white blotches on the detail
           // normals (the statement's top-down shot), so it fades out as the view turns steep
           float glitter = 1.0 - smoothstep(0.45, 0.85, NoV);
-          col += u_sunColor * (pow(NoH, 1600.0) * 60.0 + pow(NoH, 180.0) * 1.6) * F * 4.0 * glitter;
+          // sun glint (WATER LANE): an anisotropic Ward lobe in the wave's own frame, stretched toward the viewer the
+          // way a sun path streaks on water, plus the tight specular core
+          {
+            vec3 tv = normalize(vec3(-V.x, 0.0, -V.z) + vec3(1e-4, 0.0, 0.0));
+            vec3 t1 = normalize(tv - N * dot(tv, N)), b1 = cross(N, t1);
+            float ht = dot(H, t1), hb = dot(H, b1), hn = max(dot(H, N), 1e-3);
+            float NoL = max(dot(N, u_sunDir), 0.0);
+            const float ax = 0.05, ay = 0.016;
+            float ward = exp(-((ht * ht) / (ax * ax) + (hb * hb) / (ay * ay)) / (hn * hn)) / (12.566 * ax * ay * sqrt(max(NoL * NoV, 1e-3)));
+            float Fh = 0.02 + 0.98 * pow(1.0 - max(dot(H, V), 0.0), 5.0);
+            col += u_sunColor * (min(ward, 400.0) * NoL * Fh * 0.8 + pow(NoH, 1600.0) * 60.0 * F * 4.0) * glitter;
+          }
           // stochastic glints: sparse micro-facets that catch the sun for a moment and go (twinkle, not a static
           // sparkle texture). One random cell per 6 cm, each with its own phase; only cells whose facet points near
           // the half vector light up, so they gather along the glitter path and get sparser away from it
@@ -263,7 +366,7 @@ export function createWaterMaterial() {
             float rs;
             if (u_rippleGate.y < 0.0) rs = clamp(rlap * -u_rippleGate.y, -u_rippleGate.z, u_rippleGate.z * 0.3); // curvature: rings read by their lit crests; a fresh drop's bowl only dims a touch (no grey discs)
             else rs = clamp(dot(rg, kd) * u_rippleShade, -0.22, u_rippleGate.z) * (u_rippleGate.y > 0.0 ? smoothstep(u_rippleGate.x, u_rippleGate.y, rlen) : 1.0);
-            col *= 1.0 - rs;
+            col *= 1.0 - max(rs, -0.6) * (rs > 0.0 ? 0.35 : 1.0);   // WATER LANE: troughs dim only a touch (refraction and caustics carry the ring now; a dark smear read as dirt)
             col += u_sunColor * smoothstep(0.08, 0.5, rlen) * max(-rs, 0.0) * 0.6;
           }
           // blue light spilled by the gem onto the water around it (soft, wide) + a tighter core
@@ -280,7 +383,7 @@ export function createWaterMaterial() {
             col = col * (1.0 - trough * 0.12 * on) + vec3(1.0) * lip * 0.5 * on;
           }
           float spill = exp(-dot(gq, gq) * 1.3) * 0.3 + exp(-dot(gq, gq) * 6.0) * 0.34;
-          col = mix(col, col * u_gemTint * 1.5 + u_gemTint * 0.2, clamp(spill * u_gem.w * exp(-max(0.2 - u_gem.y, 0.0) * 4.0), 0.0, 1.0));
+          col = mix(col, col * u_gemTint * 1.5 + u_gemTint * 0.2, clamp(spill * 0.45 * u_gem.w * exp(-max(0.2 - u_gem.y, 0.0) * 4.0), 0.0, 1.0));   // WATER LANE: halved (violet halo, review #13)
           // the stone mirrored in the lake: Fresnel-weighted (stronger toward grazing, so it fades toward the viewer like
           // a real reflection), lifted above physical by u_gemReflK so a near-white field still shows it; the facets'
           // own dark/bright pattern keeps it a gem, not a disc
@@ -291,12 +394,12 @@ export function createWaterMaterial() {
           float tAx = max(dot(toG, Rr.xz) / max(dot(Rr.xz, Rr.xz), 1e-4), 0.0);
           float hAx = v_world.y + Rr.y * tAx;
           float hFade = 1.0 - smoothstep(0.02, 0.7, hAx);
-          float gw = smoothstep(0.05, 0.75, gemR.a) * hFade * clamp(u_gemReflK * (0.62 + F * 6.0), 0.0, 0.82);
+          float gw = smoothstep(0.05, 0.75, gemR.a) * hFade * clamp(u_gemReflK * (0.2 + F * 6.0), 0.0, GWCAP) * (1.0 - 0.75 * underA);   // WATER LANE: Fresnel-led, capped lower (muddy blob in review #13)
           // colour-depth: the mirrored stone sits deeper and cooler than the warm-lit stone above it
           vec3 rc = mix(gemR.rgb, gemR.rgb * gemR.rgb * 1.2, 0.5) * vec3(0.7, 0.8, 1.0);
           float rl = dot(rc, vec3(0.2126, 0.7152, 0.0722)); rc = max(mix(vec3(rl), rc, 1.3), 0.0);
           col = mix(col, rc, gw);
-          if (u_dbg > 1.5) col = gemR.rgb; else if (u_dbg > 0.5) col = vec3(hAx, hFade, gemR.a);
+          if (u_dbg > 2.5) col = vec3(0.5 + texture2D(u_rippleTexture, v_ruv).r * 12.0); else if (u_dbg > 1.5) col = gemR.rgb; else if (u_dbg > 0.5) col = vec3(hAx, hFade, gemR.a);   // 3 = sim height (WATER LANE QA)
           // aerial perspective toward the horizon
           float fog = smoothstep(u_fogNear, u_fogFar, dist);
           col = mix(col, u_skyHorizon, fog);
@@ -321,5 +424,8 @@ export function createWaterMaterial() {
       }`,
   })
   material.extensions = { derivatives: true } as any
+  // WATER LANE: the ripple sim runs only while the lake is actually drawn
+  material.onBeforeRender = () => { waterInput.seenFrame = props.frame }
+  if (/[?&]qa\b/.test(location.search)) (window as any).__waterU = uniforms   // QA only
   return { material, uniforms }
 }

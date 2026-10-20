@@ -16,6 +16,7 @@ import { Spring } from '../../../core/spring'
 import { engine } from '../../engine'
 import { dive, DIVE_LAYER } from '../dive/diveState'
 import { quality } from '../../quality' // PERF HOOK
+import { waterInput } from '../../water/waterInput' // WATER HOOK
 
 export const GEM_LAYER = 2
 export const gem = { pos: new THREE.Vector3(0, 0.45, 0), radius: 0.5, touch: 0 }
@@ -164,6 +165,7 @@ export function HeroStage() {
     group.current.visible = vis
     if (!vis) return
     waterMesh.current.visible = lakeOn; dome.visible = lakeOn
+    waterInput.frame(camera, lakeOn)   // WATER HOOK: touch trails (even mid-scroll) + the sim's visibility
     // W18-DIVE OVER-UNDER: the lake is cut at the lens waterline for the main camera only (never in the env/mirror captures)
     if (!waterMesh.current.userData.wl) {
       waterMesh.current.userData.wl = true

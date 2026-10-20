@@ -5,8 +5,7 @@ import { SplitText } from 'gsap/SplitText'
 import { props } from '../../state/props'
 import { settings, browser } from '../../services/settings'
 import { clamp } from '../../core/math'
-import { PROJECTS } from '../../content/site'
-import { PHRASES } from '../sections/Statement'
+import { PROJECTS, PHRASES } from '../../content/site'
 import { dive } from '../../gl/stages/dive/diveState'
 import { ufx, textMaterial, type UfxItem } from '../../gl/ufx/ufx'
 import { rasterLine } from '../../gl/ufx/UfxText'
@@ -33,9 +32,10 @@ gsap.registerPlugin(SplitText)
 type Beat = { id: string; eyebrow: string; title: string[]; body: string }
 const BEATS: Beat[] = [
   { id: 'hero', eyebrow: 'Portfolio — 2026', title: ['Shifat', 'Masud'], body: 'Design engineer & creative technologist, Dhaka.' },
-  ...PHRASES.map((p, i) => ({ id: 'statement' + i, eyebrow: `Principle 0${i + 1}`, title: p.t, body: p.c })),
+  // SECTION CUT (Shifat 15:41Z): the Statement section is gone; its line plays here during the dive's descent
+  ...PHRASES.map((p, i) => ({ id: 'statement' + i, eyebrow: PHRASES.length > 1 ? `Principle 0${i + 1}` : 'Principle', title: p.t, body: p.c })),
   { id: 'dive', eyebrow: 'Craft', title: ['Under the', 'surface'], body: 'Shaders, physics and the GPU. The part of the work you feel before you see it.' },
-  ...PROJECTS.map((p) => ({ id: 'lab-' + p.id, eyebrow: `Lab · ${p.no} / 0${PROJECTS.length}`, title: [p.title], body: `${p.blurb} ${p.tags.join(' · ')}` })),
+  ...PROJECTS.map((p) => ({ id: 'lab-' + p.id, eyebrow: `Work · ${p.no} / 0${PROJECTS.length}`, title: [p.title], body: `${p.blurb} ${p.tags.join(' · ')}` })),
   { id: 'systems', eyebrow: 'Systems', title: ['Shade DS'], body: 'A generative design system for teams who ship fast and want every screen to feel like one product. Plus the tooling that hands it to agents: MCP servers and the Upsy OAuth bridge.' },
   { id: 'journey1', eyebrow: 'Next', title: ['Playable', 'worlds.'], body: 'Made for the browser.' },
   { id: 'journey2', eyebrow: 'Next', title: ['Out of', 'the screen.'], body: 'Games, toys and tools that don’t stay inside the screen.' },
@@ -47,7 +47,7 @@ export const slotBox = { top: 1e5 }
 /** where each section sits in the document (virtual scroll px), measured on resize */
 const R: Record<string, { top: number; h: number }> = {}
 function measure() {
-  for (const id of ['hero', 'statement', 'dive', 'lab', 'systems', 'journey', 'contact']) {
+  for (const id of ['hero', 'dive', 'lab', 'systems', 'journey', 'contact']) {
     const el = document.getElementById(id); if (!el) continue
     const r = el.getBoundingClientRect()
     R[id] = { top: r.top + props.scroll, h: r.height }
@@ -55,27 +55,46 @@ function measure() {
 }
 const pin = (id: string, off = 0) => { const r = R[id]; return r ? (props.scroll - r.top + off) / Math.max(1, r.h - props.height) : -1 }
 
+/** SECTION CUT: where the statement's line hands the slot over (hero pin progress / dive progress) */
+const ST_FROM_HERO = 0.45, ST_END = 0.16
+const statementBeat = (f: number) => IDX.get('statement' + Math.min(PHRASES.length - 1, Math.max(0, Math.floor(f * PHRASES.length))))!
 /** which beat the scroll is on right now (-1: the slot is empty and lets the scene breathe) */
 function current(dropped: boolean): number {
   const vh = props.height, s = props.scroll
   if (!R.hero) return -1
   if (props.overlayOpen) return -1
   if (R.contact && s > R.contact.top - vh * 0.55) return -1
-  if (R.journey && s > R.journey.top - vh * 0.5) {
+  // SECTION CUT (REVIEW-visual #17): each beat lives exactly as long as its scene. The journey owns the slot from the
+  // moment its top enters (the space scene takes over there), so "Shade DS" is gone before the stars arrive …
+  if (R.journey && s > R.journey.top - vh) {
+    // a 100vh (reduced-motion, unpinned) journey has no pin to scrub: its two lines split the section instead
+    if (R.journey.h < vh * 1.5) return s < R.journey.top - vh * 0.2 ? IDX.get('journey1')! : IDX.get('journey2')!
+    // SECTION CUT: 600 → 420vh, so the windows widen a little to keep ~1 s of line reveal readable (cut-review P2-3)
     const p = pin('journey')
-    return p > 0.03 && p < 0.2 ? IDX.get('journey1')! : p > 0.6 && p < 0.79 ? IDX.get('journey2')! : -1
+    return p > 0.02 && p < 0.24 ? IDX.get('journey1')! : p > 0.58 && p < 0.82 ? IDX.get('journey2')! : -1
   }
-  if (R.systems && s > R.systems.top - vh * 0.35) return IDX.get('systems')!
-  if (R.lab && s > R.lab.top - vh * 0.45) {
-    const n = PROJECTS.length, a = Math.round(clamp(pin('lab')) * (n - 1))
+  // … and it leaves as the camera starts its push into the tablet (dive.push), so its exit has played before the cut
+  // (the work tail's last card is drawn only while 0 < props.lab < 1 — labGL visibleWhen — so the systems beat takes the
+  // slot exactly where the tail unpins: lab pin 1 = systems.top − vh)
+  // (only a pinned systems section gates on the push: under reduced motion sections are 100vh and the push would clear
+  // "Shade DS" before the section is even on screen — cut-review P1-2)
+  if (R.systems && s >= R.systems.top - vh) return dive.push > 0.5 && R.systems.h > vh * 1.5 ? -1 : IDX.get('systems')!
+  // the work beats show only while their GL cards are on screen (0 < pin < 1); before that "Under the surface" holds
+  const pl = R.lab ? pin('lab') : -1
+  if (pl > 0 && pl < 1) {
+    const n = PROJECTS.length, a = Math.round(clamp(pl) * (n - 1))
     return IDX.get('lab-' + PROJECTS[a].id)!
   }
-  if (props.stage === 'dive' || (R.dive && s > R.dive.top)) return dive.u > 0.405 ? IDX.get('dive')! : -1
-  if (R.statement) {
-    const p = pin('statement', vh * 0.2), n = PHRASES.length
-    // the phrases take over at the same scroll points the statement used (each rises as the previous sinks)
-    if (p * n + 0.09 >= 0) return IDX.get('statement' + Math.min(n - 1, Math.floor(p * n + 0.09)))!
+  if (props.stage === 'dive' || (R.dive && s > R.dive.top)) {
+    if (dive.u > 0.405) return IDX.get('dive')!
+    // SECTION CUT: the statement's line (it was its own 300vh section before the dive) plays over the end of the
+    // hero and the first stretch of the descent, and is out before the stone fills the frame (cut-review P1-1); the
+    // crane-down, the over-under crossing and the window of light (u .16–.405) breathe with an empty slot, as on live
+    return dive.u < ST_END ? statementBeat(dive.u / ST_END) : -1
   }
+  // the statement's line takes over from the hero's in the second half of the hero's pin, so it gets a full beat
+  // (~1.3 screens: ~0.8 of the hero pin + ~0.5 of the dive) instead of flashing past at the hand-off
+  if (dropped && pin('hero') > ST_FROM_HERO) return statementBeat(0)
   return dropped ? 0 : -1
 }
 

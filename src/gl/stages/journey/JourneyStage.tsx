@@ -58,6 +58,8 @@ export function JourneyStage(): JSX.Element {
   const group = useRef<THREE.Group>(null!)
   // W18 (Shifat 14:01Z): the CTA odometer type at full device density, drawn by the text layer behind the crewmate's depth
   const { camera: mainCam } = useThree()
+  // STICKERS HOOK: drag / peel / keyboard on the CTA wall's stickers (stickerInteract.ts), bound to the real camera
+  useEffect(() => { S.cta.attach(mainCam); return () => S.cta.detach() }, [S, mainCam])
   useEffect(() => {
     S.cta.typeRoot.position.copy(JOURNEY_ORIGIN)
     const body = S.crewOut.root

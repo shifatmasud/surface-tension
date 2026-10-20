@@ -12,6 +12,7 @@ import { InlineSharpenEffect } from './perfEffects' // PERF HOOK
 import type { Look } from '../../state/props'
 import { ufx } from '../ufx/ufx'
 import { SharpText } from './SharpText'
+import { gpuTimer } from '../systems/perfGovernor' // SHARP: the governor's GPU frame timer ends after the last draw
 
 /**
  * The render queue (handbook ch.3 / 8). Effects are data: { pass, renderOrder, enabled }.
@@ -37,6 +38,8 @@ import { SharpText } from './SharpText'
  *   4000 SMAA / FXAA     (final, screen-space; FXAA only on phones at the governor's floor)
  */
 type Entry = { name: string; order: number; pass: Pass; needsRender: () => boolean; on?: boolean }
+
+const NOCAS = typeof location !== 'undefined' && new URLSearchParams(location.search).has('nocas')
 
 export class PostChain {
   composer: EffectComposer
@@ -101,21 +104,40 @@ export class PostChain {
   // the one full-density pass: the finished frame (in the composer's input buffer after its last swap) upscaled once
   private blitCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
   private blitMat = new THREE.ShaderMaterial({
-    uniforms: { tMap: { value: null as THREE.Texture | null }, u_texel: { value: new THREE.Vector2(1, 1) }, u_sharp: { value: 0 } },
+    uniforms: { tMap: { value: null as THREE.Texture | null }, u_texel: { value: new THREE.Vector2(1, 1) }, u_sharp: { value: 0 }, u_up: { value: 0 } },
     vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
-    // CONTRAST-ADAPTIVE SHARPENING (AMD CAS-style, Shifat 15:39Z) fused into the upscale: a 5-tap cross at the scene's
-    // own texel size; the weight adapts to local contrast so flat areas stay clean and edges don't ring. Only when the
-    // scene is upscaled (u_sharp > 0).
-    fragmentShader: `uniform sampler2D tMap; uniform vec2 u_texel; uniform float u_sharp; varying vec2 vUv;
+    // SHARP UPSCALE (Shifat 15:39Z + the sharp lane): when the scene is upscaled onto the canvas, a Catmull-Rom bicubic
+    // in 5 bilinear taps (the same tap count as the old bilinear+CAS cross) instead of bilinear, clamped to the taps'
+    // min/max so its negative lobe cannot ring, then contrast-adaptive sharpening (AMD CAS-style weight: strong on soft
+    // detail, backing off at hard edges and in flat areas) with the strength following the upscale ratio. At 1:1 (the
+    // rest refinement: native density) a mild 1-texel CAS only, to take back the softness SMAA leaves on texture.
+    fragmentShader: `uniform sampler2D tMap; uniform vec2 u_texel; uniform float u_sharp; uniform float u_up; varying vec2 vUv;
+vec3 casW(vec3 mn, vec3 mx, float s){ vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, 1e-4), 0.0, 1.0)); return -amp * mix(0.125, 0.2, s); }
 void main(){
-  vec3 e = texture2D(tMap, vUv).rgb;
-  if (u_sharp > 0.0) {
-    vec3 b = texture2D(tMap, vUv + vec2(0.0, -u_texel.y)).rgb, d = texture2D(tMap, vUv + vec2(-u_texel.x, 0.0)).rgb;
-    vec3 f = texture2D(tMap, vUv + vec2(u_texel.x, 0.0)).rgb, h = texture2D(tMap, vUv + vec2(0.0, u_texel.y)).rgb;
-    vec3 mn = min(e, min(min(b, d), min(f, h))), mx = max(e, max(max(b, d), max(f, h)));
-    vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, 1e-4), 0.0, 1.0));
-    vec3 w = -amp * mix(0.125, 0.2, u_sharp);
-    e = clamp((e + (b + d + f + h) * w) / (1.0 + 4.0 * w), 0.0, 64.0);
+  vec3 e;
+  if (u_up > 0.5) {
+    vec2 ts = 1.0 / u_texel;
+    vec2 sp = vUv * ts; vec2 tc = floor(sp - 0.5) + 0.5; vec2 f = sp - tc;
+    vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f)), w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f)), w3 = f * f * (-0.5 + 0.5 * f);
+    vec2 w12 = w1 + w2; vec2 t12 = (tc + w2 / w12) * u_texel, t0 = (tc - 1.0) * u_texel, t3 = (tc + 2.0) * u_texel;
+    vec3 c = texture2D(tMap, t12).rgb;
+    vec3 n = texture2D(tMap, vec2(t12.x, t0.y)).rgb, s = texture2D(tMap, vec2(t12.x, t3.y)).rgb;
+    vec3 wv = texture2D(tMap, vec2(t0.x, t12.y)).rgb, ea = texture2D(tMap, vec2(t3.x, t12.y)).rgb;
+    float kc = w12.x * w12.y, kn = w12.x * w0.y, ks = w12.x * w3.y, kw = w0.x * w12.y, ke = w3.x * w12.y;
+    e = (c * kc + n * kn + s * ks + wv * kw + ea * ke) / (kc + kn + ks + kw + ke);
+    vec3 mn = min(c, min(min(n, s), min(wv, ea))), mx = max(c, max(max(n, s), max(wv, ea)));
+    e = clamp(e, mn, mx);
+    if (u_sharp > 0.0) { vec3 w = casW(mn, mx, u_sharp) * 0.6; e = clamp((e + (n + s + wv + ea) * w) / (1.0 + 4.0 * w), mn, mx); }
+  } else {
+    e = texture2D(tMap, vUv).rgb;
+    if (u_sharp > 0.0) {
+      vec3 b = texture2D(tMap, vUv + vec2(0.0, -u_texel.y)).rgb, d = texture2D(tMap, vUv + vec2(-u_texel.x, 0.0)).rgb;
+      vec3 f = texture2D(tMap, vUv + vec2(u_texel.x, 0.0)).rgb, h = texture2D(tMap, vUv + vec2(0.0, u_texel.y)).rgb;
+      vec3 mn = min(e, min(min(b, d), min(f, h))), mx = max(e, max(max(b, d), max(f, h)));
+      vec3 w = casW(mn, mx, u_sharp);
+      e = clamp((e + (b + d + f + h) * w) / (1.0 + 4.0 * w), 0.0, 64.0);
+    }
   }
   gl_FragColor = vec4(e, 1.0);
   #include <colorspace_fragment>
@@ -128,7 +150,10 @@ void main(){
     this.blitMat.uniforms.tMap.value = this.composer.inputBuffer.texture
     this.blitMat.uniforms.u_texel.value.set(1 / this.bw, 1 / this.bh)
     // sharpen only when the scene is upscaled onto the canvas (its DPR below the canvas's)
-    this.blitMat.uniforms.u_sharp.value = props.textDpr > props.dpr * 1.05 ? Math.min(1, (props.textDpr / props.dpr - 1) * 0.8) : 0
+    // SHARP: bicubic + CAS when upscaled (strength by ratio); a mild CAS at 1:1 (rest: native density, SMAA). ?nocas: off
+    const up = props.textDpr > props.dpr * 1.05
+    this.blitMat.uniforms.u_up.value = up ? 1 : 0
+    this.blitMat.uniforms.u_sharp.value = NOCAS ? 0 : up ? Math.min(1, (props.textDpr / props.dpr - 1) * 0.8) : 0.25
     gl.setRenderTarget(null); gl.autoClear = false
     gl.render(this.blitScene, this.blitCam)
     gl.autoClear = auto; gl.setRenderTarget(prev)
@@ -221,6 +246,7 @@ void main(){
     this.composer.render(dt)
     this.blit()
     this.text.draw(this.gl)
+    gpuTimer.end()
     void shared
   }
 }

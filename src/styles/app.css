@@ -115,7 +115,7 @@ html.gl-cards .card__dom { visibility: hidden; }
 @media (max-width: 812px) { .systems__copy, .systems__tray { grid-column: 1 / -1; } }
 
 
-.journey { height: 600vh; }
+.journey { height: 420vh; }  /* SECTION CUT (Shifat 15:41Z): 600 → 420vh, every beat kept (progress is normalised) */
 .journey__inner { display: flex; align-items: flex-start; padding-top: 16vh; pointer-events: none; }
 .journey__cap { font-size: var(--fs-body); font-weight: 400; letter-spacing: -0.02em; color: #fff; opacity: .8; }
 
@@ -180,8 +180,16 @@ html.no-gl .poster { position: absolute; inset: 0; background-size: cover; backg
 .skip-link:focus { transform: none; }
 
 /* ---- Lab (north-star frame: centred reel = star, giant name bottom-left, small caption right) ---- */
-.lab { height: 560vh; }
+.lab { height: 280vh; }  /* SECTION CUT: the dive's work tail, 3 slides (was its own 560vh chapter of 5) */
 .lab__inner { display: grid; grid-template-rows: 1fr auto; grid-template-columns: minmax(0, 1fr); padding: calc(var(--s7) * 0.6) 0 var(--s5); overflow: hidden; }
+/* SECTION CUT (REVIEW-visual #9): the global text slot draws the work's title + blurb at the bottom (W19 17:12Z text
+   block: 56px title row + 20px blurb, eyebrow above), so the card lives in the band above it: the track centres between
+   the top margin and the slot's reserved height (desktop: slot padding + ~160px for eyebrow, title and a 4-line blurb;
+   phones stack title over blurb: + ~200px), and the card's width is capped by that band's height, so neither the blurb
+   nor the title ever runs under the card. */
+html.slot-on .lab__inner { --lab-top: calc(var(--s7) * 0.45); --lab-bot: calc(var(--s5) + 160px); padding: var(--lab-top) 0 var(--lab-bot); }
+@media (max-width: 640px) { html.slot-on .lab__inner { --lab-bot: calc(var(--s4) + 200px); } }
+html.slot-on .lab .card { width: clamp(240px, min(46vw, 92vh, (100vh - var(--lab-top) - var(--lab-bot) - 24px) * 1.6), 860px); }
 .lab__count { position: absolute; top: calc(var(--s7) * 0.55); left: 0; margin: 0; font-size: var(--fs-small); color: var(--c-silver-2); font-variant-numeric: tabular-nums; display: flex; gap: 6px; }
 .lab__track { align-self: center; display: flex; align-items: center; gap: clamp(24px, 3vw, 56px); will-change: transform; }
 .card { flex: 0 0 auto; width: clamp(280px, min(46vw, 92vh), 860px); aspect-ratio: 16 / 10; border-radius: 14px; position: relative; cursor: pointer; outline: none; }
@@ -205,11 +213,11 @@ html.lab-gl .lab .card__dom { opacity: 0; }
 .lab__cap { grid-column: 10 / -1; margin: 0; font-size: var(--fs-small); line-height: 1.45; color: var(--c-white); max-width: 34ch; }
 .lab__cap span { color: var(--c-silver-2); }
 @media (max-width: 1000px) { .lab__names { grid-column: 1 / -1; } .lab__cap { grid-column: 4 / -1; margin-top: var(--s3); } }
-@media (max-width: 812px) { .card { width: 80vw; } .lab__cap { grid-column: 2 / -1; } .lab__name { white-space: normal; max-width: 7ch; } }
+@media (max-width: 812px) { .card, html.slot-on .lab .card { width: min(80vw, (100vh - var(--lab-top, 0px) - var(--lab-bot, 0px) - 24px) * 1.6); } .lab__cap { grid-column: 2 / -1; } .lab__name { white-space: normal; max-width: 7ch; } }
 
 
 /* ===== S4 · Systems — the glass stack (GL star) + its real controls. Appended block; overrides the earlier .systems rules. ===== */
-.systems { display: block; min-height: 0; height: 260vh; padding: 0; }
+.systems { display: block; min-height: 0; height: 200vh; padding: 0; }  /* SECTION CUT: 260 → 200vh (pin 160 → 100vh: atom → drum → tablet push still reads) */
 .systems .systems__inner { padding: calc(var(--pad-y) + 56px) var(--pad-x) var(--s5); display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
 .systems .systems__eyebrow { pointer-events: auto; }
 .systems .systems__row { display: grid; grid-template-columns: repeat(var(--grid-cols), minmax(0, 1fr)); column-gap: var(--grid-gap); align-items: end; position: relative; z-index: 1; }
@@ -246,7 +254,7 @@ html.lab-gl .lab .card__dom { opacity: 0; }
 
 
 /* ---- Dive (S5): the light through the surface is the star; one line early, then only tools in the water ---- */
-.dive { height: 400vh; padding: 0; }  /* v2: the stone's descent + the original under-the-sea beat */
+.dive { height: 280vh; padding: 0; }  /* v2: the stone's descent + the original under-the-sea beat. SECTION CUT: 400 → 280vh */
 .dive .dive__inner { display: grid; grid-template-rows: 1fr auto; align-items: end; padding: 0 0 var(--s5); overflow: hidden; color: var(--c-white); }
 .dive .dive__foot { display: grid; grid-template-columns: repeat(var(--grid-cols), minmax(0, 1fr)); column-gap: var(--grid-gap); align-items: last baseline; padding: 0 var(--pad-x); }
 .dive .dive__title { grid-column: 1 / span 9; margin: 0; overflow: hidden; padding-bottom: .08em; font-size: var(--fs-display); font-weight: 400; line-height: .9; letter-spacing: -0.065em; color: var(--c-white); max-width: none; }
@@ -265,23 +273,12 @@ html.no-gl .dive .dive__cap { opacity: 1 !important; }
 html.no-gl .dive .dive__tools { position: static; display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); padding: 0 var(--pad-x); }
 html.no-gl .dive .dive__tool { position: static; opacity: 1 !important; transform: none !important; margin: 0; }
 
-/* ---- Statement (R-frame: star upper-centre, two-line display bottom-left, caption bottom-right) ---- */
-.statement { height: 300vh; }
-.statement__inner { display: grid; align-items: end; padding: 0 0 var(--s5); pointer-events: none; }
-.statement__inner > * { grid-area: 1 / 1; }
-.statement__frame { display: grid; grid-template-columns: repeat(var(--grid-cols), minmax(0, 1fr)); column-gap: var(--grid-gap); align-items: last baseline; }
-.statement__lines { grid-column: 1 / span 8; margin: 0 0 0 -0.055em; font-size: var(--fs-display); line-height: .86; letter-spacing: -0.065em; color: var(--c-black); }
-.statement__cap { grid-column: 10 / -1; margin: 0; font-size: var(--fs-small); line-height: 1.45; color: var(--c-silver-3); max-width: 32ch; opacity: 0; }
-@media (min-width: 1001px) { .statement__lines { grid-row: 1; } .statement__cap { grid-row: 1; align-self: start; margin-top: calc(var(--fs-display) * 0.7 - 3 * 12.5px * 1.45); } }
-@media (min-width: 813px) { .statement__lines { white-space: nowrap; width: max-content; grid-column: 1 / span 10; } }
-@media (max-width: 1000px) { .statement__lines { grid-column: 1 / -1; } .statement__cap { grid-column: 4 / -1; margin-top: var(--s3); } }
-@media (max-width: 812px) { .statement__cap { grid-column: 2 / -1; } }
 
 html.gl-lost canvas { visibility: hidden; }
 
 /* tablet (641–1000): captions take the right half of the grid, the north-star corner, instead of a one-column indent */
 @media (min-width: 641px) and (max-width: 1000px) {
-  .hero__sub, .lab__cap, .statement__cap { grid-column: 7 / -1; }
+  .hero__sub, .lab__cap { grid-column: 7 / -1; }
   .dive .dive__cap { grid-column: 7 / -1; }
 }
 
@@ -293,11 +290,7 @@ html.gl-lost canvas { visibility: hidden; }
 .journey__beat.is-on > span + span > span { transition-delay: .075s; }
 @media (prefers-reduced-motion: reduce) { .journey__beat > span > span { transform: none; opacity: 0; transition: opacity var(--dur-fade) var(--ease-in-out); } .journey__beat.is-on > span > span { opacity: .88; } }
 
-/* no-WebGL (no GPU, reduced motion): statement phrases each get their own north-star frame; journey shows its still */
-html.no-gl .statement { height: auto; }
-html.no-gl .statement .statement__inner { position: relative; height: auto; display: block; }
-html.no-gl .statement .statement__frame { min-height: 100vh; padding-bottom: var(--s5); align-content: end; opacity: 1 !important; transform: none !important; visibility: visible !important; }
-html.no-gl .statement .statement__lines, html.no-gl .statement .statement__cap { opacity: 1 !important; transform: none !important; visibility: visible !important; }
+/* no-WebGL (no GPU, reduced motion): the journey shows its still */
 html.no-gl .journey { height: auto; background: #020203; }
 html.no-gl .journey .journey__inner { position: relative; height: 100vh; background: #020203 url(/media/journey-still-d.jpg) center / cover no-repeat; }
 @media (max-aspect-ratio: 4/5) { html.no-gl .journey .journey__inner { background-image: url(/media/journey-still-m.jpg); } }
@@ -340,7 +333,7 @@ html[data-bg='dark'] .slot { color: var(--c-white); }
   .slot__body { flex: 0 0 auto; margin: 0; font-size: 17px; max-width: 34ch; }
 }
 /* the sections' own copy stays in the document for screen readers and search, out of sight: the slot draws it */
-html.slot-on :is(.hero__row, .statement__lines, .statement__cap, .dive__title, .dive__cap, .lab__foot, .systems__eyebrow, .systems__title, .systems__copy, .journey__beat) {
+html.slot-on :is(.hero__row, .dive__title, .dive__cap, .lab__foot, .systems__eyebrow, .systems__title, .systems__copy, .journey__beat) {
   position: absolute !important; width: 1px !important; height: 1px !important; overflow: hidden !important; clip: rect(0 0 0 0) !important; white-space: nowrap !important; margin: 0 !important; padding: 0 !important; opacity: 0 !important; }
 
 /* W18 (Shifat 15:33Z): hard line masks for the card copy; the risers lean from their baseline's left end */

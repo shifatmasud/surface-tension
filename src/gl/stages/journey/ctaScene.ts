@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { props } from '../../../state/props'
 import { browser } from '../../../services/settings'
+import { createStickerInteraction, type StickerInteraction } from './stickerInteract'
 
 /**
  * W18 — THE ENDING (STRUCTURE v3, Shifat 13:27Z–13:33Z). After the crewmate breaks out of the tablet the camera pulls
@@ -105,7 +106,7 @@ void main(){
 const ST_VERT = /* glsl */ `
 attribute vec4 aSt;      // x, y (wall), size, tilt
 attribute vec2 aCell;    // atlas cell
-attribute vec3 aProg;    // slap progress 0..1, lifted-corner amount, seed
+attribute vec4 aProg;    // slap progress 0..1, lifted-corner amount, seed, stacking rank (STICKERS LANE)
 attribute vec4 aInt;     // (Shifat 15:29Z) drag lift 0..1, peel 0..1, grabbed corner direction (sticker space)
 uniform float u_z, u_shadow;
 uniform vec3 u_light;
@@ -141,9 +142,9 @@ void main(){
   }
   // DRAG: lifted off the wall while held (its shadow drops away and softens with the height)
   lp.z += aInt.x * 0.24 * aSt.z;
-  vec3 wp = vec3(aSt.x + ca * lp.x - sa * lp.y, aSt.y + sa * lp.x + ca * lp.y, u_z + lp.z);
+  vec3 wp = vec3(aSt.x + ca * lp.x - sa * lp.y, aSt.y + sa * lp.x + ca * lp.y, u_z + lp.z + aProg.w * 0.004);
   // a shadow copy lies on the wall, offset along the light, softer the higher the sheet
-  if (u_shadow > 0.5) { float hgt = lp.z + 0.03; wp.xy += (u_light.xy / -u_light.z) * hgt; wp.z = u_z - 0.022; vLift = hgt; }
+  if (u_shadow > 0.5) { float hgt = lp.z + 0.03; wp.xy += (u_light.xy / -u_light.z) * hgt; wp.z = u_z - 0.022 + aProg.w * 0.002; vLift = hgt; }
   else vLift = lift;
   vN = normalize(vec3(-sa * 0.0 + (ca + sa) * 0.7 * lift * 2.0, (sa - ca) * 0.7 * lift * 2.0, 1.0));
   vUv = (aCell + (q + 0.5)) / vec2(3.0, 2.0);
@@ -185,7 +186,7 @@ attribute vec4 aUv;      // atlas rect u0 v0 u1 v1
 attribute vec4 aRole;    // word index, letter index, copy (0 leaving / 1 arriving), words in this line
 uniform float u_time, u_em, u_gap, u_still, u_shadow, u_z, u_desc;
 uniform vec2 u_off, u_c;
-varying vec2 vUv; varying float vY; varying float vOn;
+varying vec2 vUv; varying float vY; varying float vOn; varying float vMov;
 const float PERIOD = 3.4, ROLL = 0.62, STAG = 0.045, TRAVEL = 1.25;
 float ease(float x){ x = clamp(x, 0.0, 1.0); return x < 0.5 ? 4.0 * x * x * x : 1.0 - pow(-2.0 * x + 2.0, 3.0) / 2.0; }
 void main(){
@@ -198,7 +199,7 @@ void main(){
   float on, dy;
   if (aRole.z < 0.5) { on = step(abs(aRole.x - cw), 0.1); dy = e * TRAVEL; }
   else { on = step(abs(aRole.x - nw), 0.1) * (still > 0.5 ? 0.0 : 1.0); dy = (e - 1.0) * TRAVEL; }
-  vOn = on;
+  vOn = on; vMov = abs(dy) > 0.001 ? 1.0 : 0.0;   // STICKERS LANE: a rolling glyph gets the tighter slot top
   vec2 q = position.xy + 0.5;                              // 0..1 in the glyph box
   float baseY = -aGeo.y * u_gap;
   vec2 g = vec2(aGeo.x + q.x * aGeo.z, baseY - u_desc + q.y * aGeo.w + dy);
@@ -209,9 +210,11 @@ void main(){
 }`
 const TX_FRAG = /* glsl */ `
 uniform sampler2D u_atlas; uniform float u_shadow;
-varying vec2 vUv; varying float vY; varying float vOn;
+varying vec2 vUv; varying float vY; varying float vOn; varying float vMov;
 void main(){
-  if (vOn < 0.5 || vY < -0.24 || vY > 0.84) discard;      // each line is a masked slot
+  // each line is a masked slot. STICKERS LANE: while a word rolls its slot top drops to 0.72 em, so the leaving word's
+  // stems never show in the gap under the line above (0.84 is kept at rest for the ascenders)
+  if (vOn < 0.5 || vY < -0.24 || vY > (vMov > 0.5 ? 0.72 : 0.84)) discard;
   if (u_shadow > 0.5) {
     float a = texture2D(u_atlas, vUv, 4.0).a * 0.45;
     if (a < 0.01) discard;
@@ -223,11 +226,12 @@ void main(){
 }`
 
 const LINE1 = 'Let’s make'
-const WORDS = ['it ripple.', 'it move.', 'it play.', 'it real.']
+const LEAD = 'it'                                          // static; only the word after it rolls
+const WORDS = ['ripple.', 'move.', 'play.', 'real.']
 
 function glyphAtlas(font: string, spacingEm: number) {
   const FS = 112, PAD = 26
-  const chars = Array.from(new Set((LINE1 + WORDS.join('')).split(''))).filter((c) => c !== ' ')
+  const chars = Array.from(new Set((LINE1 + LEAD + WORDS.join('')).split(''))).filter((c) => c !== ' ')
   const cv = document.createElement('canvas'); const c = cv.getContext('2d')!
   c.font = `400 ${FS}px ${font}`
   const cellH = Math.ceil(FS * 1.3) + PAD * 2
@@ -255,7 +259,7 @@ function glyphAtlas(font: string, spacingEm: number) {
   return { tex, layout, rect, FS, desc: (cellH - PAD - FS * 0.98) / FS }
 }
 
-export type CtaLayout = { C: THREE.Vector3; D: number; hw: number; wv: number; fov: number; textZ: number; em: number; crewZ: number; crewY: number; crewScale: number }
+export type CtaLayout = { C: THREE.Vector3; D: number; hw: number; wv: number; fov: number; textZ: number; em: number; crewZ: number; crewY: number; crewScale: number; crewH: number }
 
 export function buildCta(portrait: boolean) {
   const group = new THREE.Group()
@@ -273,10 +277,11 @@ export function buildCta(portrait: boolean) {
   sGeo.index = quad.index; sGeo.setAttribute('position', quad.getAttribute('position'))
   const aSt = new THREE.InstancedBufferAttribute(new Float32Array(N * 4), 4)
   const aCell = new THREE.InstancedBufferAttribute(new Float32Array(LOGOS.flatMap((_, i) => [i % 3, 1 - Math.floor(i / 3)])), 2)
-  const aProg = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3)
+  const aProg = new THREE.InstancedBufferAttribute(new Float32Array(N * 4), 4)
   aSt.setUsage(THREE.DynamicDrawUsage); aProg.setUsage(THREE.DynamicDrawUsage)
   const aInt = new THREE.InstancedBufferAttribute(new Float32Array(N * 4), 4); aInt.setUsage(THREE.DynamicDrawUsage)
   sGeo.setAttribute('aSt', aSt); sGeo.setAttribute('aCell', aCell); sGeo.setAttribute('aProg', aProg); sGeo.setAttribute('aInt', aInt); sGeo.instanceCount = N
+  const base = new Float32Array(N * 4)   // STICKERS HOOK: the laid-out x, y, size, tilt (aSt = base + the visitor's moves)
   const atlas = stickerAtlas(LOGO_PATHS)
   const sU = { u_atlas: { value: atlas }, u_z: { value: WALL_Z + 0.03 }, u_light: { value: light }, u_cam: { value: new THREE.Vector3() }, u_time: { value: 0 } }
   const sMat = new THREE.ShaderMaterial({ vertexShader: ST_VERT, fragmentShader: ST_FRAG, toneMapped: false, fog: false, side: THREE.DoubleSide, uniforms: { ...sU, u_shadow: { value: 0 } } })
@@ -308,17 +313,21 @@ export function buildCta(portrait: boolean) {
     const sp = (parseFloat(cs.letterSpacing) || -0.065 * fs) / fs
     const A = glyphAtlas(cs.fontFamily || 'sans-serif', sp)
     const rows: number[][] = []
-    const push = (line: number, word: number, nWords: number, s: string) => {
+    const push = (line: number, word: number, nWords: number, s: string, cx = 0) => {
       const L = A.layout(s)
       L.glyphs.forEach((g, li) => {
         const r = A.rect(g.ch)
-        for (let copy = 0; copy < 2; copy++) rows.push([g.x - L.w / 2 - r.padX, line, r.w, r.h, r.u0, r.v0, r.u1, r.v1, word, li, copy, nWords])
+        for (let copy = 0; copy < 2; copy++) rows.push([g.x - L.w / 2 - r.padX + cx, line, r.w, r.h, r.u0, r.v0, r.u1, r.v1, word, li, copy, nWords])
       })
       return L.w
     }
     const w1 = push(0, 0, 1, LINE1)
-    let w2 = 0
-    WORDS.forEach((wd, i) => { w2 = Math.max(w2, push(1, i, WORDS.length, wd)) })
+    // STICKERS LANE (REVIEW-visual #8): "it" stays put and only the last word rolls, in its own slot. The pair is set as
+    // one line centred on the widest word, so "it" never jumps baseline or leaves fragments mid-swap.
+    const wIt = A.layout(LEAD + ' ').w, wMax = Math.max(...WORDS.map((wd) => A.layout(wd).w))
+    const w2 = wIt + wMax
+    push(1, 0, 1, LEAD, -w2 / 2 + A.layout(LEAD).w / 2)
+    WORDS.forEach((wd, i) => { const L = A.layout(wd); push(1, i, WORDS.length, wd, -w2 / 2 + wIt + L.w / 2) })
     const n = rows.length
     const geo = new Float32Array(n * 4), uv = new Float32Array(n * 4), role = new Float32Array(n * 4)
     rows.forEach((r, i) => { geo.set(r.slice(0, 4), i * 4); uv.set(r.slice(4, 8), i * 4); role.set(r.slice(8, 12), i * 4) })
@@ -339,16 +348,17 @@ export function buildCta(portrait: boolean) {
   /** stickers placed in the final frame (fractions of the visible wall), framing the centre */
   const PLACE_WIDE: [number, number, number, number][] = [
     // fx, fy, size (× wall height), tilt (deg)
-    [-0.37, 0.31, 0.22, -9], [0.355, 0.33, 0.21, 8], [-0.425, -0.03, 0.2, 6],
+    [-0.37, 0.31, 0.22, -9], [0.355, 0.30, 0.21, 8], [-0.425, -0.03, 0.2, 6],   // STICKERS LANE: Figma (2nd) clear of the header pills
     [0.42, 0.0, 0.2, -7], [-0.345, -0.33, 0.21, 10], [0.36, -0.315, 0.2, -5],
   ]
   const PLACE_TALL: [number, number, number, number][] = [
     [-0.3, 0.335, 0.29, -9], [0.02, 0.37, 0.25, 6], [0.31, 0.325, 0.28, 8],
-    [-0.375, -0.115, 0.24, 7], [0.375, -0.07, 0.24, -6], [-0.35, -0.255, 0.22, -8],
+    [-0.375, -0.115, 0.24, 7], [0.375, -0.07, 0.24, -6], [-0.35, -0.225, 0.22, -8],   // STICKERS LANE: Notion clear of the CTA row
   ]
   // slap order: round the frame, top-left first
   const ORDER = [0, 1, 3, 5, 4, 2]
-  const lay: CtaLayout = { C: new THREE.Vector3(), D: 20, hw: 12, wv: 19, fov: 34, textZ: WALL_Z + 1.4, em: 1, crewZ: 6, crewY: 0, crewScale: 1 }
+  let typeY = 0   // the headline's first baseline (tablet-local), set by layout()
+  const lay: CtaLayout = { C: new THREE.Vector3(), D: 20, hw: 12, wv: 19, fov: 34, textZ: WALL_Z + 1.4, em: 1, crewZ: 6, crewY: 0, crewScale: 1, crewH: 1 }
 
   /** the final aligned composition for this screen (tablet-local) */
   function layout(sw: number, sh: number, aspect: number, crewHeight: number) {
@@ -361,14 +371,20 @@ export function buildCta(portrait: boolean) {
     lay.textZ = WALL_Z + D * (portrait ? 0.05 : 0.05)
     // type: the wider line spans ~70 % (wide) / ~88 % (phones) of the frame at its own depth
     const wAtText = wv * (D - (lay.textZ - WALL_Z)) / D
-    lay.em = (wAtText * (portrait ? 0.84 : 0.56)) / Math.max(1, widthEm)
+    lay.em = (wAtText * (portrait ? 0.84 : 0.53)) / Math.max(1, widthEm)
     // crewmate: closest plane, ~34 % (wide) / ~26 % (phones) of the frame tall
     lay.crewZ = WALL_Z + D * 0.42
     const hAtCrew = hw * (D - (lay.crewZ - WALL_Z)) / D
-    lay.crewScale = (hAtCrew * (portrait ? 0.26 : 0.3)) / crewHeight
-    lay.crewY = lay.C.y - hw * (portrait ? 0.09 : 0.08) * (D - (lay.crewZ - WALL_Z)) / D
+    // STICKERS LANE (REVIEW-visual #8): the crewmate no longer stands on the second line. Its x is the stage's (centre),
+    // and the word gap there is far narrower than the crewmate, so it floats in the clear band UNDER the headline: the
+    // type is lifted (typeY), the crewmate dropped and trimmed a touch so it clears the descenders and the CTA row
+    lay.crewScale = (hAtCrew * (portrait ? 0.24 : 0.25)) / crewHeight
+    lay.crewY = lay.C.y - hw * (portrait ? 0.09 : 0.15) * (D - (lay.crewZ - WALL_Z)) / D
+    typeY = lay.C.y + lay.em * 0.42 + hw * (portrait ? 0.1 : 0.125)
     const P = portrait ? PLACE_TALL : PLACE_WIDE
-    P.forEach((s, i) => aSt.setXYZW(i, lay.C.x + s[0] * wv, lay.C.y + s[1] * hw, s[2] * (portrait ? wv : hw), THREE.MathUtils.degToRad(s[3])))
+    P.forEach((s, i) => { base.set([lay.C.x + s[0] * wv, lay.C.y + s[1] * hw, s[2] * (portrait ? wv : hw), THREE.MathUtils.degToRad(s[3])], i * 4); aSt.setXYZW(i, base[i * 4], base[i * 4 + 1], base[i * 4 + 2], base[i * 4 + 3]) })
+    lay.crewH = crewHeight
+    ix?.relayout()   // STICKERS HOOK
     LOGOS.forEach((_, i) => aProg.setY(i, i === 1 || i === 4 ? 0.06 : 0)) // a lifted corner on two of them
     LOGOS.forEach((_, i) => aProg.setZ(i, i * 0.37))
     aSt.needsUpdate = true; aProg.needsUpdate = true
@@ -380,19 +396,17 @@ export function buildCta(portrait: boolean) {
   /** a = the align/glide progress 0..1 (stickers slap during it); on = whether anything of the wall is in view */
   function update(time: number, a: number, cam: THREE.Vector3, on: boolean) {
     group.visible = on
-    if (!on) return
+    if (!on) { ix?.update(time, a, on); return }   // STICKERS HOOK
     sU.u_cam.value.copy(cam); sU.u_time.value = time
-    for (let j = 0; j < N; j++) {
-      const i = ORDER[j]
-      const s0 = 0.28 + j * 0.105
-      aProg.setX(i, THREE.MathUtils.clamp((a - s0) / 0.16, 0, 1))
-    }
+    // W19 (Shifat 18:14Z "no appear animation"): the stickers are already on the wall, pressed flat; no slap-in on scroll
+    for (let j = 0; j < N; j++) aProg.setX(ORDER[j], 1)
     aProg.needsUpdate = true
+    ix?.update(time, a, on)   // STICKERS HOOK
     const showType = built
     type.visible = typeShadow.visible = showType
     if (showType) {
       tU.u_time.value = time; tU.u_em.value = lay.em
-      tU.u_c.value.set(lay.C.x, lay.C.y + lay.em * 0.42 + lay.hw * 0.04)
+      tU.u_c.value.set(lay.C.x, typeY)
       tMat.uniforms.u_z.value = lay.textZ
       // the soft shadow: the type projected along the light onto the wall
       const h = lay.textZ - WALL_Z
@@ -401,8 +415,15 @@ export function buildCta(portrait: boolean) {
   }
   /** the type's box (tablet-local, at its depth): both lines, a margin for the roll and the trail */
   const typeRect = () => {
-    const cy = lay.C.y + lay.em * 0.42 + lay.hw * 0.04, half = (widthEm * 0.5 + 0.25) * lay.em
+    const cy = typeY, half = (widthEm * 0.5 + 0.25) * lay.em
     return { x0: lay.C.x - half, x1: lay.C.x + half, y0: cy - (tU.u_gap.value + 0.6) * lay.em, y1: cy + 1.05 * lay.em, z: lay.textZ }
   }
-  return { group, typeRoot, type, typeRect, layout, update, lay, get dirty() { return dirty }, set dirty(v: boolean) { dirty = v }, wall }
+  // STICKERS HOOK: drag / peel / keyboard (stickerInteract.ts), bound to the real camera by the stage
+  let ix: StickerInteraction | null = null
+  const attach = (camera: THREE.Camera) => {
+    if (ix) return
+    ix = createStickerInteraction({ camera, group, base, aSt, aInt, aProg, lay, typeRect, labels: LOGOS.map((L) => L.label), shapes: LOGOS.map((L) => L.shape), z: () => sU.u_z.value })
+  }
+  const detach = () => { ix?.dispose(); ix = null }
+  return { group, typeRoot, type, typeRect, layout, update, lay, attach, detach, get dirty() { return dirty }, set dirty(v: boolean) { dirty = v }, wall }
 }

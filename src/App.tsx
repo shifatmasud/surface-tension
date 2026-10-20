@@ -7,7 +7,6 @@ import { WaterLevel } from './dom/ui/WaterLevel'
 import { ProjectOverlay } from './dom/ui/ProjectOverlay'
 import { TextLayer } from './dom/ui/TextLayer'
 import { Hero } from './dom/sections/Hero'
-import { Statement } from './dom/sections/Statement'
 import { Lab } from './dom/sections/Lab'
 import { Systems } from './dom/sections/Systems'
 import { Dive } from './dom/sections/Dive'
@@ -30,7 +29,6 @@ export function App() {
       <TextLayer />
       <main id="main" tabIndex={-1}>
         <Hero />
-        <Statement />
         <Dive />
         <Lab />
         <Systems />

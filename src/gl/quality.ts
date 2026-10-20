@@ -1,4 +1,6 @@
 import { settings, browser, MAX_RENDER_PIXELS } from '../services/settings'
+import { props } from '../state/props'
+import { input } from '../services/input'
 
 /**
  * PERF HOOK — the adaptive quality governor (Shifat 10:16Z "heavily optimized for fast speed in mobile",
@@ -19,7 +21,9 @@ import { settings, browser, MAX_RENDER_PIXELS } from '../services/settings'
  * New stages (v3 cube, HUD) plug in the same way: read `quality.rt(base)` for their target scales and
  * `quality.taps(n)` for loop counts, and re-size in a `quality.on` callback.
  *
- * QA: ?q=0..N pins a level (no governor), ?nogov disables the governor, window.__quality is the live object.
+ * QA: ?q=-B..N pins a level (no governor; negative = boost), ?nogov disables the governor, ?norest disables the rest
+ * refinement, ?restpin keeps a rest frame at native on a slow QA rig (no rest judge), window.__quality is the live
+ * object (stats, gpuMs, rest, restCap).
  */
 export type QualityState = { level: number; dpr: number; aa: 'smaa' | 'fxaa' }
 type Listener = (q: QualityState) => void
@@ -28,14 +32,21 @@ const q = new URLSearchParams(typeof location !== 'undefined' ? location.search 
 const tier = settings.TIER
 
 /** DPR ladders by tier (his skill: phones live inside 0.75–1.25). Level 0 = today's cap, so nothing changes on a
- *  device that already holds 60. Entries above the device's own DPR or the total-pixel cap are clipped at runtime. */
+ *  device that already holds 60. Entries above the device's own DPR or the total-pixel cap are clipped at runtime.
+ *  SHARP (Shifat: "crisp at full quality yet fast on phones"): BOOST steps sit ABOVE level 0 as negative levels
+ *  (-1, -2, …), reached only on measured headroom; level 0 keeps today's meaning for every reader of `level`
+ *  (render-target scales, tap counts, the neighbour pass, the stage window). Phones floor at 1.0. */
 const LADDER: Record<string, number[]> = {
   high: [1.5, 1.3, 1.15, 1.0, 0.85],
-  // Shifat 15:39Z sharper 3D: phones start higher and floor at ~1.0 where the frame budget allows (the governor
-  // still steps down a phone that cannot hold 60)
   mid: [1.5, 1.3, 1.15, 1.0, 0.85],
-  low: [1.3, 1.15, 1.0, 0.9, 0.8],
+  low: [1.3, 1.15, 1.0],
   none: [1],
+}
+const BOOST: Record<string, number[]> = {          // nearest first: BOOST[0] is level -1
+  high: [1.75, 2.0],
+  mid: [1.75, 2.0],
+  low: [1.5, 1.75, 2.0],
+  none: [],
 }
 /** render-target scale per level (multiplies a stage's own base scale) and loop-count scale */
 const RT = [1, 0.9, 0.8, 0.7, 0.6]
@@ -46,10 +57,26 @@ const WINDOW = 50                    // frames per decision (~0.8 s at 60)
 const STEP_COOLDOWN_MS = 1500        // a DPR step re-allocates targets: ignore the frames right after it
 const PROBE_CALM_MS = 4000           // full-rate time before probing a step up
 const MAX_BACKOFF_MS = 60000
+// SHARP: measured headroom (GPU ms per frame from the timer query, systems/perfGovernor.ts)
+const GPU_UP = 0.7                   // probe up only if the predicted GPU time at the next DPR is under 70 % of budget
+const GPU_NO = 0.95                  // never probe into a step predicted over 95 %
+const GPU_CALM_MS = 1500             // with a measurement, a shorter calm is enough
+// SHARP: rest refinement (idle → native DPR + SMAA)
+const REST_AFTER_MS = 300
+const REST_BUDGET_MS = 1000 / 30     // a still frame only has to hold 30 to stay refined (ambient motion only)
+const REST_WINDOW = 8                // frames per rest verdict (short: a refined frame that is too slow is dropped fast)
+const REST_STEP = 0.8
+const REST_BACKOFF_MS = 30000
+const HOVER_EXIT_MS = 500            // a mouse twitch keeps the rest frame; only a sustained hover (≥ 0.5 s) leaves rest
+const SETTLE_MS = 250                // the frames right after a re-allocation (rest in/out) are not a governor verdict
+/** SHARP (eng review #25): ONE density ceiling for everything. The canvas (= the text layer, SharpText + the final
+ *  upscale) never exceeds the device's own DPR (cap 3) nor ~9 Mpx of backing store; the scene never exceeds the text. */
+const CANVAS_PIXELS = 9.0e6
 
 class Quality {
   readonly tier = tier
   readonly ladder = LADDER[tier] ?? [1]
+  readonly boost = BOOST[tier] ?? []
   level = 0
   aa: 'smaa' | 'fxaa' = 'smaa'
   pinned = q.has('q')
@@ -62,48 +89,136 @@ class Quality {
   private lastStep = 0
   private calmSince = 0
   private backoff = PROBE_CALM_MS
-  private probing = -1               // level we probed up from (-1 = not probing)
+  private probing = -99              // level we probed up from (-99 = not probing)
   private stallRun = 0
   private winStart = 0
   private sorted = new Float32Array(WINDOW)
-  stats = { median: 0, p90: 0, steps: 0, probes: 0, failedProbes: 0 }
+  /** the last window size the DPR was asked for (skips boost steps the device or the pixel cap clip to the same DPR) */
+  private w = typeof window !== 'undefined' ? window.innerWidth : 1
+  private h = typeof window !== 'undefined' ? window.innerHeight : 1
+  /** GPU ms per frame (EMA) from the timer query; -1 = no measurement on this device (iOS, WebGL1, disjoint) */
+  gpuMs = -1
+  private gpuAt = 0
+  stats = { median: 0, p90: 0, steps: 0, probes: 0, failedProbes: 0, gpuProbes: 0, gpuVetoes: 0, rests: 0, restDowns: 0, restSuspends: 0, restOut: { hard: 0, hover: 0, gate: 0 } }
 
   constructor() {
-    if (this.pinned) this.level = Math.max(0, Math.min(this.ladder.length - 1, parseInt(q.get('q') || '0', 10) || 0))
+    if (this.pinned) this.level = Math.max(this.minLevel, Math.min(this.maxLevel, parseInt(q.get('q') || '0', 10) || 0))
     this.aa = this.aaFor(this.level)
   }
   get maxLevel() { return this.ladder.length - 1 }
-  /** DPR for a window size: the level's step, clipped by the device DPR and the total-pixel cap, floored at 0.6 */
+  get minLevel() { return -this.boost.length }
+  /** the ladder's DPR step at a level (negative = boost) */
+  stepAt(level: number) { return level < 0 ? this.boost[Math.min(this.boost.length, -level) - 1] : this.ladder[Math.min(this.maxLevel, level)] }
+  /** the device's own density for this window: device DPR (cap 3) within the canvas pixel cap — the single ceiling */
+  nativeFor(w: number, h: number) { return Math.max(1, Math.min(3, window.devicePixelRatio || 1, Math.sqrt(CANVAS_PIXELS / Math.max(1, w * h)))) }
+  private cap(w: number, h: number) { return Math.min(browser.dpr, this.nativeFor(w, h), Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h))) }
+  /** the rest target before the rest judge: native within 1.2x the scene pixel cap */
+  private restTarget(w: number, h: number) { return Math.min(this.nativeFor(w, h), Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h)) * 1.2) }
+  /** DPR for a window size: the level's step, clipped by the device DPR and the total-pixel cap, floored at 0.6.
+   *  At rest: native (the device's own DPR, phones up to 3) within 1.2x the pixel cap, lowered by the rest judge.
+   *  Never above the text density (eng review #25: text stays the sharpest thing on screen, at rest too). */
   dprFor(w: number, h: number, noRest = false) {
-    const byPixels = Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h))
-    // REST REFINEMENT (Shifat 15:39Z): at rest, with headroom (level 0), one step toward native (×1.35, ≤ 2)
-    const r = this.rest && !noRest
-    const step = this.ladder[this.level] * (r ? 1.35 : 1)
-    return Math.max(0.6, Math.min(browser.dpr, r ? 2 : 9, step, byPixels * (r ? 1.2 : 1)))
+    this.w = w; this.h = h
+    const td = this.textDprFor(w, h, noRest)
+    const moving = Math.min(td, Math.max(0.6, Math.min(this.stepAt(this.level), this.cap(w, h))))
+    if (!this.rest || noRest) return moving
+    return Math.min(td, Math.max(moving, Math.min(this.restTarget(w, h), this.restCap)))
   }
-  /** at rest (no scroll, no pointer for ~300 ms) the canvas refines one step; any motion drops it back. Only at level 0
-   *  on mid/high tiers and when the governor runs. */
+  /** SHARP (eng review #3): the canvas / text density is a governor rung too. Phones (tier low) on a 3x screen paid a
+   *  full 3x upscale + text pass even at the governor floor (≈85 % of the fill there). Moving: 2x on phones (indistin-
+   *  guishable from 3x at reading distance, 2.25x fewer pixels), 1.5x at the last two levels; at rest: native, so a
+   *  still is as sharp as the screen. Desktop/tablet tiers: native always (≤ 2 on almost every desktop). */
+  textDprFor(w: number, h: number, noRest = false) {
+    const n = this.nativeFor(w, h)
+    if (tier !== 'low' || (this.rest && !noRest)) return n
+    return Math.min(n, this.level >= this.maxLevel - 1 ? 1.5 : 2)
+  }
+  /** SHARP REST REFINEMENT (Shifat 15:39Z + the sharp lane): after ~300 ms with no scroll or pointer the canvas renders
+   *  at native density with SMAA (razor stills); motion drops it back. Every tier, phones included. A rest frame that
+   *  cannot hold ~30 lowers the rest DPR (×0.8 per verdict); at the moving DPR rest is suspended with back-off.
+   *  Leaving rest takes 2 moving ticks in a row, so hover jitter does not thrash the re-allocation. */
   rest = false
+  restCap = 3
   private still = 0
+  private movingRun = 0
+  private hoverSince = 0
+  private hoverLast = 0
+  private lastDelta = 16
+  private restAt = 0                 // the last rest in/out (its re-allocation frame is not a verdict)
+  private settleUntil = 0
+  private restBlockedUntil = 0
+  private restBackoff = REST_BACKOFF_MS
+  private restN = 0
+  private restBuf = new Float32Array(REST_WINDOW)
   restTick(moving: boolean, now: number) {
-    const can = this.enabled && this.judging && this.level === 0 && tier !== 'low' && this.probing < 0
-    if (moving || !can) { this.still = now; if (this.rest) this.setRest(false, now); return }
-    if (!this.rest && now - this.still > 300) this.setRest(true, now)
+    const can = this.enabled && this.judging && this.probing === -99 && now >= this.restBlockedUntil && !q.has('norest')
+    if (!can) { this.still = now; this.movingRun = 0; if (this.rest) { this.stats.restOut.gate++; this.setRest(false, now) } return }
+    // eng review #4: a hover (mouse move with no scroll, no press, no overlay) is not "moving" for an existing rest
+    // frame — a twitch used to re-allocate every target twice. A sustained hover (the pointer parallax really moving
+    // the frame for ≥ 0.5 s) still leaves rest; scroll, a press or a touch leave it at once (2 ticks).
+    const hard = Math.abs(props.scrollVel) > 0.5 || input.isDown || props.overlayOpen
+    if (moving && !hard) {
+      if (now - this.hoverLast > Math.max(150, 2.5 * this.lastDelta)) this.hoverSince = now   // a gap ends a hover (≥ 2.5 frames on a slow device)
+      this.hoverLast = now
+    }
+    if (moving) {
+      this.still = now
+      const leave = hard || now - this.hoverSince >= HOVER_EXIT_MS
+      if (this.rest && leave && ++this.movingRun >= 2) { this.stats.restOut[hard ? 'hard' : 'hover']++; this.setRest(false, now) }
+      return
+    }
+    this.movingRun = 0
+    if (!this.rest && now - this.still > REST_AFTER_MS) {
+      // nothing to refine: the moving DPR already is the rest target (native, or the pixel cap)
+      const mv = this.dprFor(this.w, this.h, true)
+      if (Math.min(this.restTarget(this.w, this.h), this.restCap) <= mv + 0.01 && this.textDprFor(this.w, this.h, true) >= this.nativeFor(this.w, this.h) - 0.01) return
+      this.setRest(true, now)
+    }
   }
   private setRest(v: boolean, now: number) {
-    this.rest = v; this.lastStep = now; this.n = 0
+    // eng review #4: rest does not touch the governor's lastStep (it used to mute the governor for 1.5 s after every
+    // pause); only the re-allocation frames right after it are skipped
+    this.rest = v; this.restAt = now; this.settleUntil = now + SETTLE_MS; this.n = 0; this.restN = 0; this.movingRun = 0
+    if (v) this.stats.rests++
+    this.aa = this.aaFor(this.level)
     const s = this.state(); this.listeners.forEach((fn) => fn(s))
   }
+  /** a rest window's verdict: too slow → lower the rest DPR, or suspend rest once it is no better than moving */
+  private judgeRest(deltaMs: number, now: number) {
+    if (now - this.restAt < SETTLE_MS || q.has('restpin')) return  // the re-allocation frame is not a verdict; ?restpin (QA on the 1–3 fps rig): rest is never judged down
+    this.restBuf[this.restN++] = Math.min(deltaMs, 1000)
+    // a verdict every 8 frames, or after 3 once they add up to half a second (a slow device is not held at native for
+    // 8 slow frames)
+    let sum = 0; for (let i = 0; i < this.restN; i++) sum += this.restBuf[i]
+    if (this.restN < REST_WINDOW && !(this.restN >= 3 && sum > 500)) return
+    const n = this.restN; this.restN = 0
+    const s = Array.from(this.restBuf.subarray(0, n)).sort((a, b) => a - b), med = s[n >> 1]
+    if (med <= REST_BUDGET_MS * 1.15) { this.restBackoff = REST_BACKOFF_MS; return }
+    const moving = this.dprFor(this.w, this.h, true)
+    const cur = this.dprFor(this.w, this.h)
+    const next = med > REST_BUDGET_MS * 3 ? moving : cur * REST_STEP     // hopeless (3x over) → straight back
+    if (next <= moving * 1.05) {
+      this.stats.restSuspends++
+      this.restBlockedUntil = now + this.restBackoff
+      this.restBackoff = Math.min(4 * REST_BACKOFF_MS, this.restBackoff * 2)
+      this.restCap = 3                                       // the next try (after the back-off) starts at native again
+      this.setRest(false, now)
+    } else {
+      this.stats.restDowns++
+      this.restCap = next
+      this.setRest(true, now)
+    }
+  }
   /** a stage's render-target scale at the current level (base = the stage's own tier scale) */
-  rt(base: number) { return base * RT[Math.min(this.level, RT.length - 1)] }
+  rt(base: number) { return base * RT[Math.max(0, Math.min(this.level, RT.length - 1))] }
   /** a loop/sample count at the current level, never below `min` */
-  taps(base: number, min = 1) { return Math.max(min, Math.round(base * TAPS[Math.min(this.level, TAPS.length - 1)])) }
-  state(): QualityState { return { level: this.level, dpr: this.ladder[this.level], aa: this.aa } }
+  taps(base: number, min = 1) { return Math.max(min, Math.round(base * TAPS[Math.max(0, Math.min(this.level, TAPS.length - 1))])) }
+  state(): QualityState { return { level: this.level, dpr: this.stepAt(this.level), aa: this.aa } }
   on(fn: Listener) { this.listeners.add(fn); return () => { this.listeners.delete(fn) } }
-  /** phones only, and only at the very bottom of the ladder: SMAA (3 passes) → FXAA (1 pass) */
-  private aaFor(level: number): 'smaa' | 'fxaa' { return tier === 'low' && level >= this.maxLevel && !q.has('smaa') ? 'fxaa' : 'smaa' }
+  /** phones only, and only at the very bottom of the ladder while moving: SMAA (3 passes) → FXAA (1 pass). Rest is SMAA. */
+  private aaFor(level: number): 'smaa' | 'fxaa' { return tier === 'low' && level >= this.maxLevel && !this.rest && !q.has('smaa') ? 'fxaa' : 'smaa' }
   set(level: number, now = performance.now()) {
-    level = Math.max(0, Math.min(this.maxLevel, level))
+    level = Math.max(this.minLevel, Math.min(this.maxLevel, level))
     if (level === this.level) return
     this.level = level
     this.aa = this.aaFor(level)
@@ -112,10 +227,28 @@ class Quality {
     const s = this.state()
     this.listeners.forEach((fn) => fn(s))
   }
+  /** SHARP: the GPU frame timer's sample (ms of GPU work for one frame) */
+  gpuSample(ms: number, now: number) {
+    if (!(ms >= 0) || ms > 500) return
+    this.gpuMs = this.gpuMs < 0 || now - this.gpuAt > 2000 ? ms : this.gpuMs * 0.9 + ms * 0.1
+    this.gpuAt = now
+  }
+  private gpuFresh(now: number) { return this.gpuMs >= 0 && now - this.gpuAt < 1000 }
+  /** the next level up whose effective DPR is actually higher (boost steps clipped to the same DPR are skipped) */
+  private nextUp(): number {
+    const cur = this.dprFor(this.w, this.h, true)
+    for (let l = this.level - 1; l >= this.minLevel; l--) {
+      const d = Math.max(0.6, Math.min(this.stepAt(l), this.cap(this.w, this.h)))
+      if (d > cur + 0.01) return l
+    }
+    return this.level
+  }
   /** called once per frame by the clock with the raw frame delta (ms) */
   frame(deltaMs: number, now: number) {
-    if (!this.enabled || !this.judging) { this.n = 0; this.calmSince = now; return }
-    if (now - this.lastStep < STEP_COOLDOWN_MS) return
+    this.lastDelta = Math.min(1000, Math.max(1, deltaMs))
+    if (!this.enabled || !this.judging) { this.n = 0; this.restN = 0; this.calmSince = now; return }
+    if (this.rest) { this.calmSince = now; this.judgeRest(deltaMs, now); return }   // rest frames judge the rest DPR only
+    if (now - this.lastStep < STEP_COOLDOWN_MS || now < this.settleUntil) return
     // an isolated stall (tab switch, a big decode) is not a rendering verdict; a run of them is a device that is simply
     // that slow, and those frames count (clamped) so it still steps down
     if (deltaMs > 250) { if (++this.stallRun < 4) return; deltaMs = 250 } else this.stallRun = 0
@@ -127,24 +260,39 @@ class Quality {
     const s = this.sorted.subarray(0, n); s.set(this.buf.subarray(0, n)); s.sort()
     const med = s[n >> 1], p90 = s[Math.floor(n * 0.9)]
     this.stats.median = med; this.stats.p90 = p90
-    const slow = med > BUDGET_MS * 1.18 || p90 > BUDGET_MS * 1.9   // < ~51 fps median, or 10 % of frames dropping 2+
+    // hysteresis: down at > ~51 fps median (or 10 % of frames dropping 2+), up only after a calm spell at full rate
+    const slow = med > BUDGET_MS * 1.18 || p90 > BUDGET_MS * 1.9
     if (slow) {
-      if (this.probing >= 0) {                                  // the probe failed: back down, wait longer next time
+      if (this.probing !== -99) {                               // the probe failed: back down, wait longer next time
         this.stats.failedProbes++
         this.backoff = Math.min(MAX_BACKOFF_MS, this.backoff * 2)
-        const back = this.probing; this.probing = -1
+        const back = this.probing; this.probing = -99
         this.set(back, now)
       } else if (this.level < this.maxLevel) this.set(this.level + 1, now)
       this.calmSince = now
       return
     }
     // full rate this window
-    if (this.probing >= 0) { this.probing = -1; this.backoff = PROBE_CALM_MS }   // the probe held: stay
-    if (this.level > 0 && now - this.calmSince > this.backoff) {
-      this.stats.probes++
-      this.probing = this.level
-      this.set(this.level - 1, now)
+    if (this.probing !== -99) { this.probing = -99; this.backoff = PROBE_CALM_MS }   // the probe held: stay
+    const up = this.nextUp()
+    if (up === this.level) return
+    const calm = now - this.calmSince
+    if (this.gpuFresh(now)) {
+      // measured: predict the GPU time at the next DPR (cost ∝ pixels) and only probe where it fits
+      const cur = this.dprFor(this.w, this.h, true), nd = Math.max(0.6, Math.min(this.stepAt(up), this.cap(this.w, this.h)))
+      const pred = this.gpuMs * (nd / cur) * (nd / cur)
+      if (pred > BUDGET_MS * GPU_NO) { this.stats.gpuVetoes++; this.calmSince = now; return }
+      if (pred < BUDGET_MS * GPU_UP && calm > GPU_CALM_MS) { this.stats.gpuProbes++; this.probe(up, now); return }
+      if (calm > this.backoff) this.probe(up, now)
+      return
     }
+    // unmeasured (no timer query): today's blind probe; boost steps wait twice as long
+    if (calm > this.backoff * (up < 0 ? 2 : 1)) this.probe(up, now)
+  }
+  private probe(up: number, now: number) {
+    this.stats.probes++
+    this.probing = this.level
+    this.set(up, now)
   }
 }
 

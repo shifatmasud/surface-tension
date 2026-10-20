@@ -29,6 +29,7 @@ import { dive } from './stages/dive/diveState'
 import { sys as sysState } from './stages/systems/state'
 import { journey } from './stages/journey/journeyState'
 import { Spring, Spring3 } from '../core/spring'
+import { GpuFrameTimer } from './systems/perfGovernor' // SHARP HOOK: the governor's GPU frame timer
 
 // PRELOAD: code-split per scene. The hero is in this chunk; each later stage is its own chunk, mounted and
 // shader-warmed when its block enters the ±1 window around the current block (LaterStages below).
@@ -42,16 +43,33 @@ const LATER: { name: string; load: () => Promise<ComponentType> }[] = [
 const LAZY = LATER.map((s) => lazy(() => s.load().then((C) => ({ default: C }))))
 
 /**
- * Shifat 14:01Z ("every big text must be the sharpest thing on screen"): the canvas backing store runs at the device's
- * own density (cap 3, and a total-pixel cap for huge screens) while the 3D scene and the post chain render at the
- * governor's DPR into their own targets (PostChain.setSize sizes them explicitly). The final pass upscales the scene
- * once onto the canvas, and the text layer is drawn after it at full density (PostChain.drawText).
+ * Shifat 14:01Z ("every big text must be the sharpest thing on screen"): the canvas backing store runs at the text
+ * density while the 3D scene and the post chain render at the governor's DPR into their own targets
+ * (PostChain.setSize sizes them explicitly). The final pass upscales the scene once onto the canvas, and the text layer
+ * is drawn after it at the canvas density (PostChain.drawText).
+ * SHARP HOOK (eng review #3/#4/#25): both densities come from ONE place (quality.dprFor / quality.textDprFor: one
+ * ceiling, scene ≤ text, the text density a governor rung on phones). R3F's own dpr IS the text density, so a governor
+ * step or a rest in/out resizes the canvas at most once (it used to go scene DPR → text DPR: two re-allocations and a
+ * clear per toggle), and only when the text rung really changes; the DOM-rect remeasure (ufx) only runs on a real
+ * window resize. The whole apply is idempotent, so the size effect and the governor listener never double up.
  */
-function applyTextDpr(gl: THREE.WebGLRenderer, w: number, h: number, sceneDpr: number) {
-  const dev = Math.min(3, window.devicePixelRatio || 1, Math.sqrt(9.0e6 / Math.max(1, w * h)))
-  const td = Math.max(sceneDpr, dev)
-  props.textDpr = td
-  if (Math.abs(gl.getPixelRatio() - td) > 1e-3) gl.setPixelRatio(td)
+type Sizing = { gl: THREE.WebGLRenderer; w: number; h: number; setDpr: (d: number) => void; sys: { paint: ScreenPaint; chain: PostChain }; last: { key: string; wh: string } } // SHARP HOOK
+function applySizing(z: Sizing): boolean { // SHARP HOOK: returns whether anything changed
+  const { gl, w, h } = z
+  const dpr = quality.dprFor(w, h), td = Math.max(dpr, quality.textDprFor(w, h)), pd = quality.dprFor(w, h, true)
+  const key = `${w}x${h}|${dpr.toFixed(4)}|${td.toFixed(4)}|${pd.toFixed(4)}`
+  if (key === z.last.key) return false
+  z.last.key = key
+  props.dpr = dpr; props.textDpr = td
+  if (Math.abs(gl.getPixelRatio() - td) > 1e-3) z.setDpr(td) // R3F's store resizes the canvas synchronously (once)
+  if (Math.abs(gl.getPixelRatio() - td) > 1e-3) gl.setPixelRatio(td) // (a store that already held td: no-op above)
+  props.renderW = Math.floor(w * dpr); props.renderH = Math.floor(h * dpr)
+  props.paintDpr = pd; z.sys.paint.resize(Math.floor(w * pd), Math.floor(h * pd)) // the trail sim ignores rest (and no-ops on an unchanged size)
+  z.sys.chain.setSize(w, h)
+  shared.u_resolution.value.set(props.renderW, props.renderH)
+  const wh = `${w}x${h}`
+  if (wh !== z.last.wh) { z.last.wh = wh; ufx.resize(w, h) } // DOM rects re-measure on a real resize only
+  return true
 }
 
 /** Owns the frame: paint → sim → (stages already updated) → post chain. Priority 1 = R3F stops auto-render. */
@@ -68,36 +86,19 @@ function Renderer() {
     return { paint, ripple, chain }
   }, [gl, scene, camera])
 
+  const sizing = useRef({ key: '', wh: '' }) // SHARP HOOK
   useEffect(() => {
     // keep the total-pixel cap as the window changes (ultrawide / 4K / external monitor)
-    // PERF HOOK: the governor's DPR step (≤ the tier cap and the total-pixel cap)
-    const want = quality.dprFor(size.width, size.height)
-    if (Math.abs(want - storeDpr) > 0.01) { setDpr(want); return }
-    const dpr = storeDpr
-    props.dpr = dpr
-    applyTextDpr(gl, size.width, size.height, dpr)
-    props.renderW = Math.floor(size.width * dpr); props.renderH = Math.floor(size.height * dpr)
-    { const pd = quality.dprFor(size.width, size.height, true); props.paintDpr = pd; sys.paint.resize(Math.floor(size.width * pd), Math.floor(size.height * pd)) } // the trail sim ignores the rest refinement (no reset when the pointer stops)
-    sys.chain.setSize(size.width, size.height)
-    shared.u_resolution.value.set(props.renderW, props.renderH)
-    ufx.resize(size.width, size.height)
+    // SHARP HOOK: one idempotent apply (canvas = text density, chain/paint = the governor's DPR)
+    applySizing({ gl, w: size.width, h: size.height, setDpr, sys, last: sizing.current })
   }, [size, gl, sys, setDpr, storeDpr])
 
-  // PERF HOOK: a governor step changes the DPR; the effect above re-sizes the paint, the chain and the uniforms
-  // NEIGHBOUR HOOK (flash fix): setDpr resizes the canvas at once (which clears it), but the effect above only runs
-  // after React re-renders; a frame presented in between showed the page through an empty canvas (caught on the remote
-  // GPU as blank frames at governor steps). So the step applies the same resize now and draws one frame immediately.
+  // PERF HOOK: a governor step changes the DPR; the same apply re-sizes the paint, the chain and the uniforms
+  // NEIGHBOUR HOOK (flash fix): a canvas resize clears it, so a step that changed anything draws one frame at once.
+  // SHARP HOOK: no second resize pass any more (the size effect above finds the same key and returns).
   useEffect(() => quality.on(() => {
-    const dpr = quality.dprFor(size.width, size.height)
-    setDpr(dpr)
-    props.dpr = dpr
-    applyTextDpr(gl, size.width, size.height, dpr)
-    props.renderW = Math.floor(size.width * dpr); props.renderH = Math.floor(size.height * dpr)
-    { const pd = quality.dprFor(size.width, size.height, true); props.paintDpr = pd; sys.paint.resize(Math.floor(size.width * pd), Math.floor(size.height * pd)) } // the trail sim ignores the rest refinement (no reset when the pointer stops)
-    sys.chain.setSize(size.width, size.height)
-    shared.u_resolution.value.set(props.renderW, props.renderH)
-    ufx.resize(size.width, size.height)
-    if (engine.warm && props.introDone) sys.chain.render(0)
+    const changed = applySizing({ gl, w: size.width, h: size.height, setDpr, sys, last: sizing.current }) // SHARP HOOK
+    if (changed && engine.warm && props.introDone) sys.chain.render(0)
   }), [size, setDpr, gl, sys])
 
   useEffect(() => {
@@ -402,6 +403,7 @@ export function Scene() {
       }}
       style={{ position: 'fixed', inset: 0 }}
     >
+      <GpuFrameTimer />{/* SHARP HOOK: times each frame's GPU work for the governor (systems/perfGovernor.ts) */}
       <Renderer />
       <NeighbourPass />
       <CameraRig />
