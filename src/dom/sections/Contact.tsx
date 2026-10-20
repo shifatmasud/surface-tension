@@ -97,7 +97,7 @@ export function Contact() {
           const f = clamp((props.height - r.top) / (r.height + 1))
           props.overscroll = f
           if (bar.current) bar.current.style.transform = `scaleX(${f.toFixed(3)})`
-          if (f > 0.985 && !fired) { fired = true; audio.swell(false); scroll.scrollTo(0, { duration: 3.2 }); setTimeout(() => (fired = false), 3500) }
+          if (f > 0.985 && !fired) { fired = true; audio.swell(false); scroll.wrapToTop(); setTimeout(() => (fired = false), 900) }
         }
       },
       dispose() { h?.dispose() },

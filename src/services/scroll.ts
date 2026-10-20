@@ -126,6 +126,36 @@ class ScrollService {
     else { this.scrollPixel = this.clampPx(this.scrollPixel); this.targetScrollPixel = this.clampPx(this.targetScrollPixel) }
   }
   private clampPx(v: number) { return clamp(v, 0, this.limit) }
+  /** input arriving before this time (ms) is dropped: the wheel/trackpad inertia that carried you past the footer must not
+   *  carry on from the top after the loop */
+  private muteUntil = 0
+  private muteCap = 0
+  /**
+   * The loop (Shifat 13:44Z: "Scrolling after footer doesn't wrap loop back to header & hero section. Instead goes to
+   * crewmate scene."). It was a 3.2 s glide to the top that any further wheel/touch input cancelled half way (landing
+   * in the crewmate scene). Now it is a real wrap: one instant jump to 0 — the header and the hero at progress 0 —
+   * under a white veil that matches the white footer and fades off over the hero, and the leftover inertia is dropped.
+   */
+  wrapToTop() {
+    // drop input for 0.6 s, and for as long after that as the wheel/trackpad inertia keeps streaming (each event while
+    // muted extends the window by 0.22 s), up to 1.8 s: a deliberate new scroll after the loop is taken at once
+    const now = performance.now()
+    this.muteUntil = now + 600; this.muteCap = now + 1800
+    this.wheelAcc = 0; this.keyTarget = null; this.dragAcc = 0
+    let veil = document.getElementById('wrap-veil')
+    if (!veil) {
+      veil = document.createElement('div'); veil.id = 'wrap-veil'; veil.setAttribute('aria-hidden', 'true')
+      veil.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:#fff;pointer-events:none;opacity:0'
+      document.body.appendChild(veil)
+    }
+    veil.style.transition = 'none'; veil.style.opacity = '1'
+    this.scrollTo(0, { immediate: true })
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (!veil) return
+      veil.style.transition = 'opacity .55s cubic-bezier(.2,.7,.2,1)'; veil.style.opacity = '0'
+    }))
+    ;(document.querySelector('#hero, main, body') as HTMLElement | null)?.focus?.({ preventScroll: true } as any)
+  }
   resetScroll(v: number) {
     this.scrollPixel = this.targetScrollPixel = this.clampPx(v)
     this.velocityPixel = 0; this.history.length = 0; this.isWheelScrolling = false
@@ -140,6 +170,8 @@ class ScrollService {
     if (this.nativeScrollerFor(e.target as Element, dy)) return // an inner scroller (overlay body) takes it
     e.preventDefault()
     if (this.stopped) return
+    const now = performance.now()
+    if (now < this.muteUntil) { this.muteUntil = Math.min(this.muteCap, Math.max(this.muteUntil, now + 220)); return }
     this.wheelAcc += clamp(dy, -WHEEL_CLAMP, WHEEL_CLAMP)
   }
   private onTouchStart = (e: TouchEvent) => {
@@ -265,6 +297,7 @@ class ScrollService {
       if (this.touchDown && !this.touchWasDown) this.history.length = 0
       let a = 0
       if (!this.stopped) {
+        if (performance.now() < this.muteUntil) { this.wheelAcc = 0; this.keyTarget = null; this.dragAcc = 0 }
         const wheel = this.wheelAcc
         if (wheel !== 0 || this.keyTarget !== null || dragging) this.tween = null
         if (this.tween) {
