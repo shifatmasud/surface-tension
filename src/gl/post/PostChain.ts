@@ -62,6 +62,10 @@ export class PostChain {
   constructor(public gl: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, ufxUnder: THREE.Scene, ufxOver: THREE.Scene, ufxCamera: THREE.Camera) {
     this.nbArgs = [scene, camera, ufxUnder, ufxOver, ufxCamera]
     this.composer = new EffectComposer(gl, { frameBufferType: THREE.HalfFloatType, multisampling: 0 })
+    // W18 fps fix: the whole chain (AA included) stays at the scene's adaptive DPR; only one bilinear blit touches the
+    // full-density canvas, then the text layer (scissored to its boxes). Before this the last pass (SMAA/FXAA) ran at
+    // the canvas's native density, ~3x the pixels on a 3x phone, with its full tap count.
+    this.composer.autoRenderToScreen = false
     this.text = new SharpText(this.distortion)
     this.scenePass = new RenderPass(scene, camera)
     this.bloom = settings.BLOOM_HQ
@@ -93,6 +97,22 @@ export class PostChain {
       // canvas's full density, through the same trail displacement
       { name: 'ClipComposite', order: 3000, pass: new EffectPass(camera, new ClipCompositeEffect()), needsRender: () => clip.boundary || clip.capture >= 0 },
     ]
+  }
+  // the one full-density pass: the finished frame (in the composer's input buffer after its last swap) upscaled once
+  private blitCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
+  private blitMat = new THREE.ShaderMaterial({
+    uniforms: { tMap: { value: null as THREE.Texture | null } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: 'uniform sampler2D tMap; varying vec2 vUv; void main(){ gl_FragColor = texture2D(tMap, vUv);\n#include <colorspace_fragment>\n}',
+    depthTest: false, depthWrite: false, toneMapped: false,
+  })
+  private blitScene = (() => { const s = new THREE.Scene(); const m = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.blitMat); m.frustumCulled = false; s.add(m); return s })()
+  private blit() {
+    const gl = this.gl, prev = gl.getRenderTarget(), auto = gl.autoClear
+    this.blitMat.uniforms.tMap.value = this.composer.inputBuffer.texture
+    gl.setRenderTarget(null); gl.autoClear = false
+    gl.render(this.blitScene, this.blitCam)
+    gl.autoClear = auto; gl.setRenderTarget(prev)
   }
   /** the chain's own buffer size (scene density), independent of the canvas (text density) */
   bw = 1; bh = 1
@@ -176,10 +196,11 @@ export class PostChain {
     if (sig !== this.signature) {
       this.signature = sig
       this.composer.removeAllPasses()
-      this.entries.filter((e) => e.on).sort((a, b) => a.order - b.order).forEach((e) => { this.composer.addPass(e.pass); e.pass.setSize(this.bw, this.bh) })
+      this.entries.filter((e) => e.on).sort((a, b) => a.order - b.order).forEach((e) => { e.pass.renderToScreen = false; this.composer.addPass(e.pass); e.pass.setSize(this.bw, this.bh) })
       ;(window as any).__chain = this.entries.filter((e) => e.on).map((e) => `${e.order}:${e.name}`)
     }
     this.composer.render(dt)
+    this.blit()
     this.text.draw(this.gl)
     void shared
   }

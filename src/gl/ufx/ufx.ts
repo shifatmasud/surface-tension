@@ -125,6 +125,7 @@ void main(){
 export const UFX_TEXT_FRAG = /* glsl */ `
 uniform sampler2D u_map;
 uniform float u_reveal;        // 0 hidden under the mask → 1 in place
+uniform float u_hw;            // quad height / width (for the tilt's skew)
 uniform float u_opacity;
 uniform sampler2D u_currPaintTexture;
 uniform vec2 u_paintTextureSize;
@@ -137,9 +138,15 @@ ${BICUBIC}
 void main(){
   // mask slide-up: sample the glyphs shifted down by (1 - reveal); clip below the line box
   // reveal 0→1 rises from under the line's mask; 1→2 keeps rising and leaves through the top edge
-  float off = (1.0 - u_reveal) * 1.15;
+  float off = (1.0 - u_reveal) * 1.02;
   vec2 uv = vec2(v_uv.x, v_uv.y + off);
-  if (uv.y > 1.0 || uv.y < 0.0) discard;
+  if (uv.y > 1.0 || uv.y < 0.0) discard;   // the hard mask: the line's own box, no feather
+  // a 2.5° tilt that settles as the line lands (and leans the other way as it leaves): a rotateX squash about the
+  // baseline plus a skew, in the glyphs' own pixel space (u_hw = the quad's height / width)
+  float tl = clamp(1.0 - u_reveal, -1.0, 1.0);
+  uv.y = 0.5 + (uv.y - 0.5) * (1.0 + 0.035 * abs(tl));
+  uv.x += (uv.y - 0.5) * 0.044 * tl * u_hw;
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y > 1.0 || uv.y < 0.0) discard;
   float a = texture2D(u_map, uv).a;
   // the cursor paints liquid silver into the type: velocity picks a sheen, weight decides how much
   vec2 suv = gl_FragCoord.xy / u_resolution;
@@ -155,7 +162,7 @@ export function textMaterial(map: THREE.Texture, color: string, sheen = '#9aa0a8
   return new THREE.ShaderMaterial({
     vertexShader: UFX_VERT, fragmentShader: UFX_TEXT_FRAG,
     uniforms: {
-      u_map: { value: map }, u_reveal: { value: 0 }, u_opacity: { value: 1 },
+      u_map: { value: map }, u_reveal: { value: 0 }, u_opacity: { value: 1 }, u_hw: { value: 0.15 },
       u_bend: bendUniform, u_viewH: viewHUniform, u_lift: { value: 0 },
       u_currPaintTexture: shared.u_currPaintTexture, u_paintTextureSize: shared.u_paintTextureSize,
       u_resolution: shared.u_resolution, u_color: { value: new THREE.Color(color) }, u_sheen: { value: new THREE.Color(sheen) },

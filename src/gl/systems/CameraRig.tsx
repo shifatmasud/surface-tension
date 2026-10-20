@@ -10,6 +10,12 @@ import { tilt } from '../../services/tilt'
 import { clip } from './clip'
 
 const FINE_POINTER = typeof matchMedia === 'function' ? matchMedia('(any-pointer: fine)').matches : true
+const REDUCED = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)').matches : false
+// the handheld operator is a polish item awaiting the OK for LIVE: on everywhere except the live host (or with ?cam)
+const OPERATOR = typeof location === 'undefined' || location.hostname !== 'shifat-surface-tension.sites.tab.bot' || /[?&]cam/.test(location.search)
+/** critically damped follow (Shifat 15:30Z "mouse/touch move smoothly animates camera like real life"): w = 6.2 rad/s
+ *  settles in ~0.75 s with no overshoot */
+class Crit { x = 0; v = 0; constructor(public w = 6.2) {} step(t: number, dt: number) { const a = this.w * this.w * (t - this.x) - 2 * this.w * this.v; this.v += a * dt; this.x += this.v * dt; return this.x } }
 
 /** The active stage owns the camera; pointer parallax (desktop) / tilt parallax (phones) + idle drift. */
 export function CameraRig() {
@@ -26,6 +32,7 @@ export function CameraRig() {
     stage: '',
     owner: -1,
     last: new THREE.Vector3(NaN, NaN, NaN),
+    op: { yaw: new Crit(), pitch: new Crit(), roll: new Crit(4.2), k: 1, t: 0 },
   }), [])
   useFrame((_, dt) => {
     visuals.resolve(st.pose, dt)
@@ -65,7 +72,26 @@ export function CameraRig() {
     const d = st.drift.update(dt)
     camera.position.set(p.x + par.x + d.x * 0.12 * strength, p.y + par.y + d.y * 0.08 * strength, p.z + d.z * 0.1 * strength)
     camera.lookAt(t.x + par.x * 0.25, t.y + par.y * 0.2, t.z)
-    if (Math.abs(camera.fov - f) > 1e-3) { camera.fov = f; camera.updateProjectionMatrix() }
+    // the handheld operator (Shifat 15:30Z): small yaw/pitch toward the cursor (desktop) or the touch-drag point
+    // (phones, only while the finger is down), a lagging roll, a 0.1–0.3° float and a breath of lens — layered on top
+    // of the scroll camera as a rotation about the lens, so it never moves the subject off its mark. Reduced motion: off.
+    if (!REDUCED && OPERATOR) {
+      const O = st.op
+      const touching = input.isTouch && input.isDown
+      const tx = fine ? input.mouseXY.x : touching ? input.mouseXY.x : 0
+      const ty = fine ? input.mouseXY.y : touching ? input.mouseXY.y : 0
+      // stages with an exact composition (the journey's screen fills the viewport) take a smaller share
+      O.k += ((props.overlayOpen ? 0 : props.stage === 'journey' ? 0.35 : 1) - O.k) * (1 - Math.exp(-3 * dt))
+      const yaw = O.yaw.step(-tx * 0.042 * O.k, dt)          // ±2.4°
+      const pitch = O.pitch.step(ty * 0.03 * O.k, dt)        // ±1.7°
+      const roll = O.roll.step(O.yaw.v * -0.12 * O.k, dt)    // the roll lags the pan, like a shoulder rig
+      O.t += dt
+      const fy = 0.0035 * Math.sin(O.t * 0.37) + 0.0018 * Math.sin(O.t * 0.91 + 1.3)   // ~0.1–0.3° float
+      const fx = 0.0028 * Math.sin(O.t * 0.29 + 0.7) + 0.0014 * Math.sin(O.t * 0.77)
+      camera.rotateY(yaw + fy); camera.rotateX(pitch + fx); camera.rotateZ(roll)
+      const breathe = f * (1 + 0.004 * Math.sin(O.t * 0.52))
+      if (Math.abs(camera.fov - breathe) > 1e-4) { camera.fov = breathe; camera.updateProjectionMatrix() }
+    } else if (Math.abs(camera.fov - f) > 1e-3) { camera.fov = f; camera.updateProjectionMatrix() }
   }, -1)
   return null
 }

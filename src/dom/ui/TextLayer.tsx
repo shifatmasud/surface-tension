@@ -80,9 +80,25 @@ function current(dropped: boolean): number {
 }
 
 type LineGL = { it: UfxItem; mat: THREE.ShaderMaterial; el: HTMLElement; role: 'eyebrow' | 'title' | 'body' }
-const OUT_DUR = 0.62, IN_DUR = 0.9, STAGGER = 0.07, IN_DELAY = 0.22
-const easeOut = (x: number) => 1 - Math.pow(1 - x, 4)
-const easeIn = (x: number) => x * x * x
+// Shifat 15:33Z ("looks cheap" → premium): one motion language for all copy. IN: each line rises from under its hard
+// mask on cubic-bezier(0.19, 1, 0.22, 1) over 1.0 s, 75 ms apart, with a 2.5° tilt that settles to 0; OUT: up and out
+// through the top of the mask, 0.6 s ease-in-out, a touch quicker. No opacity on the glyphs (reduced motion: fades).
+const OUT_DUR = 0.6, IN_DUR = 1.0, STAGGER = 0.075, IN_DELAY = 0.18
+export function bezier(x1: number, y1: number, x2: number, y2: number) {
+  const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx, cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by
+  const X = (t: number) => ((ax * t + bx) * t + cx) * t, Y = (t: number) => ((ay * t + by) * t + cy) * t, dX = (t: number) => (3 * ax * t + 2 * bx) * t + cx
+  return (x: number) => {
+    if (x <= 0) return 0; if (x >= 1) return 1
+    let t = x
+    for (let i = 0; i < 6; i++) { const d = dX(t); if (Math.abs(d) < 1e-6) break; t -= (X(t) - x) / d }
+    t = Math.min(1, Math.max(0, t))
+    return Y(t)
+  }
+}
+export const easeOutPremium = bezier(0.19, 1, 0.22, 1)
+export const easeInOutPremium = bezier(0.65, 0, 0.35, 1)
+const easeOut = easeOutPremium
+const easeIn = easeInOutPremium
 
 export function TextLayer() {
   const root = useRef<HTMLDivElement>(null)
@@ -125,7 +141,7 @@ export function TextLayer() {
             const mesh = new THREE.Mesh(GEO, mat); mesh.renderOrder = 10
             const it: UfxItem = {
               el: line, mesh, layer: 'slot', fixed: true, docTop: 0, docLeft: 0, w: 0, h: 0, section: '',
-              measure() { const rr = line.getBoundingClientRect(); it.docTop = rr.top - padY; it.docLeft = rr.left - padX; it.w = rr.width + padX * 2; it.h = rr.height + padY * 2 },
+              measure() { const rr = line.getBoundingClientRect(); it.docTop = rr.top - padY; it.docLeft = rr.left - padX; it.w = rr.width + padX * 2; it.h = rr.height + padY * 2; mat.uniforms.u_hw.value = it.h / Math.max(1, it.w) },
               visibleWhen: () => st[bi].on,
             }
             ufx.add(it)
@@ -163,7 +179,9 @@ export function TextLayer() {
         for (let i = 0; i < n; i++) {
           // reveal 0 under the mask → 1 in place → 2 gone through the top (UFX_TEXT_FRAG); reduced motion: opacity only
           let v: number, o = 1
-          const x = clamp((now - s.t0 - i * STAGGER) / (s.dir > 0 ? IN_DUR : OUT_DUR))
+          // QA: window.__slotScrub = 0..1 pins the active beat's IN timeline (frames of the reveal on a slow rig)
+          const scrub = (window as any).__slotScrub
+          const x = typeof scrub === 'number' && s.dir > 0 ? clamp((scrub * (IN_DUR + STAGGER * (n - 1)) - i * STAGGER) / IN_DUR) : clamp((now - s.t0 - i * STAGGER) / (s.dir > 0 ? IN_DUR : OUT_DUR))
           if (s.dir > 0) { v = reduced ? 1 : easeOut(x); o = reduced ? x : 1; if (x < 1) done = false }
           else { v = reduced ? 1 : 1 + easeIn(x); o = reduced ? 1 - x : 1; if (x < 1) done = false }
           const L = s.lines[i]

@@ -323,3 +323,10 @@ html[data-bg='dark'] .slot { color: var(--c-white); }
 /* the sections' own copy stays in the document for screen readers and search, out of sight: the slot draws it */
 html.slot-on :is(.hero__row, .statement__lines, .statement__cap, .dive__title, .dive__cap, .lab__foot, .systems__eyebrow, .systems__title, .systems__copy, .journey__beat) {
   position: absolute !important; width: 1px !important; height: 1px !important; overflow: hidden !important; clip: rect(0 0 0 0) !important; white-space: nowrap !important; margin: 0 !important; padding: 0 !important; opacity: 0 !important; }
+
+/* W18 (Shifat 15:33Z): hard line masks for the card copy; the risers lean from their baseline's left end */
+.ov-mask { display: block; overflow: clip; padding-bottom: .14em; margin-bottom: -.14em; }
+.ov-rise { display: inline-block; transform-origin: 0% 100%; will-change: transform; }
+.overlay__link.ov-rise { display: inline-flex; }
+.overlay__line .ov-line { padding-bottom: .1em; margin-bottom: -.1em; }
+.overlay__line .ov-line > * { transform-origin: 0% 100%; }

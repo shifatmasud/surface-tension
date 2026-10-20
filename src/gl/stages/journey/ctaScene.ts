@@ -106,9 +106,10 @@ const ST_VERT = /* glsl */ `
 attribute vec4 aSt;      // x, y (wall), size, tilt
 attribute vec2 aCell;    // atlas cell
 attribute vec3 aProg;    // slap progress 0..1, lifted-corner amount, seed
+attribute vec4 aInt;     // (Shifat 15:29Z) drag lift 0..1, peel 0..1, grabbed corner direction (sticker space)
 uniform float u_z, u_shadow;
 uniform vec3 u_light;
-varying vec2 vUv; varying vec3 vN; varying vec3 vW; varying float vA; varying float vLift;
+varying vec2 vUv; varying vec3 vN; varying vec3 vW; varying float vA; varying float vLift; varying float vCurl;
 void main(){
   float s = clamp(aProg.x, 0.0, 1.0);
   // slap: from a curled sheet a little off the wall, pressed flat with a tiny squash, then settled
@@ -124,6 +125,22 @@ void main(){
   lp.z = lift * lift * 1.6 + (1.0 - press) * 0.55;
   lp.xy *= mix(1.08, 1.0, press);
   lp.xy *= aSt.z; lp.z *= aSt.z;
+  // PEEL: the sheet folds back over a line perpendicular to the grabbed corner, rolling round a small radius
+  vCurl = 0.0;
+  if (aInt.y > 0.001) {
+    vec2 cd = normalize(aInt.zw);
+    float d = dot(q, cd), t = 0.72 - aInt.y * 1.55, sd = d - t;
+    if (sd > 0.0) {
+      float r = 0.055 + 0.05 * aInt.y, ang = sd / r, along, up;
+      if (ang < 3.14159) { along = t + r * sin(ang); up = r * (1.0 - cos(ang)); }
+      else { along = t - (sd - 3.14159 * r); up = 2.0 * r; }
+      lp.xy += cd * (along - d) * aSt.z;
+      lp.z += up * aSt.z;
+      vCurl = clamp(ang / 3.14159, 0.0, 1.0);
+    }
+  }
+  // DRAG: lifted off the wall while held (its shadow drops away and softens with the height)
+  lp.z += aInt.x * 0.24 * aSt.z;
   vec3 wp = vec3(aSt.x + ca * lp.x - sa * lp.y, aSt.y + sa * lp.x + ca * lp.y, u_z + lp.z);
   // a shadow copy lies on the wall, offset along the light, softer the higher the sheet
   if (u_shadow > 0.5) { float hgt = lp.z + 0.03; wp.xy += (u_light.xy / -u_light.z) * hgt; wp.z = u_z - 0.022; vLift = hgt; }
@@ -136,7 +153,7 @@ void main(){
 }`
 const ST_FRAG = /* glsl */ `
 uniform sampler2D u_atlas; uniform float u_shadow, u_time; uniform vec3 u_light, u_cam;
-varying vec2 vUv; varying vec3 vN; varying vec3 vW; varying float vA; varying float vLift;
+varying vec2 vUv; varying vec3 vN; varying vec3 vW; varying float vA; varying float vLift; varying float vCurl;
 float h21(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 void main(){
   if (vA < 0.5) discard;
@@ -148,6 +165,8 @@ void main(){
   }
   vec4 t = texture2D(u_atlas, vUv);
   if (t.a < 0.5) discard;
+  // the back of a peeled sheet: the vinyl's white backing paper, shaded by the curl
+  if (!gl_FrontFacing) { gl_FragColor = vec4(vec3(0.78 + 0.12 * (1.0 - vCurl)), 1.0); return; }
   // glossy vinyl under the raking light: a broad sheen + a tight highlight that slides with the view, a whisper of
   // wrinkle in the film
   vec3 n = normalize(vN);
@@ -256,7 +275,8 @@ export function buildCta(portrait: boolean) {
   const aCell = new THREE.InstancedBufferAttribute(new Float32Array(LOGOS.flatMap((_, i) => [i % 3, 1 - Math.floor(i / 3)])), 2)
   const aProg = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3)
   aSt.setUsage(THREE.DynamicDrawUsage); aProg.setUsage(THREE.DynamicDrawUsage)
-  sGeo.setAttribute('aSt', aSt); sGeo.setAttribute('aCell', aCell); sGeo.setAttribute('aProg', aProg); sGeo.instanceCount = N
+  const aInt = new THREE.InstancedBufferAttribute(new Float32Array(N * 4), 4); aInt.setUsage(THREE.DynamicDrawUsage)
+  sGeo.setAttribute('aSt', aSt); sGeo.setAttribute('aCell', aCell); sGeo.setAttribute('aProg', aProg); sGeo.setAttribute('aInt', aInt); sGeo.instanceCount = N
   const atlas = stickerAtlas(LOGO_PATHS)
   const sU = { u_atlas: { value: atlas }, u_z: { value: WALL_Z + 0.03 }, u_light: { value: light }, u_cam: { value: new THREE.Vector3() }, u_time: { value: 0 } }
   const sMat = new THREE.ShaderMaterial({ vertexShader: ST_VERT, fragmentShader: ST_FRAG, toneMapped: false, fog: false, side: THREE.DoubleSide, uniforms: { ...sU, u_shadow: { value: 0 } } })

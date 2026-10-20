@@ -130,6 +130,7 @@ class ScrollService {
    *  carry on from the top after the loop */
   private muteUntil = 0
   private muteCap = 0
+  private muteDy = 1e9
   /**
    * The loop (Shifat 13:44Z: "Scrolling after footer doesn't wrap loop back to header & hero section. Instead goes to
    * crewmate scene."). It was a 3.2 s glide to the top that any further wheel/touch input cancelled half way (landing
@@ -140,7 +141,7 @@ class ScrollService {
     // drop input for 0.6 s, and for as long after that as the wheel/trackpad inertia keeps streaming (each event while
     // muted extends the window by 0.22 s), up to 1.8 s: a deliberate new scroll after the loop is taken at once
     const now = performance.now()
-    this.muteUntil = now + 600; this.muteCap = now + 1800
+    this.muteUntil = now + 700; this.muteCap = now + 6000; this.muteDy = 1e9   // the mute holds until the gesture ends (see onWheel)
     this.wheelAcc = 0; this.keyTarget = null; this.dragAcc = 0
     let veil = document.getElementById('wrap-veil')
     if (!veil) {
@@ -171,7 +172,13 @@ class ScrollService {
     e.preventDefault()
     if (this.stopped) return
     const now = performance.now()
-    if (now < this.muteUntil) { this.muteUntil = Math.min(this.muteCap, Math.max(this.muteUntil, now + 220)); return }
+    if (now < this.muteUntil) {
+      // still the gesture that hit the loop (trackpad/mouse inertia decays): keep dropping it until a 450 ms pause;
+      // a fresh flick (the delta jumps back up) is a new, deliberate scroll and is taken at once
+      const a = Math.abs(dy)
+      if (a > 40 && a > this.muteDy * 1.8 && now > this.muteUntil - 450 + 120) { this.muteUntil = 0 }
+      else { this.muteDy = a; this.muteUntil = Math.min(this.muteCap, now + 450); return }
+    }
     this.wheelAcc += clamp(dy, -WHEEL_CLAMP, WHEEL_CLAMP)
   }
   private onTouchStart = (e: TouchEvent) => {
