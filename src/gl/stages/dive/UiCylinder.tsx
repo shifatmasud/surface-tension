@@ -13,6 +13,8 @@ import { TabletWindow } from '../journey/tabletWindow'; import { tabletPose } fr
 const KEEP_EYE = new THREE.Vector3(0, 0, -1e3), KEEP_F = new THREE.Vector3(0, 0, 1), KEEP_V = new THREE.Vector3() // POLISH-2: the main lens, for the ring's keep-out
 const ss = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
 const QS = typeof location !== 'undefined' ? location.search : ''
+// QA: ?drumlift=<m> tries another phone drum lift
+const DRUM_LIFT = (() => { const m = /[?&]drumlift=([\d.]+)/.exec(QS); return m ? +m[1] : 0 })()
 const HOLD = /[?&]atom/.test(QS) ? 0 : /[?&]drum/.test(QS) ? 1 : -1
 
 /**
@@ -422,7 +424,7 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
     // eyebrow; text over busy 3D, r22): phones lift the DRUM (the spin group) so its bottom row keeps ~24 px of clear air
     // above the eyebrow as it turns. Only the drum moves: the particle atom stays centred on the stone (its morph targets
     // read the spin matrix, so the particles still land on the lifted parts) and the tablet keeps its pose.
-    s.position.y = 1.1 * portrait()
+    s.position.y = DRUM_LIFT * portrait()
     // SYSTEMS SEQUENCE (Shifat 13:13Z: "Start sequence with B then morph into A"): it opens as the particle atom around
     // the stone; through the section the particles stream onto the flat parts, the parts' real materials fade in as
     // they settle and the particles dissolve; it ends as the drum. Scroll-driven, so scrolling up runs it backward.
@@ -454,6 +456,10 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
     if (!nb.active) { KEEP_EYE.copy(state.camera.position); state.camera.getWorldDirection(KEEP_F) }
     for (let i = 0; i < built.items.length; i++) {
       const it = built.items[i], S = st[i], A = it.g.userData.act as Record<string, any>
+      // W20 (root 23:16Z: on phones the middle row passed over the stone, and a lifted bottom row did too): phones raise the
+      // top and middle rows so no row sits at the stone's height; the bottom row stays below it, clear of the SYSTEMS
+      // eyebrow. A per-aspect layout of the same parts, like the wide-screen lift above.
+      const iy = it.y + portrait() * (it.y > 0.5 ? 0.9 : it.y > -0.5 ? 1.05 : 0)
       S.h += ((i === ia.hover ? 1 : 0) - S.h) * (1 - Math.exp(-10 * dt))
       S.press = Math.max(0, S.press - dt * 4)
       S.turn += (S.turnT - S.turn) * (1 - Math.exp(-6 * dt))
@@ -466,12 +472,12 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
       let dodge = 0, sideX = 0, sideZ = 0
       {
         const wa = it.a + s.rotation.y
-        KEEP_V.set(SYS_C.x + Math.sin(wa) * rr - KEEP_EYE.x, SYS_C.y + it.y - KEEP_EYE.y, SYS_C.z + Math.cos(wa) * rr - KEEP_EYE.z)
+        KEEP_V.set(SYS_C.x + Math.sin(wa) * rr - KEEP_EYE.x, SYS_C.y + iy - KEEP_EYE.y, SYS_C.z + Math.cos(wa) * rr - KEEP_EYE.z)
         const z = KEEP_V.dot(KEEP_F)
         const rk = 2.2 * ss(-0.8, 0.2, z) * (1 - ss(4.0, 6.0, z)) * ss(0, 0.15, dive.push) // only on the push toward the tablet
         if (rk > 0) {
           const lat = Math.sqrt(Math.max(0, KEEP_V.lengthSq() - z * z))
-          dodge = (it.y >= 0 ? 1 : -1) * (Math.sqrt(lat * lat + rk * rk) - lat)
+          dodge = (iy >= 0 ? 1 : -1) * (Math.sqrt(lat * lat + rk * rk) - lat)
           // W20 (root 22:55Z, r22): on phones a lower-row part sliding DOWN out of the corridor crossed the Shade DS
           // eyebrow/title at the bottom of the screen. Phones move lower parts SIDEWAYS instead, straight away from the
           // lens axis by the same clearance (the same smooth path change, never a fade or a pop).
@@ -483,7 +489,7 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
           }
         }
       }
-      it.g.position.set(Math.sin(it.a) * rr + sideX, it.y + dodge + Math.sin(t * 0.6 + it.ph) * 0.05, Math.cos(it.a) * rr + sideZ)
+      it.g.position.set(Math.sin(it.a) * rr + sideX, iy + dodge + Math.sin(t * 0.6 + it.ph) * 0.05, Math.cos(it.a) * rr + sideZ)
       // each part turns halfway toward the lens from its place on the drum (no edge-on slivers at the sides)
       let off = Math.PI - (it.a + s.rotation.y); off = Math.atan2(Math.sin(off), Math.cos(off))
       it.g.rotation.set(Math.sin(t * 0.5 + it.ph) * 0.04 * (1 - S.h), it.a + off * (0.55 + 0.45 * S.h) + S.turn, Math.sin(t * 0.4 + it.ph * 1.3) * 0.03 * (1 - S.h))
