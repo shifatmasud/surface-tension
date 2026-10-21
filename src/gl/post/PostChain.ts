@@ -217,6 +217,7 @@ void main(){
     return (n.swaps % 2 === 1 ? n.composer.outputBuffer : n.composer.inputBuffer).texture
   }
   /** Copy the blended section look into the passes (ch.7.1: visuals → post stack). */
+  private darkT = 0
   sync() {
     const L = props.look
     const g = (n: string) => this.grade.u(n)
@@ -227,6 +228,10 @@ void main(){
     const d = (n: string) => this.distortion.u(n)
     d('u_amount').value = L.paintAmount; d('u_rgbShift').value = L.paintRGBShift
     d('u_multiplier').value = L.paintMultiplier; d('u_colorMultiplier').value = L.paintColorMultiplier
+    // W23: the trail's dark-wall mode follows the UI tone in the journey (the space and the CTA wall), eased so it never pops
+    const wantDark = props.stage === 'journey' && document.documentElement.dataset.bg === 'dark' ? 1 : 0
+    const ud = d('u_dark'), now = performance.now(), kd = 1 - Math.exp(-Math.min(1, (now - this.darkT) / 1000) * 6); this.darkT = now
+    ud.value += (((window as any).__trailDark ?? wantDark) - ud.value) * kd
   }
   render(dt: number) {
     this.sync()

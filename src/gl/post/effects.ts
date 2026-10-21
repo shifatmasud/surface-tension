@@ -18,7 +18,7 @@ export class ScreenPaintDistortionEffect extends Effect {
     super('ScreenPaintDistortion', /* glsl */ `
       uniform sampler2D u_screenPaintTexture;
       uniform vec2 u_screenPaintTexelSize;
-      uniform float u_amount, u_rgbShift, u_multiplier, u_colorMultiplier, u_shade, u_iridescence, u_debug;
+      uniform float u_amount, u_rgbShift, u_multiplier, u_colorMultiplier, u_shade, u_iridescence, u_debug, u_dark;
       ${BLUE_NOISE}
       vec3 spd_encode(vec3 c){ c = max(c, 0.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
       vec3 spd_decode(vec3 c){ c = max(c, 0.0); return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
@@ -27,15 +27,19 @@ export class ScreenPaintDistortionEffect extends Effect {
         vec4 data = texture2D(u_screenPaintTexture, uv);
         float weight = (data.z + data.w) * 0.5;
         vec2 vel = (0.5 - data.xy - 0.001) * 2.0 * weight;           // signed, flipped, fades with paint
-        vec2 stepUv = vel * u_amount / 4.0 * u_screenPaintTexelSize * u_multiplier;
+        vec2 stepUv = vel * u_amount / 4.0 * u_screenPaintTexelSize * u_multiplier * (1.0 - 0.6 * u_dark);   // W23: on the dark wall a shorter smear (it dragged the matte texture into dirty streaks)
         vec2 p = uv + bn.xy * stepUv;                                 // jittered first tap kills banding
         vec4 acc = vec4(0.0);
         for (int i = 0; i < 9; i++) { vec4 s = texture2D(inputBuffer, p); acc += vec4(min(spd_encode(s.rgb), 1.0), s.a); p += stepUv; }  // each tap as the reference's 8-bit buffer holds it
         acc /= 9.0;
         if (u_debug > 0.5) acc = vec4(vec3(0.5 + 0.35 * weight), 1.0);
         // wake fringe: strongest where weight is low, gone above 0.4
-        acc.rgb += sin(vec3(vel.x + vel.y) * 40.0 + vec3(0.0, 2.0, 4.0) * u_rgbShift)
+        vec3 fringe = sin(vec3(vel.x + vel.y) * 40.0 + vec3(0.0, 2.0, 4.0) * u_rgbShift)
                  * smoothstep(0.4, -0.9, weight) * u_shade * max(abs(vel.x), abs(vel.y)) * u_colorMultiplier;
+        // W23 (scorer-r618/r621: the trail on the dark CTA wall read as an oily navy smudge): on dark sections the fringe
+        // only ever lightens, as a soft glassy tint at a third of the strength; its dark half (which clipped to black
+        // contours on the wall) is dropped. Light sections are unchanged.
+        acc.rgb += mix(fringe, max(fringe, 0.0) * 0.35, u_dark);
         if (u_iridescence > 0.0) {
           // accumulated thin film on the wake edges: the long-tail weight is the film thickness,
           // the weight gradient finds the edges; off by default (the reference has only the sine fringe)
@@ -61,6 +65,7 @@ export class ScreenPaintDistortionEffect extends Effect {
         ['u_shade', new THREE.Uniform(1.25)],
         ['u_iridescence', new THREE.Uniform(0)],
         ['u_debug', new THREE.Uniform(debug ? 1 : 0)],
+        ['u_dark', new THREE.Uniform(0)],
         ['u_blueNoise', shared.u_blueNoise as any],
         ['u_blueNoiseOffset', shared.u_blueNoiseOffset as any],
         ['u_blueNoiseSize', shared.u_blueNoiseSize as any],
