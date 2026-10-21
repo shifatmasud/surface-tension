@@ -83,7 +83,7 @@ ${COMMON}
 attribute vec3 aF;      // x: 0 bell / 1 filament / 2 oral arm, y: 0 apex … 1 rim (bell) or 0 root … 1 tip, z: strip side ±1
 attribute vec4 aSeed;   // xyz cell (0..1), w random
 attribute vec4 aSeed2;  // x size, y/z tilt, w film hue
-varying float vA, vKind, vT, vHue, vCoc, vPulse;
+varying float vA, vKind, vT, vHue, vCoc, vPulse, vSide;
 uniform float u_keep;   // 1 while the work cards hold the frame (no jelly over a card)
 uniform vec3 u_camR, u_camU, u_camF; uniform vec2 u_lens;   // the main camera's basis and tan(half fov) x/y
 varying vec3 vN, vV;
@@ -129,19 +129,21 @@ void main(){
   float sz = aSeed.w * dd * tY * (1.0 + 0.25 * coc);
   vec3 w = c + p * sz;
   vec4 mv = viewMatrix * vec4(w, 1.0);
-  if (aF.x > 0.5) mv.x += aF.z * sz * (aF.x < 1.5 ? 0.012 : 0.05) * (1.0 - 0.7 * aF.y);
+  // W25 R6.54 (scorer-r652 #3: hairline, dashed tentacles): a filament is a tapered ribbon with a soft cross-section
+  // (vSide feathers its edges in the fragment), wide at the root and thin at the tip; oral arms the same, a little fuller
+  if (aF.x > 0.5 && aF.x < 2.5) mv.x += aF.z * sz * (aF.x < 1.5 ? 0.024 : 0.065) * (1.0 - 0.8 * aF.y);
   gl_Position = projectionMatrix * mv;
   vA = floatFade(c, edge, gl_Position, 1.2, 3.0) * depthLight() * mix(1.0, 0.42, coc) * (1.0 - u_keep);
   // safety net: a bell whose centre would ever reach the subject's zone in the middle of the frame fades out
   vec2 cn = vec2(nx, ny);
   vA *= smoothstep(0.0, 0.12, max(abs(cn.x) - 0.36, abs(cn.y) - 0.5));
   vN = normalize(mat3(viewMatrix) * n); vV = normalize(-mv.xyz);
-  vKind = aF.x; vT = aF.y; vHue = aSeed2.w; vPulse = pulse;
+  vKind = aF.x; vT = aF.y; vHue = aSeed2.w; vPulse = pulse; vSide = aF.z;
 }`
 const jellyFrag = /* glsl */ `
 uniform float u_time, u_split; uniform vec2 u_res;
 ${CLIP}
-varying float vA, vKind, vT, vHue, vCoc, vPulse;
+varying float vA, vKind, vT, vHue, vCoc, vPulse, vSide;
 varying vec3 vN, vV;
 void main(){
   splitClip();
@@ -166,6 +168,9 @@ void main(){
     // W24: a soft silhouette — the brightest fresnel sat on the last pixel and drew a hard, stepped outline
     float fe = max(fwidth(fr), 1e-3);
     col *= mix(0.3, 1.0, 1.0 - smoothstep(1.0 - 3.0 * fe, 1.0, fr));
+    // W25 R6.54 (scorer-r652 #3: the lower lip read as a hard flat ellipse): the glowing margin stays, but the last stretch to
+    // the lip feathers out (wider when defocused), as the R6.51 inner bell does
+    col *= 1.0 - 0.8 * smoothstep(mix(0.93, 0.8, vCoc), 1.0, vT);
   } else if (vKind > 2.5){
     // W25 R6.50: the inner bell: a faint translucent body seen through the outer bell, its margin lit with the pulse;
     // defocus softens it like the outer bell, so it stays edge ambience
@@ -183,6 +188,7 @@ void main(){
     // light running down the tentacles with the pulse, brightest at the roots
     float run = 0.5 + 0.5 * sin(vT * 9.0 - u_time * 2.2 + vHue * 6.2832);
     col += lum * glow * (1.0 - vT) * (1.0 - vT) * (vKind < 1.5 ? 1.1 : 0.7) * (0.6 + 0.4 * run);
+    col *= 1.0 - smoothstep(0.25, 1.0, abs(vSide));   // W25 R6.54: a soft ribbon cross-section, no hard 1 px line
   }
   gl_FragColor = vec4(col * vA * 0.85, 1.0);
 }`
