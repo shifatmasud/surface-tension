@@ -62,6 +62,18 @@ export class ScreenPaintDistortionEffect extends Effect {
         // W23 (scorer-r6261 #5): on dark it is also colourless now (the chromatic phase read as an oily fringe), and off anything bright
         vec3 glass = vec3(dot(max(fringe, 0.0), vec3(0.3333))) * 0.52 * smoothstep(0.05, 0.35, weight);   // W24 R6.35: 1.5× (the trace barely registered once decay ran on time); R6.32: the glass fades out with the paint (its thin contours lingered)
         acc.rgb += mix(fringe, glass * (1.0 - keep), u_dark) * stkM;
+        // W25 R6.43 (scorer-r636..r639: the trace on the dark CTA wall is invisible; verified on a frame-paced live sweep at 390
+        // and 1440: ?paintdebug shows a full streak, the default wall shows nothing): on dark sections the trail's EDGE catches
+        // light like the lip of a wet streak on matte paint: a thin, colourless highlight where the paint's weight changes
+        // fastest, fading with the paint. Not a lift of the body (tried by W24, read as nothing) and not a colour fringe.
+        if (u_dark > 0.001) {
+          vec2 ptx = u_screenPaintTexelSize * 1.5;
+          vec4 pe = texture2D(u_screenPaintTexture, uv + vec2(ptx.x, 0.0)), pw = texture2D(u_screenPaintTexture, uv - vec2(ptx.x, 0.0));
+          vec4 pn = texture2D(u_screenPaintTexture, uv + vec2(0.0, ptx.y)), ps = texture2D(u_screenPaintTexture, uv - vec2(0.0, ptx.y));
+          vec2 wg = vec2((pe.z + pe.w) - (pw.z + pw.w), (pn.z + pn.w) - (ps.z + ps.w)) * 0.5;
+          float lip = smoothstep(0.02, 0.16, length(wg)) * smoothstep(0.03, 0.2, weight) * (0.75 + 0.25 * bn.z);
+          acc.rgb += vec3(0.86, 0.9, 1.0) * lip * 0.11 * u_dark * (1.0 - keep) * stkM;
+        }
         if (u_iridescence > 0.0) {
           // accumulated thin film on the wake edges: the long-tail weight is the film thickness,
           // the weight gradient finds the edges; off by default (the reference has only the sine fringe)
