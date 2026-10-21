@@ -17,6 +17,7 @@ import { Logo } from '../../assets/logo/Logo'
 import { ProjectLinks } from '../a11y/ProjectLinks'
 import { noOrphan } from '../a11y/noOrphans'
 import { lineRoll, type LineRoll } from '../ui/maskedRoll'
+import { bindInk } from '../../services/inkButton'
 
 /** W19: the fixed footer's height (50vh / 50svh since 19:06Z), cached by a ResizeObserver so the frame loop reads no layout */
 let footH = 0
@@ -50,6 +51,8 @@ function runwayPx(vh: number, fh: number) {
 export function Contact() {
   const ref = useRef<HTMLElement>(null)
   const l1 = useRef<HTMLSpanElement>(null), l2 = useRef<HTMLSpanElement>(null)
+  const btnRef = useRef<HTMLAnchorElement>(null)
+  useEffect(() => bindInk(btnRef.current, 'cta'), [])
   useSection(ref, (range) => {
     // same camera as the journey (one continuous scene); its own calm look: no bloom on the white type, no vignette
     const st = visuals.register('contact', () => journey.pose, {
@@ -117,8 +120,11 @@ export function Contact() {
             <h2 className="contact__title" id="contact-title"><span className="contact__line" ref={l1}>Let’s make</span><span className="contact__line" ref={l2}>it ripple.</span></h2>
             <div className="contact__row">
               <div className="contact__cta">
-                <a className="big-btn" href={SITE.email ? `mailto:${SITE.email}` : SITE.x} target={SITE.email ? undefined : '_blank'} rel="noreferrer" aria-label={SITE.email ? 'Write to me' : 'Say hi on X'} data-cursor onMouseEnter={() => audio.tick()}>
-                  <span className="big-btn__label">{SITE.email ? 'Write to me' : 'Say hi on X'}</span> <i><ArrowUpRight size={20} weight="bold" /></i>
+                <a className="big-btn" ref={btnRef} href={SITE.email ? `mailto:${SITE.email}` : SITE.x} target={SITE.email ? undefined : '_blank'} rel="noreferrer" aria-label={SITE.email ? 'Write to me' : 'Say hi on X'} data-cursor onPointerEnter={(e) => { if (e.pointerType === 'mouse') audio.tick() }}>
+                  {/* BUTTON v2 (mockup): the label and the arrow each carry two copies for the masked roll; .ink is the
+                      inverse-coloured copy the flood reveals (services/inkButton.ts) */}
+                  <span className="big-btn__label ink-par"><span className="ir"><span className="ir-a">{SITE.email ? 'Write to me' : 'Say hi on X'}</span><span className="ir-b" aria-hidden="true">{SITE.email ? 'Write to me' : 'Say hi on X'}</span></span></span> <i className="ink-par"><span className="ia-a"><ArrowUpRight size={20} weight="bold" /></span><span className="ia-b" aria-hidden="true"><ArrowUpRight size={20} weight="bold" /></span></i>
+                  <span className="ink" aria-hidden="true"><span className="big-btn__label ink-par"><span className="ir"><span className="ir-a">{SITE.email ? 'Write to me' : 'Say hi on X'}</span><span className="ir-b">{SITE.email ? 'Write to me' : 'Say hi on X'}</span></span></span><i className="ink-par"><span className="ia-a"><ArrowUpRight size={20} weight="bold" /></span><span className="ia-b"><ArrowUpRight size={20} weight="bold" /></span></i></span>
                 </a>
                 {/* POLISH (Shifat 18:19Z/18:20Z "only one clean CTA button"): the message form and its send pill are gone */}
                 <ProjectLinks />

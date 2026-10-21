@@ -560,13 +560,17 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
         A.fill.scale.x = A.L * A.v; A.fill.position.x = -A.L / 2 + (A.L / 2) * A.v; A.thumb.position.x = -A.L / 2 + A.L * A.v
       } else if (A.kind === 'segmented') { const x = A.step * (A.i - 1); A.pill.position.x += (x - A.pill.position.x) * (1 - Math.exp(-12 * dt)) }
     }
-    // W20 (root 00:0xZ, keyboard): the Shade DS controls are real DOM buttons (Systems.tsx). They are no tab stops until
-    // the drum has formed (the layer is inert), then each one sits over its drum part (a ≥44 px box, so the focus ring
+    // W20 (root 00:0xZ, keyboard): the Shade DS controls are real DOM buttons (Systems.tsx). They are always tab stops (W26);
+    // once the drum has formed each one sits over its drum part (a ≥44 px box, so the focus ring
     // shows where the part is) and the focused part lifts like a hover. Enter / Space plays the part, as a tap would.
     if (!nb.active) {
       const layer = sys.layer, formed = pf > 0.9 && fv > 0.6 && props.stage === 'dive'
       if (layer) {
-        if ((layer as any).inert !== !formed) (layer as any).inert = !formed
+        // W26 (scorer-r655 #1): never inert. Setting inert while the drum was not formed evicted keyboard focus to <body>
+        // (1440: R6.53's scroll un-formed the drum under the focused toggle) and made the controls no tab stops at all
+        // (390). The controls stay reachable; focusing one jump-cuts the page to the formed drum first (Systems.tsx).
+        if ((layer as any).inert) (layer as any).inert = false
+        sys.formed = formed
         const kb = kbState.current
         if (!kb.map) { kb.map = {}; built.items.forEach((it, i) => { const k = (it.g.userData.act as any).kind as string; if (!(k in kb.map!)) kb.map![k] = i }) }
         const M = kb.map, idx: Record<ControlId, number | undefined> = { toggle: M.toggle, button: M.button, slider: M.slider, chip0: M.segmented, chip1: M.segmented, chip2: M.segmented }

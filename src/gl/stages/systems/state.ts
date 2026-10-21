@@ -32,6 +32,7 @@ export const sys = {
   weight: 0,             // stage weight (visibility)
   weightRaw: 0,          // NEIGHBOUR HOOK: the section's weight before the clip gate (the neighbour pass draws with it)
   active: false,         // the stage owns the camera
+  formed: false,         // the drum has formed (its parts sit where the DOM hit areas are); written by UiCylinder
   /** DOM hit areas the stage positions every frame (viewport px) */
   els: {} as Partial<Record<ControlId | 'stack', HTMLElement>>,
   layer: null as HTMLElement | null, // the positioned container (to convert viewport → local)

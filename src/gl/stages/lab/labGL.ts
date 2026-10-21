@@ -5,6 +5,7 @@ import { props, shared } from '../../../state/props'
 import { settings, browser } from '../../../services/settings'
 import { PROJECTS } from '../../../content/site'
 import { damp } from '../../../core/math'
+import { Spring } from '../../../core/spring'
 import { dive } from '../dive/diveState'
 import { DIVE_COMMON } from '../dive/shaders'
 import { SlideFluid, FLUID_GLSL } from './slideFluid'
@@ -35,17 +36,22 @@ import { SlideFluid, FLUID_GLSL } from './slideFluid'
  *  from its world map at merge; nothing else here needs to change. */
 export const LAB_ARC_ORIGIN = { x: 0, y: 0, z: 0, radius: null as number | null }
 
+/** UI STATES mockup: how far a pressed slide sinks (fraction of its size) and its release spring (f Hz, zeta) */
+const PRESS_DEPTH = 0.03, PRESS_F = 2.6, PRESS_ZETA = 0.55
 const VERT = /* glsl */ `
-uniform float u_R, u_phi, u_ax, u_az, u_cy, u_w, u_h, u_time, u_sway, u_seed;
+#define PRESS_DEPTH ${PRESS_DEPTH.toFixed(3)}
+uniform float u_R, u_phi, u_ax, u_az, u_cy, u_w, u_h, u_time, u_sway, u_seed, u_press;
 varying vec2 v_uv;
 varying vec3 v_dir;
 void main(){
   v_uv = uv;
   // the slide is a strip of the cylinder: local x walks along the arc (arc length = card px), y stays upright
   float t = u_time;
-  float th = u_phi + position.x * u_w / u_R + sin(t * 0.31 + u_seed * 1.7) * 0.0022 * u_sway;
+  // UI STATES mockup: a press sinks the slide toward its centre (3 % at full press), released on a spring
+  vec2 pp = position.xy * (1.0 - PRESS_DEPTH * u_press);
+  float th = u_phi + pp.x * u_w / u_R + sin(t * 0.31 + u_seed * 1.7) * 0.0022 * u_sway;
   float bob = sin(t * 0.47 + u_seed * 2.3) * 3.0 * u_sway;
-  vec3 w = vec3(u_ax + u_R * sin(th), u_cy + position.y * u_h + bob, u_az - u_R * cos(th));
+  vec3 w = vec3(u_ax + u_R * sin(th), u_cy + pp.y * u_h + bob, u_az - u_R * cos(th));
   w += modelMatrix[3].xyz;   // ufx's boundary drift (0 inside the lab's block)
   v_dir = w - cameraPosition;
   gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.0);
@@ -132,7 +138,7 @@ type Geo = { baseX: number; relY: number; w: number; h: number }
 type Card = {
   id: string; el: HTMLElement; item: UfxItem; mat: THREE.ShaderMaterial; video?: HTMLVideoElement; vtex?: THREE.VideoTexture
   poster?: THREE.Texture; vt?: number; getHtml?: (() => THREE.Texture | null) | null
-  geo: Geo; phi: number; fluid: SlideFluid; seed: number; css: string
+  geo: Geo; phi: number; fluid: SlideFluid; seed: number; css: string; pressT: number; pressS: Spring
 }
 
 const loader = new THREE.TextureLoader()
@@ -181,7 +187,7 @@ export const labGL = {
       const id = cardEl.dataset.id!
       const p = PROJECTS.find((x) => x.id === id)!
       const fluid = new SlideFluid()
-      const card: Card = { id, el: cardEl, item: null as any, mat: null as any, geo: { baseX: 0, relY: 0, w: 0, h: 0 }, phi: 0, fluid, seed: i * 1.37 + 0.4, css: '' }
+      const card: Card = { id, el: cardEl, item: null as any, mat: null as any, geo: { baseX: 0, relY: 0, w: 0, h: 0 }, phi: 0, fluid, seed: i * 1.37 + 0.4, css: '', pressT: 0, pressS: new Spring(0, PRESS_F, PRESS_ZETA, 0) }
       this.cards.push(card)
       if (!this.gl) return
       const mat = new THREE.ShaderMaterial({
@@ -191,7 +197,7 @@ export const labGL = {
           u_ready: { value: 0 }, u_off: { value: 0 }, u_rise: { value: 0 }, u_vid: { value: 0 }, u_fx: { value: MOTION ? 1 : 0 },
           u_size: { value: new THREE.Vector2(1, 1) }, u_mapSize: { value: new THREE.Vector2(16, 9) },
           u_R: { value: 1000 }, u_phi: { value: 0 }, u_ax: { value: 0 }, u_az: { value: 0 }, u_cy: { value: 0 },
-          u_w: { value: 1 }, u_h: { value: 1 }, u_sway: { value: MOTION ? 1 : 0 }, u_seed: { value: card.seed },
+          u_w: { value: 1 }, u_h: { value: 1 }, u_press: { value: 0 }, u_sway: { value: MOTION ? 1 : 0 }, u_seed: { value: card.seed },
           u_sp: { value: fluid.sp }, u_st: { value: fluid.st }, u_n: { value: 0 },
           // the deep's shared look (DiveStage drives the same numbers from the dive state)
           u_time: shared.u_time, u_amb: { value: 0 }, u_abyss: { value: 0 },
@@ -359,6 +365,7 @@ export const labGL = {
     u.u_amb.value = dive.active ? ss(-9, -22, dive.camY) : 1
     u.u_abyss.value = dive.abyss
     u.u_n.value = card.fluid.n
+    u.u_press.value = MOTION ? card.pressS.update(card.pressT, Math.min(Math.max(props.dt, 1 / 240), 0.1)) : 0
     // video: only the slide at the centre of the arc plays
     this.ensureMedia(card, p)
     if (card.video) {
@@ -419,7 +426,9 @@ export const labGL = {
         l = Math.min(l, o.x); r = Math.max(r, o.x); t = Math.min(t, o.y); b = Math.max(b, o.y)
       }
     }
-    return { left: l, top: t, width: r - l, height: b - t, radius: 14 * this.D / this.R }
+    // a pressed slide is drawn smaller about its centre: the morph starts from the size you see
+    const k = 1 - PRESS_DEPTH * (MOTION ? c.pressS.value : 0), cx = (l + r) / 2, cyy = (t + b) / 2
+    return { left: cx - (r - l) * k / 2, top: cyy - (b - t) * k / 2, width: (r - l) * k, height: (b - t) * k, radius: 14 * k * this.D / this.R }
   },
   /** W19: the detail card closed — put this card back on its poster and make its reel prove a fresh frame again */
   restore(id: string) {
@@ -430,6 +439,10 @@ export const labGL = {
   },
   /** kept for the DOM card's hover / focus handlers: the slides no longer lift or tilt (Shifat: no over-animation) */
   hover(_id: string, _on: boolean) {},
+  /** UI STATES mockup: a finger / mouse / Enter press on the slide's DOM card (services/press.ts) */
+  press(id: string, on: boolean) {
+    const c = this.cards.find((x) => x.id === id); if (c) c.pressT = on ? 1 : 0
+  },
   /** QA (?qa): each slide's angle, drawn rect and live splats */
   state() {
     return this.cards.map((c) => ({ id: c.id, phiDeg: +(c.phi * 57.2958).toFixed(2), rect: this.rectOf(c.id), splats: c.fluid.n, visible: !!c.item?.mesh.visible }))

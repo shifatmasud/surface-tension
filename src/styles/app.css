@@ -135,7 +135,7 @@ html.gl-cards .card__dom { visibility: hidden; }
 
 .big-btn { display: inline-flex; align-items: center; justify-content: space-between; gap: 18px; height: 64px; padding: 0 10px 0 26px; border-radius: 999px; background: var(--c-ink); color: #fff; text-decoration: none; font-size: var(--fs-body); font-weight: 400; letter-spacing: -0.02em; max-width: 420px; border: 0; cursor: pointer; }
 .big-btn i { width: 46px; height: 46px; border-radius: 50%; background: #fafafa; color: var(--c-ink); display: grid; place-items: center; transition: transform var(--dur-ui) var(--ease); }
-@media (hover: hover) { .big-btn:hover i { transform: rotate(-45deg); } }
+/* BUTTON v2: the arrow no longer rotates on hover; it rolls out ↗ and a fresh one rolls in (inkButton.ts) */
 .form { display: flex; gap: 8px; max-width: 420px; }
 .form input { flex: 1; height: 48px; border-radius: 99px; border: 0; padding: 0 18px; background: rgba(10,10,11,.06);  font: inherit;  font-size: var(--fs-body);}
 /* back-to-the-surface: flat UI only — a small label over a hairline track with a solid fill (no gradient, no pill) */
@@ -418,7 +418,7 @@ p, li, figcaption, .slot__body, .hero__sub, .dive__cap, .systems__lede, .systems
 .site-footer .overscroll__fill { background: var(--c-success); box-shadow: 0 0 8px var(--c-success-glow-1), 0 0 16px var(--c-success-glow-2); }
 /* W19 (Shifat 19:09Z "No green button please"): the one CTA stays black/white; hover inverts it (no colour) */
 @media (hover: hover) { .contact .big-btn { transition: background-color var(--dur-ui) var(--ease), color var(--dur-ui) var(--ease), box-shadow var(--dur-ui) var(--ease); }
-  .contact .big-btn:hover { background: #000; color: #fff; box-shadow: inset 0 0 0 1px #fff; } .contact .big-btn:hover i { background: #fff; color: #000; } }
+  /* BUTTON v2: the inset ring and the hover swap are gone; the ink flood is the hover (services/inkButton.ts) */ }
 /* W19 (Shifat 19:18Z "Big texts, titles must have tight letter & line spacing"): one token pair for display type >= 32px.
    The giant stage titles (hero, dive, systems, lab names, contact) already sit tighter (-0.065em / .86-.9) and keep it. */
 :root { --display-tracking: -0.035em; --display-leading: 0.8; }   /* W23 (Shifat 02:28Z m:b33ea208 "0.8 seems good", 02:29Z "Just ship this") */
@@ -476,3 +476,63 @@ html[data-bg='dark'] .systems .systems__hit:focus-visible, html[data-bg='dark'] 
 /* W23 (Shifat 02:28Z m:b33ea208 "Ensure subtitle never be in one line"): the hero subtitle is set as two lines at every
    width ("Design engineer &" / "creative technologist"); neither line wraps further. */
 .slot__beat[data-beat="hero"] .slot__body { white-space: nowrap; }
+
+/* ── UI STATES (W25 mockup for Shifat 11:23Z "interactive ui states like hover even on phone") ─────────────────
+   One state set for every control, inside the Swiss rules (B/W/grey, no shadows/borders/gradients, Inter, house eases):
+   rest → hover (mouse only, @media (hover: hover), so a tap never leaves a hover stuck) → press (services/press.ts
+   sinks the control with the CSS `scale` property on the house expo-out: 0.97, 0.94 on the 40 px pills, 160 ms in,
+   0.6 s release; a finger waits 70 ms so a swipe never flashes) → focus-visible (the existing 2 px ring, unchanged).
+   No ink, ripple or fill on touch: the press itself is the feedback (a ripple would be a gradient). */
+a, button, [role='button'], .stk-hit { -webkit-tap-highlight-color: transparent; }
+.big-btn, .pill, .wordmark, .skip-link, .overlay__link, .site-footer__links a, .site-footer__top-link { -webkit-touch-callout: none; touch-action: manipulation; }
+/* hover lives only where a real pointer hovers: these were global and stuck after a tap on phones */
+.card:hover .card__media { filter: grayscale(1); }
+.card.is-active .card__media, .card:focus-visible .card__media { filter: none; }
+@media (hover: hover) { .card:hover .card__media { filter: none; } }
+.overlay__link:hover { background: rgba(255,255,255,.1); }
+.overlay__link:focus-visible { background: rgba(255,255,255,.18); }
+@media (hover: hover) { .overlay__link:hover { background: rgba(255,255,255,.18); } }
+.overlay__link { transition: background-color var(--dur-ui) var(--ease); }
+/* wordmark: hover dims to grey (opacity, so the header ink rule keeps its colour), press dims further */
+.wordmark { transition: opacity var(--dur-fade) var(--ease); }
+@media (hover: hover) { .wordmark:hover { opacity: .56; } }
+.wordmark.is-press { opacity: .4; }
+/* footer links + back-to-top: the underline the reduced-motion work list already uses; press dims */
+.site-footer__links a, .site-footer__top-link { text-decoration-line: underline; text-decoration-color: transparent; text-decoration-thickness: 1px; text-underline-offset: 4px; transition: text-decoration-color var(--dur-ui) var(--ease), opacity var(--dur-fade) var(--ease); }
+/* the footer words are drawn in GL (.is-ufx makes the DOM text transparent), so the rule takes the frame's fg ink, not currentColor */
+@media (hover: hover) { .site-footer__links a:hover, .site-footer__top-link:hover { text-decoration-color: var(--c-fg); } }
+.site-footer__links a.is-press, .site-footer__top-link.is-press { opacity: .56; }
+/* the CTA arrow answers a press the way it answers a hover (the pill's colours and placement are locked) */
+/* the sound pill: the hover lift stays mouse-only; a press cancels it so the pill sinks straight down */
+.pill--sound.is-press { transform: none; }
+/* pills sit near-invisible over bright water, so their press also takes an ink fill: 12 % of their own ink (follows
+   the header ink rule by construction, no new colour), on the pill's existing background transition */
+.pill.is-press { background-color: color-mix(in srgb, currentColor 12%, transparent); }
+@media (prefers-reduced-motion: reduce) { .wordmark, .site-footer__links a, .site-footer__top-link, .overlay__link { transition-duration: .01s; } }
+
+/* ── BUTTON v2 (mockup for Shifat 11:48Z "We can do better for button"; 11:50Z / 11:52Z the SVG circle ripple) ──────
+   services/inkButton.ts drives every value on one rAF loop; here is only the structure. Colours stay the locked pair:
+   the CTA (white pill on the black wall, contact.css) floods to its old hover black; the sound pill's ink is its own
+   header ink (currentColor), the wave inverted inside it. */
+.big-btn, .pill--sound { position: relative; isolation: isolate; overflow: hidden; -webkit-user-select: none; user-select: none; }
+.big-btn > .big-btn__label, .big-btn > i, .pill--sound > .sroll { position: relative; z-index: 1; }
+.big-btn .ink, .pill--sound .ink { position: absolute; inset: 0; z-index: 2; pointer-events: none; visibility: hidden; clip-path: circle(0px at 0px 0px); display: flex; align-items: center; }
+/* the CTA's ink is its old hover: black with the 1 px white inner rule (the pill would vanish into the black wall
+   without it), white arrow disc; the rule rides the ink layer, so it grows with the flood instead of snapping on */
+.big-btn .ink { justify-content: inherit; gap: inherit; padding: inherit; background: #000; color: #fff; box-shadow: inset 0 0 0 1px #fff; border-radius: inherit; }
+.big-btn .ink i.ink-par { background: #fff; color: #000; }
+.pill--sound .ink { justify-content: center; background: currentColor; border-radius: inherit; }
+/* the masked roll: two copies, the second waits below and is moved by inkButton.ts */
+.big-btn .ir { position: relative; display: block; overflow: hidden; line-height: 1.3em; }
+.big-btn .ir-a, .big-btn .ir-b { display: block; white-space: nowrap; }
+.big-btn .ir-b { position: absolute; left: 0; top: 0; transform: translate3d(0, 100%, 0); }
+.big-btn i { overflow: hidden; position: relative; }
+.big-btn .ia-a, .big-btn .ia-b { display: grid; place-items: center; grid-area: 1 / 1; }
+.big-btn .ia-b { transform: translate3d(-130%, 130%, 0); }
+.big-btn i { grid-template-areas: 'a'; }
+.sroll { position: relative; display: block; overflow: hidden; width: 22px; height: 14px; }
+.sroll .ir-a, .sroll .ir-b { display: block; position: absolute; inset: 0; }
+.sroll .ir-b { transform: translate3d(0, 100%, 0); }
+/* the magnet replaces the sound pill's 1 px hover lift */
+@media (hover: hover) { .pill--sound:hover { transform: none; } }
+.pill--sound.is-press { background-color: transparent; }

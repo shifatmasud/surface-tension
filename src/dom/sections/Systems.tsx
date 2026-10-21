@@ -63,8 +63,9 @@ export function Systems() {
             // W25 R6.53 (scorer-r652 #2): a keyboard stop on a Shade DS control brings the drum on screen first (the middle of
             // the pin, where the parts have formed), so focus never sits on a control below the fold
             const sec = ref.current; if (!sec) return
+            // W26: a jump-cut (immediate), not a glide, so the drum has formed before the focus ring needs a place to sit
             const r = sec.getBoundingClientRect()
-            if (r.top > 1 || r.bottom < window.innerHeight - 1) scroll.scrollTo(sec, { offset: Math.max(0, sec.offsetHeight - window.innerHeight) * 0.5 })
+            if (!sys.formed || r.top > 1 || r.bottom < window.innerHeight - 1) scroll.scrollTo(sec, { offset: Math.max(0, sec.offsetHeight - window.innerHeight) * 0.5, immediate: true })
           }} onBlur={() => (sys.focus = 0)}>
           <button type="button" className="systems__hit systems__hit--toggle" role="switch" aria-checked={on} ref={bind('toggle')}
             onPointerDown={press('toggle')} onClick={() => { sys.on = !sys.on; setOn(sys.on); if (!gl) press('toggle')() }}>

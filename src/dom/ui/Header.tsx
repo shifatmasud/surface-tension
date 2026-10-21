@@ -2,6 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { audio } from '../../services/audio'
 import { scroll } from '../../services/scroll'
 import { Logo } from '../../assets/logo/Logo'
+import { bindInk } from '../../services/inkButton'
+
+/** BUTTON v2: the ink copy of the wave draws in the opposite of the header ink (the flood is the ink itself) */
+function inv(c: string) {
+  const m = c.match(/[\d.]+/g); if (!m) return '#fafafa'
+  return (0.2126 * +m[0] + 0.7152 * +m[1] + 0.0722 * +m[2]) > 128 ? '#121315' : '#fafafa'
+}
 
 /**
  * W19 (Shifat 20:33Z m:2349f78f "No need menu button in nav"): the Menu button and its overlay are gone. It is one page
@@ -10,7 +17,7 @@ import { Logo } from '../../assets/logo/Logo'
  * toggle is ONE thin stroke. On, a gentle sine drifts; off, it eases to flat (reversible, no jump). Under reduced motion
  * it is static (a still wave when on, flat when off).
  */
-function Wave({ on }: { on: boolean }) {
+function Wave({ on, invert = false }: { on: boolean; invert?: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null)
   const onRef = useRef(on)
   onRef.current = on
@@ -27,7 +34,7 @@ function Wave({ on }: { on: boolean }) {
       if (!reduced) phase += dt * 3.2
       if ((++n & 7) === 0 || now < toneUntil) color = getComputedStyle(c).color
       ctx.clearRect(0, 0, W, H)
-      ctx.lineWidth = 1.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = color
+      ctx.lineWidth = 1.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = invert ? inv(color) : color
       ctx.beginPath()
       for (let x = 1; x <= W - 1; x += 0.5) {
         const env = Math.sin(Math.PI * (x - 1) / (W - 2))           // the ends rest on the centre line
@@ -55,6 +62,8 @@ function Wave({ on }: { on: boolean }) {
 
 export function Header() {
   const [sound, setSound] = useState(false)
+  const sndRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => bindInk(sndRef.current, 'sound'), [])
   useEffect(() => audio.onChange(setSound), [])
   // W21: the no-GL page has no GL frame to set the UI tone (html[data-bg]), so its header (and the text slot) stayed
   // black on the dark sections. There the tone follows the section under the header: an opaque dark background or an
@@ -85,8 +94,10 @@ export function Header() {
     <header className="header">
       <a className="wordmark" href="#hero" onClick={(e) => { e.preventDefault(); go('hero') }} aria-label="Shifat Masud — home" data-cursor><span className="wordmark__mark" aria-hidden="true"><Logo size="100%" /></span><span aria-hidden="true">Shifat</span></a>
       <nav className="pills" aria-label="Primary">
-        <button type="button" className="pill pill--quiet pill--sound" onClick={() => audio.toggle()} aria-pressed={sound} aria-label={sound ? 'Sound on' : 'Sound off'} data-cursor onMouseEnter={() => audio.tick()}>
-          <Wave on={sound} />
+        <button type="button" ref={sndRef} className="pill pill--quiet pill--sound" onClick={() => audio.toggle()} aria-pressed={sound} aria-label={sound ? 'Sound on' : 'Sound off'} data-cursor onPointerEnter={(e) => { if (e.pointerType === 'mouse') audio.tick() }}>
+          {/* BUTTON v2 (mockup): two wave copies roll in a mask; .ink is the flood with the inverse-ink copy */}
+          <span className="sroll ink-par"><span className="ir-a"><Wave on={sound} /></span><span className="ir-b"><Wave on={sound} /></span></span>
+          <span className="ink" aria-hidden="true"><span className="sroll ink-par"><span className="ir-a"><Wave on={sound} invert /></span><span className="ir-b"><Wave on={sound} invert /></span></span></span>
         </button>
       </nav>
     </header>
