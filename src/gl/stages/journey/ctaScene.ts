@@ -366,7 +366,7 @@ export function buildCta(portrait: boolean) {
     // W23 (scorer-r618/r621: 'a centred headline inside a symmetric ring'): still one per corner and balanced, but balanced
     // on the diagonal rather than mirrored: the top-left and bottom-right sheets a size larger, each corner its own tilt
     // and inset (the headline and the pill stay centred by Shifat's rules)
-    [-0.385, 0.32, 0.24, -12], [0.34, 0.285, 0.19, 6], [-0.335, -0.31, 0.195, 4], [0.37, -0.335, 0.225, -9],
+    [-0.385, 0.295, 0.222, -12], [0.34, 0.285, 0.19, 6], [-0.335, -0.31, 0.195, 4], [0.37, -0.335, 0.225, -9],
   ]
   const PLACE_TALL: [number, number, number, number][] = [
     // W19: four stickers, one per corner (the upper pair over the headline, the lower pair either side of the crewmate)
