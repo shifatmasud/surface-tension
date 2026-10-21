@@ -55,7 +55,11 @@ export function Intro() {
       // can lower the target), and a bounded step: after a frame the main thread spent linking shaders the eased step
       // was ~97 % of the gap at once (the counter jumped 32 → 98 in one frame on ANGLE/D3D11). 6 points per frame at
       // 60 fps; on a slow GPU (long frames) up to 30 points, so the roll never takes more than a few frames
-      const next = mix(eased, target, 1 - Math.exp(-7 * dt))
+      // W22 (GL load-time cut, option b: the counter stays the hero's REAL progress): once the load is really done
+      // (target 1) the last stretch rolled on an exponential tail (rate 7/s to 0.999: ~0.6–0.9 s of counting after the
+      // hero was ready at 60 fps). It now rolls straight on at the fastest speed the no-snap rule allows (1.2 points a
+      // frame at 60 fps), so the drop follows the real readiness by a few frames instead of most of a second
+      const next = target >= 1 ? 1 : mix(eased, target, 1 - Math.exp(-7 * dt))
       // PRELOAD (Shifat 19:14Z, no snapping digits): at most ~1.2 points a frame at 60 fps, so the units reel never skips
       // digits and every carry slides over 2+ frames; long frames (a slow GPU) still catch up by time (dt × 0.6)
       eased = Math.max(eased, Math.min(next, eased + Math.max(0.012, dt * 0.6)))
