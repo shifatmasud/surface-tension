@@ -44,12 +44,16 @@ export const sink = { depth: 0 }
  */
 const gemSil = { value: 1 }    // W23: silhouette coverage on (QA: window.__gemSil = 0 turns it off)
 const gemLift = { value: 0.35 }   // W23: the facet floor (QA: window.__gemLift)
+const gemBoost = { value: 1 }   // W24 R6.36: facet range above the floor (phones/portrait 1.15; scorer-r633 #1)
+const gemFeather = { value: 1.75 }   // W24 R6.36: silhouette coverage ramp in scene px (portrait 2.75: 1 px more feather)
 const gemFill = { value: 0.7 }   // W23: 0.7 in the hero (the darkest navy chips lift toward the env blue), 0.85 in the dive (set per frame)
 function gemPatch(fresPow: string, lod: string) {
   return (sh: { vertexShader: string; fragmentShader: string; uniforms: Record<string, { value: unknown }> }) => {
     sh.uniforms.w22Fill = gemFill
     sh.uniforms.w23Lift = gemLift
     sh.uniforms.w23Sil = gemSil
+    sh.uniforms.w24Boost = gemBoost
+    sh.uniforms.w24Feather = gemFeather
     // W23 (390 stepped outline): the stone's silhouette edges get analytic coverage (diamond.ts addSilhouetteAttrs): on a
     // triangle whose neighbour across an edge faces away, alpha ramps from 0 at that edge to 1 over ~1.75 scene pixels,
     // so the outline stops stepping when the phone's scene (≈1.3–1.5× density) is scaled up. No MSAA (SMAA-only rule).
@@ -57,7 +61,7 @@ function gemPatch(fresPow: string, lod: string) {
       .replace('varying vec3 vNormal;', 'varying vec3 vNormal;\n  attribute vec3 aSilB; attribute vec3 aSilN0; attribute vec3 aSilN1; attribute vec3 aSilN2;\n  varying vec3 vSilB; varying vec3 vSilN0; varying vec3 vSilN1; varying vec3 vSilN2;')
       .replace('gl_Position = projectionMatrix * viewMatrix * modelMatrix * transformedPosition;', 'vSilB = aSilB; mat3 w23M = mat3(modelMatrix); vSilN0 = w23M * aSilN0; vSilN1 = w23M * aSilN1; vSilN2 = w23M * aSilN2;\n    gl_Position = projectionMatrix * viewMatrix * modelMatrix * transformedPosition;')
     sh.fragmentShader = sh.fragmentShader
-      .replace('uniform float bounces;', 'uniform float bounces;\n  uniform float w22Fill;\n  uniform float w23Sil;\n  uniform float w23Lift;\n  varying vec3 vSilB; varying vec3 vSilN0; varying vec3 vSilN1; varying vec3 vSilN2;')
+      .replace('uniform float bounces;', 'uniform float bounces;\n  uniform float w22Fill;\n  uniform float w23Sil;\n  uniform float w23Lift;\n  uniform float w24Boost;\n  uniform float w24Feather;\n  varying vec3 vSilB; varying vec3 vSilN0; varying vec3 vSilN1; varying vec3 vSilN2;')
       .replace('pow( 1.0 + dot( viewDirection, worldNormal), 10.0 )', `pow( clamp(1.0 + dot( viewDirection, worldNormal), 0.0, 1.0), ${fresPow} )`)
       .replace('gl_FragColor = vec4(mix(diffuseColor.rgb, vec3(1.0), nFresnel), diffuseColor.a);', `
     #ifdef ENVMAP_TYPE_CUBEM
@@ -74,7 +78,11 @@ function gemPatch(fresPow: string, lod: string) {
       // W23 (scorer-r6261/r630 #1: navy facets in the 1440 dive): a facet-level floor in the stone's own blue, so an exit ray
       // into a dark patch of the env (where the soft env is dark too and the fill above has nothing to lift toward) reads
       // as deep blue glass rather than a navy hole
-      diffuseColor.rgb = max(diffuseColor.rgb, vec3(0.035, 0.075, 0.45) * (w23Lift / 0.35));
+      vec3 w24F = vec3(0.035, 0.075, 0.45) * (w23Lift / 0.35);
+      diffuseColor.rgb = max(diffuseColor.rgb, w24F);
+      // W24 R6.36 (scorer-r633 #1: the 390 stone read flatter after the floor): stretch the range ABOVE the floor so the
+      // floor removes the holes without flattening the facets (portrait only; 1440 unchanged)
+      diffuseColor.rgb = w24F + (diffuseColor.rgb - w24F) * w24Boost;
     #endif
       float w22M = max(max(diffuseColor.r, diffuseColor.g), diffuseColor.b);
       if (w22M > 2.1) diffuseColor.rgb *= (2.1 + 0.7 * (1.0 - exp(-(w22M - 2.1) / 0.7))) / w22M;
@@ -85,7 +93,7 @@ function gemPatch(fresPow: string, lod: string) {
       if (dot(vSilN0, w23V) < 0.0) w23C = min(w23C, w23D.x);
       if (dot(vSilN1, w23V) < 0.0) w23C = min(w23C, w23D.y);
       if (dot(vSilN2, w23V) < 0.0) w23C = min(w23C, w23D.z);
-      float w23A = clamp(w23C / 1.75, 0.0, 1.0);
+      float w23A = clamp(w23C / w24Feather, 0.0, 1.0);
       if (w23Sil > 1.5) gl_FragColor = vec4(1.0 - w23A, w23A, 0.0, 1.0);   // QA: __gemSil = 2 shows the coverage (red = edge)
       else gl_FragColor.a *= mix(1.0, w23A, w23Sil);`)
   }
@@ -259,6 +267,7 @@ export function HeroStage() {
     if (!vis) return
     // W22: the stone's dark-chip fill: off in the hero, full once the dive guides the stone (QA: window.__gemFill)
     gemLift.value = (window as any).__gemLift ?? 0.35
+    { const portrait = innerWidth < innerHeight; gemBoost.value = portrait ? 1.15 : 1; gemFeather.value = portrait ? 2.75 : 1.75 }
     gemFill.value = (window as any).__gemFill ?? (0.7 + 0.15 * Math.min(1, Math.max(0, dive.gemMix)))   // W23 (scorer-r621 #1, root 02:55Z): the hero lifts its darkest chips too (0.7; 0.85 in the dive)
     { const W = window as any; if (W.__gemFres !== undefined) (gemMesh.current.material as any).fresnel = W.__gemFres; if (W.__sheenTp !== undefined) sheen.uniforms.u_tp.value = W.__sheenTp; if (W.__sheenWarm !== undefined) sheen.uniforms.u_warm.value = W.__sheenWarm; if (W.__sheenStr !== undefined) sheen.uniforms.u_strength.value = W.__sheenStr; if (W.__gemHide !== undefined) sheenMesh.current.visible = !W.__gemHide }   // QA hooks (W22 stone A/B)
     waterMesh.current.visible = lakeOn; dome.visible = lakeOn

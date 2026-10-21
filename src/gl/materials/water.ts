@@ -313,14 +313,19 @@ export function createWaterMaterial() {
             vec2 off = (N.xz * vec2(0.035, 0.05) + rg * 0.25) * (0.7 + 2.2 * gdp) * u_refrK;
             off *= min(1.0, 0.06 / max(length(off), 1e-4));
             float disp = 0.15 + 1.2 * min(length(rg), 0.4);
-            vec4 ug = texture2D(u_underTex, suv + off);
+            // W24 R6.36 (scorer-r633 #3: at the 1440 dive the submerged ghost read as a jagged lilac silhouette): the stone's
+            // under-pass is drawn at 0.4–0.6× and upscaled, so its edge stair-stepped; a 4-tap box of ~1.5 under-texels softens
+            // the mask, and its coverage is eased (no hard 0→1 step at the outline) and capped a little lower
+            vec2 utx = 1.5 / vec2(textureSize(u_underTex, 0));
+            vec4 ug = 0.25 * (texture2D(u_underTex, suv + off + vec2(utx.x, utx.y)) + texture2D(u_underTex, suv + off + vec2(-utx.x, utx.y))
+                            + texture2D(u_underTex, suv + off + vec2(utx.x, -utx.y)) + texture2D(u_underTex, suv + off - utx));
             vec4 ugR = texture2D(u_underTex, suv + off * (1.0 - disp));
             vec4 ugB = texture2D(u_underTex, suv + off * (1.0 + disp));
             vec3 sc = vec3(ugR.r / max(ugR.a, 1e-3), ug.g / max(ug.a, 1e-3), ugB.b / max(ugB.a, 1e-3));
             sc = mix(ug.rgb / max(ug.a, 1e-3), sc, step(0.02, min(ugR.a, ugB.a)));
             sc *= mix(1.0, (0.78 + 0.4 * cauL) * focus, 0.65 * clamp(gdp * 3.0, 0.3, 1.0));
             vec3 Tg = exp(-u_absorb * gdp * 0.9);
-            refr = mix(refr, sc * Tg + inscatter * (1.0 - Tg.g) * 0.45, clamp(ug.a, 0.0, 1.0) * 0.95);
+            refr = mix(refr, sc * Tg + inscatter * (1.0 - Tg.g) * 0.45, smoothstep(0.05, 0.85, ug.a) * 0.88);
             underA = clamp(ug.a, 0.0, 1.0);
           }
           col = mix(refr, refl, F);
