@@ -154,7 +154,7 @@ export function HeroStage() {
     const rt = new THREE.WebGLCubeRenderTarget(hi ? 256 : 128, { type: THREE.HalfFloatType, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter })
     const cam = new THREE.CubeCamera(0.05, 200, rt)
     cam.children.forEach((c) => { c.layers.enable(STUDIO_LAYER); c.layers.enable(SYSUI_LAYER) })
-    return { rt, cam, frame: 0, deep: false, lake: true, dropped: false }
+    return { rt, cam, frame: 0, deep: false, lake: true, dropped: false, lifted: false }
   }, [hi])
   // product-photography trick: a near-white world gives a pastel stone, so the env capture alone sees a ring of
   // dark flags with bright gaps around the gem (plus a deep floor card). The facets then tile into crisp
@@ -433,7 +433,10 @@ export function HeroStage() {
         gemMask.x = (v.x * 0.5 + 0.5) * innerWidth; gemMask.y = (0.5 - v.y * 0.5) * innerHeight; gemMask.on = 1
       } else gemMask.on = 0
     }
-    env.frame++
+    // CURTAIN (Shifat 13:04Z): while the preloader curtain is lifting, the periodic re-captures wait (the 3 captures of the
+    // drop run before the lift starts, Intro.tsx); counting resumes once it has lifted, so a cube pass never lands on the
+    // ~300 ms in which the curtain crosses the screen
+    if (!(env.frame >= 3 && props.introDrop && !env.lifted && !(env.lifted = document.documentElement.classList.contains('is-lifted')))) env.frame++
     scene.background = bg
     gl.setRenderTarget(prevRT); gl.setClearColor(cc, prevClear)
   }, group)

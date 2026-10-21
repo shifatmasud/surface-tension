@@ -94,6 +94,9 @@ html[data-bg='dark'] .level { background: rgba(255,255,255,.12); }
 /* ── intro ──────────────────────────────────────────── */
 /* Shifat 08:51Z: black preloader that lifts like a curtain (flat edge, no gradient) */
 .intro { position: fixed; inset: 0; z-index: 100; overflow: hidden; background: #000; color: #fff; display: flex; align-items: flex-end; justify-content: space-between; padding: var(--pad-y) var(--pad-x); pointer-events: none; }
+/* CURTAIN (Shifat 13:04Z): the panel is its own compositor layer from the first frame, so the lift is a pure transform
+   animation (no layer promotion or repaint of the panel when it starts) */
+.intro:not(.shell-intro) { will-change: transform; backface-visibility: hidden; }
 .intro__count { font-size: var(--fs-display); font-weight: 400; letter-spacing: -0.06em; line-height: .8; font-variant-numeric: tabular-nums; display: flex; }
 .intro__meta { font-size: var(--fs-small); color: var(--c-silver-2); max-width: 26ch; text-align: right; line-height: 1.5; }
 /* the reel window clips with clip-path (not overflow), so the box keeps the digits' own baseline and sits on the text line */

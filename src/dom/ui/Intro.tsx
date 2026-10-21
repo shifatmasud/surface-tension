@@ -69,20 +69,51 @@ export function Intro() {
       // the curtain starts lifting with the first droplet, so the ring opens as the hero is revealed
       // QA: ?introhold parks the counter at 60 % until window.__introGo is set (frames of the panel + its logo)
       if (/[?&]introhold/.test(location.search) && !(window as any).__introGo) { eased = Math.min(eased, 0.6); if (count.current) paintCounter(count.current, eased * 100); raf = requestAnimationFrame(loop); return }
-      if (eased >= 1) { logo3d.exit(); boot.drop(); setTimeout(() => setGone(true), 120); return }
+      if (eased >= 1) { boot.drop(); settle(now); return }
+      if (dts.length < 24) dts.push(dt); else { dts[di] = dt; di = (di + 1) % 24 }
       raf = requestAnimationFrame(loop)
+    }
+    // CURTAIN (Shifat 13:04Z "in my phone it instantly vanishes upon finishing"): the drop's first frames are the heaviest of
+    // the load (full-rate chain from the drop on, 3 back-to-back env cube captures, the droplet), and the old path started
+    // the lift ~120 ms + a React commit + a passive effect after the drop, so on a phone the curve's visible middle (it
+    // crosses ~80 % of the screen in ~300 ms) landed on those stalled frames: two or three frames, i.e. a vanish. Now the
+    // drop's heavy frames run first (the panel still covers them, the logo keeps spinning), the lift starts on the first
+    // frame after two consecutive normal-length frames once the 3 env-capture frames are past (normal: ≤ 1.5× the counter's
+    // own frame time, at least 24 ms, or within 30 % of the shortest frame since the drop), and it is
+    // started here, in the frame, not through a timer and a React effect. Capped at 450 ms after the drop so a device whose
+    // every frame is long still lifts. Same curve, same duration, same flat edge; reduced motion keeps its 350 ms fade.
+    const dts: number[] = []; let di = 0
+    const settle = (t0d: number) => {
+      const s = dts.slice().sort((a, b) => a - b), med = s.length ? s[s.length >> 1] * 1000 : 16.7
+      const thr = Math.max(24, med * 1.5)
+      let prev = t0d, n = 0, lo = 1e9, d1 = 1e9
+      const step = (now: number) => {
+        const d = now - prev; prev = now; n++
+        if (n > 1) lo = Math.min(lo, d)
+        // normal = the counter's own frame time, or (a phone whose full-rate hero frame is simply longer than the counter's
+        // third-rate one) within 30 % of the shortest frame since the drop; the first 3 frames (the env captures) never count
+        const norm = (x: number) => x <= thr || x <= lo * 1.3
+        if ((n >= 4 && norm(d) && norm(d1)) || now - t0d > 450) { lift(); return }
+        d1 = d
+        raf = requestAnimationFrame(step)
+      }
+      raf = requestAnimationFrame(step)
+    }
+    const lift = () => {
+      const el = root.current
+      logo3d.exit()
+      if (el) {
+        // W24 (framer-motion removed): the curtain lift as WAAPI — same curve (expo in-out, 1.05 s), same reduced-motion fade
+        const a = reduced
+          ? el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 350, easing: HOUSE.CSS_INOUT, fill: 'forwards' })
+          : el.animate([{ transform: 'translateY(0%)' }, { transform: 'translateY(-100%)' }], { duration: /[?&]introslow/.test(location.search) ? 12000 : 1050, easing: 'cubic-bezier(0.87, 0, 0.13, 1)', fill: 'forwards' })
+        a.onfinish = () => { setHidden(true); document.documentElement.classList.add('is-lifted') }
+      } else document.documentElement.classList.add('is-lifted')
+      setGone(true)
     }
     raf = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(raf)
   }, [])
-  // W24 (framer-motion removed): the curtain lift as WAAPI — same curve (expo in-out, 1.05 s), same reduced-motion fade
-  useEffect(() => {
-    const el = root.current; if (!gone || !el) return
-    const a = reduced
-      ? el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 350, easing: HOUSE.CSS_INOUT, fill: 'forwards' })
-      : el.animate([{ transform: 'translateY(0%)' }, { transform: 'translateY(-100%)' }], { duration: /[?&]introslow/.test(location.search) ? 12000 : 1050, easing: 'cubic-bezier(0.87, 0, 0.13, 1)', fill: 'forwards' })
-    a.onfinish = () => { setHidden(true); document.documentElement.classList.add('is-lifted') }
-  }, [gone])
   // hidden, never unmounted: removing the node mid-commit could tear down the sibling Canvas
   return (
     // Shifat 08:51Z: the black panel lifts off like a curtain (expo in-out, flat edge) over the already-rendered hero;
