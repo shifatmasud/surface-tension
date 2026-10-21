@@ -272,49 +272,40 @@ export class ScreenPaint {
     // a JUMP (the loop wrap, a nav/deep-link jump: more than half a screen in one frame) is not a scroll: it never
     // paints, on any device (the wrap used to draw a full-height seam over the hero)
     const jump = Math.abs(props.scrollDelta) > props.height * 0.5
-    const scrollTerm = this.touchMode || jump ? 0 : props.scrollDelta
+    // W25 R6.47 (Shifat 2:28 AM Oct 21, LOCKED FOREVER: the lusion-decoded-source DESKTOP trail on every device): the finger drives
+    // the desktop brush exactly as the mouse does, scroll term included; only a jump (more than half a screen in one frame: the
+    // loop wrap, a deep link; the reference has none) never paints
+    const scrollTerm = jump ? 0 : props.scrollDelta
 
     // 2) radius from speed: px moved this frame, the scroll added to the pointer ×3 viewports (the reference adds
     // scrollViewDelta × viewportHeight × 3 to the y-down pixel position), so a scroll paints even with a still pointer
     this.v2.copy(px); this.v2.y += scrollTerm * ratio * 3
     let radius = fit(this.v2.distanceTo(prevPx), 0, this.radiusDistanceRange, this.minRadius, this.maxRadius)
     // 3) when it refuses to paint: still and not scrolling; on touch / needsMouseDown only while held two frames
-    const touchRule = (this.needsMouseDown || browser.isMobile || this.touchMode) && (!isDown || !wasDown)
+    // W25 R6.47: the desktop rule only (needsMouseDown is false, as on the reference's desktop): no mobile hold-to-paint path
+    const touchRule = this.needsMouseDown && (!isDown || !wasDown)
     if (Math.abs(scrollTerm) === 0 && (!moved || !this.drawEnabled || touchRule)) radius = 0
-    if (this.touchMode && touchRule) radius = 0
     if (!ever || !this.drawEnabled) radius = 0
     radius = (radius / props.height) * ph // CSS px → paint px
 
     // 4) the brush is a segment: from = last to (pointer in -1..1, y up, plus the scroll in viewport units)
     this.from.copy(this.to)
     const mx = ever ? (px.x / props.width) * 2 - 1 : 0
-    const my = (ever ? 1 - (px.y / props.height) * 2 : 0) + (this.touchMode || jump ? 0 : offY)
+    const my = (ever ? 1 - (px.y / props.height) * 2 : 0) + (jump ? 0 : offY)
     this.to.set(((mx + 1) * pw) / 2, ((my + 1) * ph) / 2, radius, 1)
     if (!this.started) { this.from.copy(this.to); this.started = true }
-    if (this.touchMode) {
-      // POLISH: cap the stroke length on touch (a flick or a new touch far from the last one never draws a long seam)
-      const dx = this.to.x - this.from.x, dy = this.to.y - this.from.y, len = Math.hypot(dx, dy), cap = ph * 0.12
-      if (len > cap) { const k = 1 - cap / len; this.from.x += dx * k; this.from.y += dy * k }
-    }
 
     // 5) leaky-integrated brush velocity
     this.v2.set(this.to.x - this.from.x, this.to.y - this.from.y).multiplyScalar(dt * 0.8)
-    if (this.touchMode && radius === 0) this.v2.set(0, 0)   // POLISH: a finger jump while not painting injects no push
     u.u_vel.value.multiplyScalar(this.accelerationDissipation).add(this.v2)
 
     // live tuning → uniforms
     u.u_pushStrength.value = this.pushStrength
     u.u_curlScale.value = this.curlScale
     u.u_curlStrength.value = this.curlStrength
-    const f = settings.PAINT_DT_SCALED || this.touchMode ? dt * 60 : 1 // parity: per-frame constants (see checklist note)
+    const f = settings.PAINT_DT_SCALED ? dt * 60 : 1 // parity: per-frame constants, as the reference (W25 R6.47: on touch too)
     u.u_dissipations.value.set(Math.pow(this.velocityDissipation, f), Math.pow(this.weight1Dissipation, f), Math.pow(this.weight2Dissipation, f))
-    if (this.touchMode) {
-      // POLISH: on touch the fades run on time (a slow phone frame no longer stretches the trail) with a half-life of
-      // at most 0.6 s, and the velocity residue the 8-bit step used to strand snaps to rest
-      const hl = Math.pow(0.5, dt / 0.6), d = u.u_dissipations.value
-      d.set(Math.min(d.x, hl), Math.min(d.y, hl), Math.min(d.z, hl))
-    }
-    u.u_velSnap.value = this.touchMode ? 3 / 255 : 0
+    u.u_velSnap.value = 0   // W25 R6.47: the reference has no velocity snap
     if (this.useNoise !== ('USE_NOISE' in this.material.defines)) {
       if (this.useNoise) this.material.defines.USE_NOISE = ''; else delete this.material.defines.USE_NOISE
       this.material.needsUpdate = true
