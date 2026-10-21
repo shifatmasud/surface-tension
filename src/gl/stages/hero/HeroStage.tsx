@@ -83,7 +83,10 @@ export function HeroStage() {
   // dark/bright blues — a vivid stone with real sparkle — while the visible frame stays airy and white.
   const studio = useMemo(() => {
     const g = new THREE.Group()
-    const dark = new THREE.MeshBasicMaterial({ color: '#05070f', side: THREE.DoubleSide, fog: false, toneMapped: false })
+    // W20 (scorer-r610 #1: at 1440 the near-black cards read as black void facets on the star of every frame): wide
+    // screens give the dark cards a deep sapphire instead of near-black, so the dark facets stay dark-blue glass and keep
+    // the sparkle contrast; phones keep the look Shifat called beautiful.
+    const dark = new THREE.MeshBasicMaterial({ color: hi ? '#0c2266' : '#05070f', side: THREE.DoubleSide, fog: false, toneMapped: false })
     const deep = new THREE.MeshBasicMaterial({ color: '#0a1a4a', side: THREE.DoubleSide, fog: false, toneMapped: false })
     const soft = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.2, 2.2, 2.25), side: THREE.DoubleSide, fog: false, toneMapped: false })
     const add = (m: THREE.Mesh) => { m.layers.set(STUDIO_LAYER); g.add(m) }
@@ -100,7 +103,7 @@ export function HeroStage() {
     // PERF HOOK (same objects on every tier): the env-capture-only studio cards exist on phones too.
     g.visible = true
     return g
-  }, [])
+  }, [hi])
   // v3 underwater lighting fix (from the cube work, applied to the stone): under water the light comes from above. The
   // env sees a full surround graded from the bright surface window overhead through luminous teal to the deep below,
   // with a few dark kelp flags for contrast, so the stone reads as a lit sapphire (it went near-black under water).
@@ -343,7 +346,7 @@ export function HeroStage() {
           paths, so whole facets came out pure green, dark red or black (A/B on live: 0 removes them). Now a thin
           fast-chroma fringe (direction offset, one traced path) on every tier: the fire stays, the chips go */}
       <mesh ref={gemMesh} geometry={gemGeo} onUpdate={(o) => o.layers.enable(GEM_LAYER)} onBeforeRender={gemRes}>
-        <MeshRefractionMaterial envMap={env.rt.texture as any} bounces={hi ? 3 : 2} ior={2.2} fresnel={0.85} aberrationStrength={hi ? 0.012 : 0.008} fastChroma color={new THREE.Color(0.1, 0.34, 2.1)} toneMapped />
+        <MeshRefractionMaterial envMap={env.rt.texture as any} bounces={hi ? 3 : 2} ior={2.2} fresnel={0.85} aberrationStrength={hi ? 0.006 : 0.008} fastChroma color={new THREE.Color(0.1, 0.34, 2.1)} toneMapped />
       </mesh>
       <mesh ref={sheenMesh} geometry={gemGeo} material={sheen.material} renderOrder={2} onUpdate={(o) => o.layers.enable(GEM_LAYER)} />
     </group>

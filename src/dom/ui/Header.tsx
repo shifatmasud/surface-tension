@@ -19,13 +19,13 @@ function Wave({ on }: { on: boolean }) {
     const W = 22, H = 14
     const dpr = Math.min(devicePixelRatio, 2); c.width = W * dpr; c.height = H * dpr; ctx.scale(dpr, dpr)
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
-    let raf = 0, amp = onRef.current ? 1 : 0, phase = 0, n = 0, last = performance.now(), color = getComputedStyle(c).color
+    let raf = 0, amp = onRef.current ? 1 : 0, phase = 0, n = 0, last = performance.now(), color = getComputedStyle(c).color, toneUntil = 0
     const draw = (now: number) => {
       const dt = Math.min(0.05, (now - last) / 1000); last = now
       const target = onRef.current ? 1 : 0
       amp = reduced ? target : amp + (target - amp) * (1 - Math.exp(-6 * dt))
       if (!reduced) phase += dt * 3.2
-      if ((++n & 7) === 0) color = getComputedStyle(c).color
+      if ((++n & 7) === 0 || now < toneUntil) color = getComputedStyle(c).color
       ctx.clearRect(0, 0, W, H)
       ctx.lineWidth = 1.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = color
       ctx.beginPath()
@@ -36,11 +36,15 @@ function Wave({ on }: { on: boolean }) {
       }
       ctx.stroke()
       // settled and still: stop drawing until the state changes
-      if (reduced || (target === 0 && amp < 0.002)) { raf = 0; return }
+      if ((reduced || (target === 0 && amp < 0.002)) && now >= toneUntil) { raf = 0; return }
       raf = requestAnimationFrame(draw)
     }
     raf = requestAnimationFrame(draw)
-    return () => { if (raf) cancelAnimationFrame(raf) }
+    // W20 (scorer-r610 #3: the icon stayed dark on every dark section): a settled, silent wave stops drawing, so it kept
+    // the colour it had when it stopped. Redraw once whenever the UI tone (html[data-bg]) flips.
+    const mo = new MutationObserver(() => { toneUntil = performance.now() + 700; if (!raf) { last = performance.now(); raf = requestAnimationFrame(draw) } }) // follows the .5 s colour transition
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-bg'] })
+    return () => { if (raf) cancelAnimationFrame(raf); mo.disconnect() }
   }, [on])
   return <canvas ref={ref} className="wave" aria-hidden />
 }
