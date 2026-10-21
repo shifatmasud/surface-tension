@@ -248,7 +248,12 @@ export function createStickerInteraction(c: Ctx): StickerInteraction {
     g = { i, id, mode: ang === null ? 'drag' : 'peel', gx: w2.x - posX(i), gy: w2.y - posY(i), sx: w2.x, sy: w2.y, touch }
     const lab = ang !== null ? 'Peel' : 'Drag'
     if (st.el.dataset.cursorLabel !== lab) { st.el.dataset.cursorLabel = lab; st.el.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })) }
-    if (ang !== null) { st.ang = ang; st.peelT = 0.08 } else { st.liftT = RM ? 0 : 1; st.ox.tune(7, 1, 0); st.oy.tune(7, 1, 0); st.tx = st.ox.value; st.ty = st.oy.value }
+    if (ang !== null) { st.ang = ang; st.peelT = 0.08 } else {
+      st.liftT = RM ? 0 : 1; st.ox.tune(7, 1, 0); st.oy.tune(7, 1, 0); st.tx = st.ox.value; st.ty = st.oy.value
+      // W23 (scorer-r6261: 'no visible peel or curl on a drag'): picked up by its face, the corner on the side of the
+      // finger curls up a little, the way a lifted sticker does; it lays flat again on the drop (well under the peel-off)
+      if (!RM) { st.ang = c.shapes[i] === 'circle' ? Math.atan2(q.y, q.x) : Math.atan2(q.y >= 0 ? 1 : -1, q.x >= 0 ? 1 : -1); st.peelT = 0.17 }
+    }
     audio.tick()
     if (touch && navigator.vibrate) try { navigator.vibrate(8) } catch { /* not allowed */ }
   }
@@ -272,7 +277,7 @@ export function createStickerInteraction(c: Ctx): StickerInteraction {
     note(`end ${g.i} ${cancel ? 'cancel' : 'drop'}`)
     const st = S[g.i], i = g.i
     if (g.mode === 'drag') {
-      st.liftT = 0
+      st.liftT = 0; st.peelT = 0
       if (RM) { st.ox.tune(4, 1, 0); st.oy.tune(4, 1, 0) } else { st.ox.tune(2.4, 0.62, 0); st.oy.tune(2.4, 0.62, 0) }
       // a little inertia: a flicked sticker travels on a touch before it re-sticks (capped at one sticker width)
       const s = size(i), k = RM ? 0 : 0.12
