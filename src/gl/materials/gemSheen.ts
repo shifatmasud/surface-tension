@@ -32,7 +32,8 @@ export function createGemSheen(opts: { strength?: number; warm?: number } = {}) 
     u_surfaceY: { value: 0 },        // the lake's level: below it the stone is underwater
     u_under: { value: 1 },           // 0 disables the underwater look (caustics, absorption, waterline)
     u_tp: { value: 1 },
-    u_feather: { value: 1.75 },     // W25 R6.41: silhouette coverage ramp (scene px), shared with the stone's (HeroStage gemFeather)              // CINEMATIC: three-point strength (key from the surface underwater, fill, rim)
+    u_feather: { value: 1.75 },
+    u_dep: { value: new THREE.Vector2(0, 2) },   // W25 R6.42: shared with the stone's under-pass depth fade (HeroStage gemDep)     // W25 R6.41: silhouette coverage ramp (scene px), shared with the stone's (HeroStage gemFeather)              // CINEMATIC: three-point strength (key from the surface underwater, fill, rim)
     ...causticUniforms,
   }
   const material = new THREE.ShaderMaterial({
@@ -65,7 +66,7 @@ export function createGemSheen(opts: { strength?: number; warm?: number } = {}) 
         gl_Position = projectionMatrix * viewMatrix * w;
       }`,
     fragmentShader: /* glsl */ `
-      uniform float u_time, u_strength, u_warm, u_surfaceY, u_under, u_tp, u_feather; uniform vec3 u_key, u_rim;
+      uniform float u_time, u_strength, u_warm, u_surfaceY, u_under, u_tp, u_feather; uniform vec2 u_dep; uniform vec3 u_key, u_rim;
       varying vec3 vN; varying vec3 vW; varying vec3 vO; varying vec3 vON; varying vec3 vOW;
       varying vec3 vSilB; varying vec3 vSilN0; varying vec3 vSilN1; varying vec3 vSilN2;
       ${THIN_FILM}
@@ -139,6 +140,7 @@ export function createGemSheen(opts: { strength?: number; warm?: number } = {}) 
         if (dot(vSilN1, w25V) < 0.0) w25C = min(w25C, w25D.y);
         if (dot(vSilN2, w25V) < 0.0) w25C = min(w25C, w25D.z);
         col *= clamp(w25C / u_feather, 0.0, 1.0);
+        if (u_dep.x > 0.5) col *= mix(1.0, 0.3, smoothstep(0.05, 0.9, max(0.0, -vW.y) * u_dep.y));   // W25 R6.42: same fade as the stone's coverage
         gl_FragColor = vec4(col, 1.0);
       }`,
   })

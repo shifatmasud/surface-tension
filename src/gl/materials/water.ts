@@ -401,8 +401,12 @@ export function createWaterMaterial() {
           vec2 toG = u_gem.xz - v_world.xz;
           float tAx = max(dot(toG, Rr.xz) / max(dot(Rr.xz, Rr.xz), 1e-4), 0.0);
           float hAx = v_world.y + Rr.y * tAx;
-          float hFade = 1.0 - smoothstep(0.02, 0.7, hAx);
-          float gw = smoothstep(0.05, 0.75, gemR.a) * hFade * clamp(u_gemReflK * (0.2 + F * 6.0), 0.0, GWCAP) * (1.0 - 0.75 * underA);   // WATER LANE: Fresnel-led, capped lower (muddy blob in review #13)
+          // W25 R6.42 (scorer-r636..r639: the 1440 dive's 'ghost lobe' — diagnosed on staging as THIS mirror, not the refraction:
+          // u_reflOn = 0 removes the wide lilac lobe and its spikes): the mirror fades sooner with its height above the waterline
+          // (0.7 -> 0.5) once the stone has sunk to the waterline (the dive); the floating hero stone keeps 0.7. The lobe recedes. (A higher coverage-ramp start, 0.18, was tried: it cut the
+          // spikes' tips but left a harder, more jagged outline; not kept)
+          float hFade = 1.0 - smoothstep(0.02, mix(0.5, 0.7, smoothstep(0.15, 0.35, u_gem.y)), hAx);   // hero (stone floating, y≈0.45): unchanged 0.7
+          float gw = smoothstep(0.05, 0.85, gemR.a) * hFade * clamp(u_gemReflK * (0.2 + F * 6.0), 0.0, GWCAP) * (1.0 - 0.75 * underA);   // WATER LANE: Fresnel-led, capped lower (muddy blob in review #13)
           // colour-depth: the mirrored stone sits deeper and cooler than the warm-lit stone above it
           vec3 rc = mix(gemR.rgb, gemR.rgb * gemR.rgb * 1.2, 0.5) * vec3(0.7, 0.8, 1.0);
           float rl = dot(rc, vec3(0.2126, 0.7152, 0.0722)); rc = max(mix(vec3(rl), rc, 1.3), 0.0);

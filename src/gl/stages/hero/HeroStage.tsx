@@ -46,6 +46,8 @@ const gemSil = { value: 1 }    // W23: silhouette coverage on (QA: window.__gemS
 const gemLift = { value: 0.35 }   // W23: the facet floor (QA: window.__gemLift)
 const gemBoost = { value: 1 }   // W24 R6.36: facet range above the floor (phones/portrait 1.15; scorer-r633 #1)
 const gemFeather = { value: 1.75 }   // W24 R6.36: silhouette coverage ramp in scene px (portrait 2.75: 1 px more feather)
+const gemDep = { value: new THREE.Vector2(0, 2) }   // W25 R6.42: under-surface pass only: x = on, y = 1 / stone radius (depth fade of the lake's refracted ghost)
+const gemPre = { value: 0 }   // W25 R6.42: 1 when the stone is drawn opaque (its alpha is not applied by blending)
 const gemFill = { value: 0.7 }   // W23: 0.7 in the hero (the darkest navy chips lift toward the env blue), 0.85 in the dive (set per frame)
 function gemPatch(fresPow: string, lod: string) {
   return (sh: { vertexShader: string; fragmentShader: string; uniforms: Record<string, { value: unknown }> }) => {
@@ -54,6 +56,8 @@ function gemPatch(fresPow: string, lod: string) {
     sh.uniforms.w23Sil = gemSil
     sh.uniforms.w24Boost = gemBoost
     sh.uniforms.w24Feather = gemFeather
+    sh.uniforms.w25Dep = gemDep
+    sh.uniforms.w25Pre = gemPre
     // W23 (390 stepped outline): the stone's silhouette edges get analytic coverage (diamond.ts addSilhouetteAttrs): on a
     // triangle whose neighbour across an edge faces away, alpha ramps from 0 at that edge to 1 over ~1.75 scene pixels,
     // so the outline stops stepping when the phone's scene (≈1.3–1.5× density) is scaled up. No MSAA (SMAA-only rule).
@@ -61,7 +65,7 @@ function gemPatch(fresPow: string, lod: string) {
       .replace('varying vec3 vNormal;', 'varying vec3 vNormal;\n  attribute vec3 aSilB; attribute vec3 aSilN0; attribute vec3 aSilN1; attribute vec3 aSilN2;\n  varying vec3 vSilB; varying vec3 vSilN0; varying vec3 vSilN1; varying vec3 vSilN2;')
       .replace('gl_Position = projectionMatrix * viewMatrix * modelMatrix * transformedPosition;', 'vSilB = aSilB; mat3 w23M = mat3(modelMatrix); vSilN0 = w23M * aSilN0; vSilN1 = w23M * aSilN1; vSilN2 = w23M * aSilN2;\n    gl_Position = projectionMatrix * viewMatrix * modelMatrix * transformedPosition;')
     sh.fragmentShader = sh.fragmentShader
-      .replace('uniform float bounces;', 'uniform float bounces;\n  uniform float w22Fill;\n  uniform float w23Sil;\n  uniform float w23Lift;\n  uniform float w24Boost;\n  uniform float w24Feather;\n  varying vec3 vSilB; varying vec3 vSilN0; varying vec3 vSilN1; varying vec3 vSilN2;')
+      .replace('uniform float bounces;', 'uniform float bounces;\n  uniform float w22Fill;\n  uniform float w23Sil;\n  uniform float w23Lift;\n  uniform float w24Boost;\n  uniform float w24Feather;\n  uniform vec2 w25Dep;\n  uniform float w25Pre;\n  varying vec3 vSilB; varying vec3 vSilN0; varying vec3 vSilN1; varying vec3 vSilN2;')
       .replace('pow( 1.0 + dot( viewDirection, worldNormal), 10.0 )', `pow( clamp(1.0 + dot( viewDirection, worldNormal), 0.0, 1.0), ${fresPow} )`)
       .replace('gl_FragColor = vec4(mix(diffuseColor.rgb, vec3(1.0), nFresnel), diffuseColor.a);', `
     #ifdef ENVMAP_TYPE_CUBEM
@@ -95,7 +99,11 @@ function gemPatch(fresPow: string, lod: string) {
       if (dot(vSilN2, w23V) < 0.0) w23C = min(w23C, w23D.z);
       float w23A = clamp(w23C / w24Feather, 0.0, 1.0);
       if (w23Sil > 1.5) gl_FragColor = vec4(1.0 - w23A, w23A, 0.0, 1.0);   // QA: __gemSil = 2 shows the coverage (red = edge)
-      else gl_FragColor.a *= mix(1.0, w23A, w23Sil);`)
+      else gl_FragColor.a *= mix(1.0, w23A, w23Sil);
+      // W25 R6.42 (scorer-r636..r639: the 1440 dive's refracted ghost lobe reads as solid as the stone above the surface): in
+      // the under-surface pass only, the stone's coverage fades with its depth below the lake (full at the waterline, ~30 %
+      // a stone-radius down), so the lake's refraction of the pavilion recedes into the water instead of a hard lilac lobe
+      if (w25Dep.x > 0.5) { float w25f = mix(1.0, 0.3, smoothstep(0.05, 0.9, max(0.0, -vWorldPosition.y) * w25Dep.y)); gl_FragColor.a *= w25f; if (w25Pre > 0.5) gl_FragColor.rgb *= w25f; }`)
   }
 }
 const gemPatchHi = gemPatch('10.0', '4.0')
@@ -123,7 +131,7 @@ export function HeroStage() {
     return g
   }, [hi])
   const gemGeo = useMemo(() => brilliantGeometry(1), [])
-  const sheen = useMemo(() => { const s = createGemSheen({ strength: 0.75 }); s.uniforms.u_feather = gemFeather; return s }, [])   // W25 R6.41: the shell's silhouette ramp = the stone's
+  const sheen = useMemo(() => { const s = createGemSheen({ strength: 0.75 }); s.uniforms.u_feather = gemFeather; s.uniforms.u_dep = gemDep; return s }, [])   // W25 R6.41: the shell's silhouette ramp = the stone's
   const sheenMesh = useRef<THREE.Mesh>(null!)
   // DIAG: the refraction shader maps gl_FragCoord / resolution to the camera ray it takes its mip gradients from, and
   // drei feeds it the CSS size. gl_FragCoord is in target pixels, so at DPR 2 (phones, retina) uv ran 0..2 (one mip
@@ -357,8 +365,10 @@ export function HeroStage() {
     wu.u_underOn.value = submerged ? 1 : 0
     if (submerged) {
       const ml = c.layers.mask; c.layers.set(GEM_LAYER)
+      gemDep.value.set(1, 1 / Math.max(1e-3, m.scale.x)); gemPre.value = (m.material as THREE.Material).transparent ? 0 : 1   // W25 R6.42
       gl.setRenderTarget(under.rt); gl.setClearColor(0x000000, 0); gl.clear(true, true, false)
       gl.render(scene, c)
+      gemDep.value.x = 0
       c.layers.mask = ml
     }
     }
