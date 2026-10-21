@@ -111,7 +111,7 @@ void main(){
   float coc = clamp(abs(1.0 / dd - 1.0 / F) * F * 1.2, 0.0, 1.0);
   vCoc = coc;
   vec3 p = position, n;
-  if (aF.x < 0.5){
+  if (aF.x < 0.5 || aF.x > 2.5){   // the bell, and (W25 R6.50) the inner bell, pulse together
     float r = aF.y;
     p.xz *= 1.0 - 0.24 * pulse * r * r;
     p.y *= 0.7 + 0.18 * pulse;
@@ -164,6 +164,14 @@ void main(){
     col += lum * glow * (1.45 * smoothstep(mix(0.8, 0.5, vCoc), 1.0, vT)                    // the glowing margin ring (hot spot)
                        + 0.2 * (1.0 - smoothstep(0.0, 0.4, vT)));                           // the lit core under the apex
     // W24: a soft silhouette — the brightest fresnel sat on the last pixel and drew a hard, stepped outline
+    float fe = max(fwidth(fr), 1e-3);
+    col *= mix(0.3, 1.0, 1.0 - smoothstep(1.0 - 3.0 * fe, 1.0, fr));
+  } else if (vKind > 2.5){
+    // W25 R6.50: the inner bell: a faint translucent body seen through the outer bell, its margin lit with the pulse;
+    // defocus softens it like the outer bell, so it stays edge ambience
+    float fr = 1.0 - abs(dot(normalize(vN), vV));
+    col = vec3(0.86, 0.56, 0.98) * (0.035 + 0.3 * pow(fr, 1.6)) * (1.0 - 0.5 * vCoc);
+    col += lum * glow * 0.55 * smoothstep(mix(0.72, 0.5, vCoc), 1.0, vT) * (1.0 - 0.4 * vCoc);
     float fe = max(fwidth(fr), 1e-3);
     col *= mix(0.3, 1.0, 1.0 - smoothstep(1.0 - 3.0 * fe, 1.0, fr));
   } else {
@@ -332,6 +340,22 @@ function jellyGeometry(segW: number, segH: number, filSeg: number) {
     const base = pos.length / 3
     for (let j = 0; j <= filSeg; j++) for (const sd of [-1, 1]) { pos.push(x, y, z); f.push(kind, j / filSeg, sd) }
     for (let j = 0; j < filSeg; j++) { const a = base + j * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3) }
+  }
+  // W25 R6.50 (scorer-r647 #3 "hairline tentacles, no inner body"): an inner bell (the manubrium/stomach) inside each of the
+  // same four jellies: a smaller, flatter dome hung under the apex (kind 3), faint, with a lit margin. No new objects.
+  {
+    const base = pos.length / 3, ih = Math.max(4, segH >> 1)
+    for (let iy = 0; iy <= ih; iy++) {
+      const th = (iy / ih) * (Math.PI / 2) * 1.05
+      for (let ix = 0; ix <= segW; ix++) {
+        const ph = (ix / segW) * Math.PI * 2
+        pos.push(Math.sin(th) * Math.cos(ph) * 0.5, Math.cos(th) * 0.42 + 0.22, Math.sin(th) * Math.sin(ph) * 0.5); f.push(3, iy / ih, 0)
+      }
+    }
+    for (let iy = 0; iy < ih; iy++) for (let ix = 0; ix < segW; ix++) {
+      const a = base + iy * (segW + 1) + ix, b = a + segW + 1
+      idx.push(a, b, a + 1, b, b + 1, a + 1)
+    }
   }
   for (let k = 0; k < 8; k++) { const a = (k / 8) * Math.PI * 2 + 0.2; strip(Math.cos(a) * 0.9, -0.02, Math.sin(a) * 0.9, 1) }
   for (let k = 0; k < 4; k++) { const a = (k / 4) * Math.PI * 2 + 0.6; strip(Math.cos(a) * 0.16, 0.1, Math.sin(a) * 0.16, 2) }
