@@ -386,6 +386,9 @@ export function Scene() {
         ;(window as any).__webgl2 = isGL2
         console.info(`[surface-tension] renderer: ${isGL2 ? 'WebGL2' : 'WebGL1'} · tier ${settings.TIER} · dpr ${gl.getPixelRatio()} · ${settings.GPU}`)
         engine.canvas = gl.domElement
+        // W25 R6.52 (a11y): the canvas is the picture of what the DOM already says (every section's words live in the DOM
+        // slot and its sr-only live region), so assistive tech skips it rather than announcing an unlabeled canvas
+        gl.domElement.setAttribute('aria-hidden', 'true'); gl.domElement.setAttribute('tabindex', '-1')
         // W19 (eng P0-2 + visual P0-1): a lost context gets a restore on EVERY loss, not just the first one per session.
         // lost → ask the driver for it back after 3 s (WEBGL_lose_context.restoreContext; most browsers restore on their
         // own first); restored → reload once per 60 s window at the same scroll position (the stages' GPU objects are
