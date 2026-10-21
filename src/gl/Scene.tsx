@@ -22,6 +22,7 @@ import { clip, BLOCKS } from './systems/clip'
 import { quality, paintState } from './quality' // PERF HOOK
 import { diveRays } from './stages/dive/diveState' // PERF HOOK
 import { input } from '../services/input' // PERF HOOK
+import { wrapFade } from '../services/wrapFade'
 import { nb } from './systems/neighbour' // NEIGHBOUR HOOK
 import { visuals, type Pose } from './systems/visuals'
 import { makeLook } from '../state/props'
@@ -155,6 +156,7 @@ function Renderer() {
     if (!props.introDrop && props.frame % 3 !== 0 && !warmGate.active) return
     if (warmGate.active) sys.chain.warmAll = true // PRELOAD: every gated frame runs every pass this tier can use
     sys.chain.render(dt)
+    if (wrapFade.want) wrapFade.grab(gl.domElement)   // W21: the loop wrap freezes this exact frame (services/wrapFade.ts)
     // PRELOAD: the gate closed: every program of the real frame (every post pass, the neighbour chain, the mirror/under
     // targets) has drawn once, so the old full-size warm frame has nothing left to build (measured: it was 3.1 s of pure
     // fill on a slow GPU with the counter parked). Reset the sims the gate starved; the warm-up is done (counter → 100)

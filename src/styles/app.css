@@ -449,3 +449,7 @@ html[data-bg='dark'] .systems .systems__hit:focus-visible, html[data-bg='dark'] 
 /* W21: the slot's beats are stacked in one place; until TextLayer has split and masked their lines they paint nothing
    (the no-GL page flashed every beat's copy on top of each other at mount) */
 .slot:not(.is-built) .slot__beat { visibility: hidden; }
+
+/* W21: the loop wrap's frozen outgoing frame (services/wrapFade.ts) — over the page and its text slot, under the header */
+.wrap-fade { position: fixed; inset: 0; z-index: 45; pointer-events: none; opacity: 1; }
+.wrap-fade canvas { display: block; }

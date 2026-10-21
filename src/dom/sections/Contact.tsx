@@ -82,6 +82,7 @@ export function Contact() {
         // W19 (Shifat 19:06Z footer at half height): the footer's own height, not a full viewport
         const fh = footerH(vh)
         const k0 = Math.max(0, vh - (top + range.height)), k = Math.round(Math.min(k0, fh + 2))
+        // (W21 tried a soft mask on the curtain's lower edge: it read as a grey gradient band, against the no-gradient rule; the edge stays hard)
         if (k !== lastK && canvasEl) { lastK = k; canvasEl.style.transform = k > 0 ? `translate3d(0, ${-k}px, 0)` : '' }
         // once the footer is fully uncovered, keep scrolling: the flat bar fills and floats you back to the surface
         // W19: the bar fills over the second half of the footer's reveal and wraps as it lands (no empty band above a half-height footer)

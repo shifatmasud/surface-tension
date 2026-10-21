@@ -1,6 +1,7 @@
 import { props } from '../state/props'
 import { clamp, damp } from '../core/math'
 import { houseInOut } from '../core/house'
+import { wrapFade } from './wrapFade'
 
 /**
  * Layer 3 — virtual scroll (handbook ch.5.2–5.4), written fresh after Lusion's ScrollPane.
@@ -173,8 +174,13 @@ class ScrollService {
     // but it also hid the stone and then faded it back in (a disappear/appear). The footer and the hero are both on
     // white, and the hero is pre-positioned (HeroStage), so the first frame after the jump is a normal hero frame.
     document.getElementById('wrap-veil')?.remove()
-    this.scrollTo(0, { immediate: true })
-    ;(document.querySelector('#hero, main, body') as HTMLElement | null)?.focus?.({ preventScroll: true } as any)
+    // W21 (Shifat 19:12Z: no jump cut, the wrap included): the outgoing frame is frozen and dissolves over the hero
+    // (services/wrapFade.ts); without a frame to freeze, the plain jump
+    const go = () => {
+      this.scrollTo(0, { immediate: true })
+      ;(document.querySelector('#hero, main, body') as HTMLElement | null)?.focus?.({ preventScroll: true } as any)
+    }
+    if (!wrapFade.start(go)) go()
   }
   resetScroll(v: number) {
     this.scrollPixel = this.targetScrollPixel = this.clampPx(v)
