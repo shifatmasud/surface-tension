@@ -4,6 +4,7 @@ import { BLUE_NOISE } from '../shaders/chunks'
 import { ufx } from '../ufx/ufx'
 import { paintState } from '../quality'
 import type { ScreenPaintDistortionEffect } from './effects'
+const TEXT_BEND = /[?&]textbend\b/.test(location.search)   // W21: QA only
 
 /**
  * W18 — Shifat 14:01Z: "Ensure every big text is sharpest not low quality gpu layer like other parts of 3d scene".
@@ -131,7 +132,9 @@ export class SharpText {
     if (any) gl.render(slot, ufx.slotCamera)
     if (ext) for (const e of this.extras) if (e.active()) e.draw(gl)
     // 2) composite over the finished frame on the canvas, through the trail
-    this.mat.uniforms.u_on.value = props.look.paintAmount > 0 && !paintState.asleep ? 1 : 0
+    // W21 (scorer-r610/r614: the pointer trail refracted 'PORTFOLIO' and the name, so the type wobbled under the cursor):
+    // the copy sits ABOVE the trail now; the trail bends the scene under it, never the words. (?textbend restores it)
+    this.mat.uniforms.u_on.value = TEXT_BEND && props.look.paintAmount > 0 && !paintState.asleep ? 1 : 0
     gl.setRenderTarget(null)
     if (b) { gl.setScissorTest(true); gl.setScissor(b.x, this.h - b.y - b.h, b.w, b.h) }
     gl.render(this.scene, this.cam)
