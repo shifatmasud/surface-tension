@@ -86,7 +86,7 @@ export function Contact() {
         const k0 = Math.max(0, vh - (top + range.height)), k = Math.round(Math.min(k0, fh + 2))
         // (W21 tried a soft mask on the curtain's lower edge: it read as a grey gradient band, against the no-gradient rule; the edge stays hard)
         if (k !== lastK && canvasEl) { lastK = k; canvasEl.style.transform = k > 0 ? `translate3d(0, ${-k}px, 0)` : '' }
-        journey.lift = k   // W21: the scene inside the lifting curtain re-frames by part of it (Scene.tsx), so the crewmate stays in the visible slab
+        journey.lift = k   // W21: how far the curtain has lifted (css px); read by nothing that moves the picture (see Scene.tsx)
         // once the footer is fully uncovered, keep scrolling: the flat bar fills and floats you back to the surface
         // W19: the bar fills over the second half of the footer's reveal and wraps as it lands (no empty band above a half-height footer)
         // TEXTROLL: the CTA lines (GL, ctaScene) leave rolling up as the curtain lifts; the footer's lines

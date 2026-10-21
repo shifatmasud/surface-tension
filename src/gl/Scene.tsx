@@ -155,12 +155,10 @@ function Renderer() {
     // so the counter keeps moving on slow GPUs and huge windows; full rate from the drop on
     if (!props.introDrop && props.frame % 3 !== 0 && !warmGate.active) return
     if (warmGate.active) sys.chain.warmAll = true // PRELOAD: every gated frame runs every pass this tier can use
-    // W21 (scorer-r614 #1: the last ~350 px before the wrap showed the top half as an empty black slab, the crewmate gone
-    // off the top): while the CTA curtain lifts by k px, the picture inside it slides down by 0.6 k, so the crewmate rides
-    // up more slowly than the edge (a parallax lag) and stays in the visible part through the footer's runway
-    { const cam = camera as THREE.PerspectiveCamera, s = journey.lift * 0.6
-      if (s > 0.5) cam.setViewOffset(props.width, props.height, 0, -s, props.width, props.height)
-      else if (cam.view && cam.view.enabled) cam.clearViewOffset() }
+    // (W21 tried re-framing the picture inside the lifting curtain (a 0.6 k lag): it walked the crewmate into the pinned
+    // 'Say hi on X' pill, which sits ~20 px under its feet. The curtain lifts rigidly again; the slab is no longer empty
+    // because the CTA scene now keeps drawing through the runway, Contact.tsx)
+    { const cam = camera as THREE.PerspectiveCamera; if (cam.view && cam.view.enabled) cam.clearViewOffset() }
     sys.chain.render(dt)
     if (wrapFade.want) wrapFade.grab(gl.domElement)   // W21: the loop wrap freezes this exact frame (services/wrapFade.ts)
     // PRELOAD: the gate closed: every program of the real frame (every post pass, the neighbour chain, the mirror/under
