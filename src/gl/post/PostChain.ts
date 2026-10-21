@@ -201,8 +201,17 @@ void main(){
     ;(this.hdrMat.uniforms.u_a.value as THREE.Vector4).fromArray(toUv(document.querySelector('.header .wordmark'), [24, 16, 130, 58]))
     ;(this.hdrMat.uniforms.u_b.value as THREE.Vector4).fromArray(toUv(document.querySelector('.header .pills'), [W - 90, 16, W - 20, 58]))
   }
+  private hdrBg = ''
+  private hdrEma = [-1, -1]
   private hdrProbe() {
     const now = performance.now()
+    // W24 R6.39 (scorer-r638 #1: ink lingered seconds on the deep after the dive): when the scene's own tone flips, the header
+    // takes it at once and the measurement starts fresh; the readback then only corrects it where the frame disagrees
+    const bg = document.documentElement.dataset.bg === 'dark' ? 'dark' : 'light'
+    if (bg !== this.hdrBg) {
+      this.hdrBg = bg; this.hdrTone = bg; this.hdrVotes = 0; this.hdrEma = [-1, -1]
+      if (document.documentElement.dataset.hdr !== bg) document.documentElement.dataset.hdr = bg
+    }
     if (this.hdrBusy || now - this.hdrT < 250) return
     const gl = this.gl as THREE.WebGLRenderer & { readRenderTargetPixelsAsync?: (...a: unknown[]) => Promise<unknown> }
     if (!gl.readRenderTargetPixelsAsync) return
@@ -222,15 +231,25 @@ void main(){
           const i = (y * 16 + x) * 4
           sum += 0.2126 * lin(this.hdrBuf[i]) + 0.7152 * lin(this.hdrBuf[i + 1]) + 0.0722 * lin(this.hdrBuf[i + 2])
         }
-        const L = sum / 32
+        // R6.39 (scorer-r638 #1: the 390 sky blinked under passing leaves): an EMA over readings (~1 s at 250 ms)
+        const e0 = this.hdrEma[half], L = e0 < 0 ? sum / 32 : e0 + (sum / 32 - e0) * 0.3
+        this.hdrEma[half] = L
         worstInk = Math.min(worstInk, (L + 0.05) / (0.0065 + 0.05))   // ink #121315 over it
         worstWhite = Math.min(worstWhite, (1.0 + 0.05) / (L + 0.05))  // white over it
       }
-      const cur = this.hdrTone || (document.documentElement.dataset.bg === 'dark' ? 'dark' : 'light')
-      // flip only on a clear win (25 %) seen on two readings in a row (~0.5 s), so a passing frond never toggles it
-      const other = cur === 'dark' ? (worstInk > worstWhite * 1.25 ? 'light' : '') : (worstWhite > worstInk * 1.25 ? 'dark' : '')
+      const cur = this.hdrTone || bg
+      // R6.39 decision (scorer-r638 #1; Tab 07:27Z): the scene's own tone is the default; the header leaves it only where the
+      // frame gives it under 3:1 AND the other colour does 25 % better, and returns once the scene tone reaches 3.3:1 again (or
+      // the other colour stops clearly winning). Mid-tone skies where both colours sit near 3:1 keep the scene tone (no blink).
+      // A colour reading under 2:1 with the other clearly better switches at once; anything else needs ~0.75 s of agreement.
+      const ct: Record<string, number> = { light: worstInk, dark: worstWhite }
+      const alt = bg === 'dark' ? 'light' : 'dark'
+      let other = ''
+      if (cur === bg) { if (ct[bg] < 3.0 && ct[alt] > ct[bg] * 1.25) other = alt }
+      else if (ct[bg] >= 3.3 || ct[alt] < ct[bg] * 1.1) other = bg
+      const urgent = other !== '' && ct[cur] < 2.0 && ct[other] > ct[cur] * 1.25
       this.hdrVotes = other ? this.hdrVotes + 1 : 0
-      const want = other && this.hdrVotes >= 2 ? other : cur
+      const want = other && (urgent || this.hdrVotes >= 3) ? other : cur
       if (want !== cur) this.hdrVotes = 0
       this.hdrTone = want
       if (document.documentElement.dataset.hdr !== want) document.documentElement.dataset.hdr = want
