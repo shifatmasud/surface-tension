@@ -154,7 +154,6 @@ export class ScreenPaint {
   material: THREE.ShaderMaterial
   // live tuning (ch.14 S.10 values)
   pushStrength = 25
-  private lastMs = 0
   velocityDissipation = 0.975
   weight1Dissipation = 0.95
   weight2Dissipation = 0.8
@@ -307,17 +306,12 @@ export class ScreenPaint {
     u.u_pushStrength.value = this.pushStrength
     u.u_curlScale.value = this.curlScale
     u.u_curlStrength.value = this.curlStrength
-    // W24 R6.35 (scorer-r633 #5): the fades run on WALL-CLOCK time, not per frame. The reference's per-frame constants are
-    // kept exactly at 60 fps (f = 1 per 16.7 ms), but a device that drops frames no longer carries a sweep's smear on into the
-    // next scenes (the frame clock's dt is capped at 1/20 s, so the real elapsed time is read here, capped at 1 s)
-    const nowMs = performance.now(), realDt = this.lastMs ? Math.min(1, Math.max(0, (nowMs - this.lastMs) / 1000)) : dt
-    this.lastMs = nowMs
-    const f = settings.PAINT_DT_SCALED ? dt * 60 : realDt * 60
+    const f = settings.PAINT_DT_SCALED || this.touchMode ? dt * 60 : 1 // parity: per-frame constants (see checklist note)
     u.u_dissipations.value.set(Math.pow(this.velocityDissipation, f), Math.pow(this.weight1Dissipation, f), Math.pow(this.weight2Dissipation, f))
     if (this.touchMode) {
       // POLISH: on touch the fades run on time (a slow phone frame no longer stretches the trail) with a half-life of
       // at most 0.6 s, and the velocity residue the 8-bit step used to strand snaps to rest
-      const hl = Math.pow(0.5, realDt / 0.6), d = u.u_dissipations.value
+      const hl = Math.pow(0.5, dt / 0.6), d = u.u_dissipations.value
       d.set(Math.min(d.x, hl), Math.min(d.y, hl), Math.min(d.z, hl))
     }
     u.u_velSnap.value = this.touchMode ? 3 / 255 : 0

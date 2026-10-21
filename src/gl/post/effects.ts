@@ -18,8 +18,7 @@ export class ScreenPaintDistortionEffect extends Effect {
     super('ScreenPaintDistortion', /* glsl */ `
       uniform sampler2D u_screenPaintTexture;
       uniform vec2 u_screenPaintTexelSize;
-      uniform float u_amount, u_rgbShift, u_multiplier, u_colorMultiplier, u_shade, u_iridescence, u_debug, u_dark;
-      uniform vec4 u_stk[4]; uniform float u_stkOn; uniform vec2 u_view; uniform vec4 u_gem;   // W23: the CTA stickers on screen (viewport px)
+      uniform float u_amount, u_rgbShift, u_multiplier, u_colorMultiplier, u_shade, u_iridescence, u_debug;
       ${BLUE_NOISE}
       vec3 spd_encode(vec3 c){ c = max(c, 0.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
       vec3 spd_decode(vec3 c){ c = max(c, 0.0); return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
@@ -28,52 +27,15 @@ export class ScreenPaintDistortionEffect extends Effect {
         vec4 data = texture2D(u_screenPaintTexture, uv);
         float weight = (data.z + data.w) * 0.5;
         vec2 vel = (0.5 - data.xy - 0.001) * 2.0 * weight;           // signed, flipped, fades with paint
-        vel *= mix(1.0, weight, u_dark);                              // W23 R6.32: on dark walls the smear dies with the paint's square (≈2x faster tail)
-        // W23: no smear on or next to a sticker (it dragged the die-cut white margin out across the wall as a wedge)
-        float stkM = 1.0;
-        if (u_stkOn > 0.5) {
-          vec2 px = vec2(uv.x, 1.0 - uv.y) * u_view;
-          for (int i = 0; i < 4; i++) if (u_stk[i].w > 0.5) stkM = min(stkM, smoothstep(u_stk[i].z * 1.05, u_stk[i].z * 1.05 + 80.0, distance(px, u_stk[i].xy)));
-        }
-        // W23: nor across the hero stone's edge (it dragged a grey hook off its silhouette onto the water)
-        if (u_gem.w > 0.5) stkM = min(stkM, smoothstep(u_gem.z, u_gem.z + 36.0, distance(vec2(uv.x, 1.0 - uv.y) * u_view, u_gem.xy)));
-        vec2 stepUv = vel * u_amount / 4.0 * u_screenPaintTexelSize * u_multiplier * (1.0 - 0.4 * u_dark) * stkM;   // W23: on the dark wall a shorter smear (it dragged the matte texture into dirty streaks); W24 R6.35: 0.4→0.6 of full length (1.5×), safe now the paint fades on wall-clock time
+        vec2 stepUv = vel * u_amount / 4.0 * u_screenPaintTexelSize * u_multiplier;
         vec2 p = uv + bn.xy * stepUv;                                 // jittered first tap kills banding
         vec4 acc = vec4(0.0);
         for (int i = 0; i < 9; i++) { vec4 s = texture2D(inputBuffer, p); acc += vec4(min(spd_encode(s.rgb), 1.0), s.a); p += stepUv; }  // each tap as the reference's 8-bit buffer holds it
         acc /= 9.0;
-        // W23 (scorer-r6261 #5: on the dark wall the smear dragged a red streak off the crewmate's legs): on dark sections the
-        // smear only moves the dark wall itself; wherever the pixel or what it would pull in is brighter than the wall (the
-        // crewmate, the stickers, the type) the frame stays as rendered
-        float keep = 0.0;
-        if (u_dark > 0.001) {
-          vec3 orig = min(spd_encode(texture2D(inputBuffer, uv).rgb), 1.0);
-          vec3 hi3 = max(orig, acc.rgb);   // brightest channel: the red crewmate is dim in luminance but far off the grey wall
-          keep = u_dark * smoothstep(0.15, 0.27, max(max(hi3.r, hi3.g), hi3.b));   // R6.32: a lower knee, so the crewmate's dark rim is kept too (it smeared into a pale halo)
-          acc.rgb = mix(acc.rgb, orig, keep);
-        }
         if (u_debug > 0.5) acc = vec4(vec3(0.5 + 0.35 * weight), 1.0);
         // wake fringe: strongest where weight is low, gone above 0.4
-        vec3 fringe = sin(vec3(vel.x + vel.y) * 40.0 + vec3(0.0, 2.0, 4.0) * u_rgbShift)
+        acc.rgb += sin(vec3(vel.x + vel.y) * 40.0 + vec3(0.0, 2.0, 4.0) * u_rgbShift)
                  * smoothstep(0.4, -0.9, weight) * u_shade * max(abs(vel.x), abs(vel.y)) * u_colorMultiplier;
-        // W23 (scorer-r618/r621: the trail on the dark CTA wall read as an oily navy smudge): on dark sections the fringe
-        // only ever lightens, as a soft glassy tint at a third of the strength; its dark half (which clipped to black
-        // contours on the wall) is dropped. Light sections are unchanged.
-        // W23 (scorer-r6261 #5): on dark it is also colourless now (the chromatic phase read as an oily fringe), and off anything bright
-        vec3 glass = vec3(dot(max(fringe, 0.0), vec3(0.3333))) * 0.52 * smoothstep(0.05, 0.35, weight);   // W24 R6.35: 1.5× (the trace barely registered once decay ran on time); R6.32: the glass fades out with the paint (its thin contours lingered)
-        acc.rgb += mix(fringe, glass * (1.0 - keep), u_dark) * stkM;
-        // W25 R6.43 (scorer-r636..r639: the trace on the dark CTA wall is invisible; verified on a frame-paced live sweep at 390
-        // and 1440: ?paintdebug shows a full streak, the default wall shows nothing): on dark sections the trail's EDGE catches
-        // light like the lip of a wet streak on matte paint: a thin, colourless highlight where the paint's weight changes
-        // fastest, fading with the paint. Not a lift of the body (tried by W24, read as nothing) and not a colour fringe.
-        if (u_dark > 0.001) {
-          vec2 ptx = u_screenPaintTexelSize * 1.5;
-          vec4 pe = texture2D(u_screenPaintTexture, uv + vec2(ptx.x, 0.0)), pw = texture2D(u_screenPaintTexture, uv - vec2(ptx.x, 0.0));
-          vec4 pn = texture2D(u_screenPaintTexture, uv + vec2(0.0, ptx.y)), ps = texture2D(u_screenPaintTexture, uv - vec2(0.0, ptx.y));
-          vec2 wg = vec2((pe.z + pe.w) - (pw.z + pw.w), (pn.z + pn.w) - (ps.z + ps.w)) * 0.5;
-          float lip = smoothstep(0.02, 0.16, length(wg)) * smoothstep(0.03, 0.2, weight) * (0.75 + 0.25 * bn.z);
-          acc.rgb += vec3(0.86, 0.9, 1.0) * lip * 0.11 * u_dark * (1.0 - keep) * stkM;
-        }
         if (u_iridescence > 0.0) {
           // accumulated thin film on the wake edges: the long-tail weight is the film thickness,
           // the weight gradient finds the edges; off by default (the reference has only the sine fringe)
@@ -99,6 +61,8 @@ export class ScreenPaintDistortionEffect extends Effect {
         ['u_shade', new THREE.Uniform(1.25)],
         ['u_iridescence', new THREE.Uniform(0)],
         ['u_debug', new THREE.Uniform(debug ? 1 : 0)],
+        // W25 R6.45 (Shifat 09:16Z "restore it to this", the R6.20 trail; LOCKED): the shader above is R6.20's exactly. These
+        // uniforms are still fed by PostChain (dark-wall mode, sticker/stone keep-outs) but the R6.20 shader does not read them.
         ['u_dark', new THREE.Uniform(0)],
         ['u_stk', new THREE.Uniform([new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()])],
         ['u_stkOn', new THREE.Uniform(0)],
