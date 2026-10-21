@@ -52,6 +52,7 @@ export const boot = {
       const p = pool.pointer
       if (p.active) { pool.drop(p.x, p.z, 0.14, 0.05); audio.plip(1, 0.7) }
     })
+    audio.restore()   // W25 R6.55: a returning visitor's sound choice, armed for their first gesture
     loader.start()
   },
   /** PRELOAD: real progress of the hero + the next section only (Shifat 10:51Z): the boot JS (byte-weighted, includes

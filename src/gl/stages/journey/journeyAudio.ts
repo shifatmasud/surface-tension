@@ -109,6 +109,7 @@ function shatterSound() {
 /** one-shot hits, forward only (scrolling back through them stays quiet) */
 const HITS = [0.772, 0.788]
 let lastP = -1
+const lastCue: number[] = []
 
 /** Call every frame while the journey is on screen. Returns the beat index. */
 export function journeyAudio(p: number) {
@@ -123,7 +124,10 @@ export function journeyAudio(p: number) {
   }
   if (b !== current) {
     current = b
-    if (audio.enabled && audio.ctx) cues[b]?.()
+    // W25 R6.55 (sound audit #9): scrubbing fast back and forth over a beat edge re-fired its cue every crossing, stacking
+    // copies (the shatter alone is ~140 oscillators); a cue now rests 1.5 s (the shatter 4 s) before it can play again
+    const now = performance.now(), rest = b === 4 ? 4000 : 1500
+    if (audio.enabled && audio.ctx && now - (lastCue[b] ?? -1e9) > rest) { lastCue[b] = now; cues[b]?.() }
   }
   return current
 }

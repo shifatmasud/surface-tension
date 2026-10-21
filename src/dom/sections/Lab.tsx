@@ -58,7 +58,7 @@ export function Lab() {
             <div key={p.id} className={'card' + (i === active ? ' is-active' : '')} data-id={p.id} data-cursor data-cursor-label="Open" tabIndex={0} role="button"
               onClick={() => { overlay.open(p.id, { morph: true, from: labGL.rectOf(p.id) }); audio.splash() }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); overlay.open(p.id, { morph: true, from: labGL.rectOf(p.id) }) } }}
               onFocus={() => labGL.hover(p.id, true)} onBlur={() => labGL.hover(p.id, false)}
-              onMouseEnter={() => { audio.tick(); labGL.hover(p.id, true) }} onMouseLeave={() => labGL.hover(p.id, false)} aria-label={`${p.title}, ${p.year}, ${p.no} ${p.tags.join(' · ')} — ${p.blurb} Open project.`}>
+              onPointerEnter={(e) => { if (e.pointerType !== 'mouse') return; audio.tick(); labGL.hover(p.id, true) }} onPointerLeave={(e) => { if (e.pointerType === 'mouse') labGL.hover(p.id, false) }} aria-label={`${p.title}, ${p.year}, ${p.no} ${p.tags.join(' · ')} — ${p.blurb} Open project.`}>
               <div className="card__dom">
                 <img className="card__media" src={p.poster} alt="" loading="lazy" />
                 <div className="card__label"><span>{p.no}</span><span>{p.tags.join(' · ')}</span></div>

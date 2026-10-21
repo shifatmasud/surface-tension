@@ -25,7 +25,11 @@ class AudioService {
     this.ctx = ctx
     this.master = ctx.createGain(); this.master.gain.value = 0
     this.analyser = ctx.createAnalyser(); this.analyser.fftSize = 64
-    this.master.connect(this.analyser); this.analyser.connect(ctx.destination)
+    // W25 R6.55 (sound audit #6): a safety limiter before the speakers. A splash (noise + six plips) over the bed, the drone
+    // and the reverb tail could sum past full scale and clip; the limiter only acts on those peaks
+    const lim = ctx.createDynamicsCompressor()
+    lim.threshold.value = -6; lim.knee.value = 6; lim.ratio.value = 12; lim.attack.value = 0.003; lim.release.value = 0.25
+    this.master.connect(lim); lim.connect(this.analyser); this.analyser.connect(ctx.destination)
     // convolution reverb from a generated decaying-noise impulse
     this.reverb = ctx.createConvolver()
     const len = ctx.sampleRate * 2.6, ir = ctx.createBuffer(2, len, ctx.sampleRate)
@@ -34,9 +38,16 @@ class AudioService {
     this.wet = ctx.createGain(); this.wet.gain.value = 0.32
     this.reverb.connect(this.wet); this.wet.connect(this.master)
     // water bed: pink-ish noise → bandpass, slow LFO on the filter
-    const nb = ctx.createBuffer(1, ctx.sampleRate * 4, ctx.sampleRate), nd = nb.getChannelData(0)
+    // W25 R6.55 (sound audit #5): the 4 s bed loop had a seam: the pink filter starts at rest and ends mid-swing, so every 4 s
+    // the loop jumped (a soft click / level dip). The noise is now generated 0.5 s longer and that tail is cross-faded
+    // (equal power) into the head, so the end flows into the start
+    const SR = ctx.sampleRate, L = SR * 4, X = Math.floor(SR * 0.5)
+    const raw = new Float32Array(L + X)
     let b0 = 0, b1 = 0, b2 = 0
-    for (let i = 0; i < nd.length; i++) { const w = Math.random() * 2 - 1; b0 = 0.99765 * b0 + w * 0.099046; b1 = 0.963 * b1 + w * 0.2965164; b2 = 0.57 * b2 + w * 1.0526913; nd[i] = (b0 + b1 + b2 + w * 0.1848) * 0.18 }
+    for (let i = 0; i < raw.length; i++) { const w = Math.random() * 2 - 1; b0 = 0.99765 * b0 + w * 0.099046; b1 = 0.963 * b1 + w * 0.2965164; b2 = 0.57 * b2 + w * 1.0526913; raw[i] = (b0 + b1 + b2 + w * 0.1848) * 0.18 }
+    const nb = ctx.createBuffer(1, L, SR), nd = nb.getChannelData(0)
+    for (let i = 0; i < L; i++) nd[i] = raw[i]
+    for (let i = 0; i < X; i++) { const k = i / X; nd[i] = raw[i] * Math.sin(k * Math.PI / 2) + raw[L + i] * Math.cos(k * Math.PI / 2) }
     const noise = ctx.createBufferSource(); noise.buffer = nb; noise.loop = true
     this.bedFilter = ctx.createBiquadFilter(); this.bedFilter.type = 'bandpass'; this.bedFilter.frequency.value = 700; this.bedFilter.Q.value = 0.6
     this.bedGain = ctx.createGain(); this.bedGain.gain.value = 0.12
@@ -48,14 +59,44 @@ class AudioService {
     ;[55, 55.6, 82.4].forEach((f) => { const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f; o.connect(this.droneFilter); o.start() })
     this.droneFilter.connect(this.droneGain); this.droneGain.connect(this.master); this.droneGain.connect(this.reverb)
   }
+  // W25 R6.55 (sound audit #1/#2/#3/#7):
+  //  - the state flips synchronously, so a fast double tap is on → off (it used to read the stale state across the await and
+  //    land on → on, with the wave line and the sound disagreeing)
+  //  - the choice persists (localStorage); a returning visitor who left it on gets it back on their first gesture (still
+  //    muted until a gesture: the autoplay rule)
+  //  - a hidden tab suspends the context and a visible one resumes it; iOS/Android can also suspend or "interrupt" it (a
+  //    call, the lock screen, another app's audio), so every later gesture resumes a context that should be running
+  private wired = false
+  private wire() {
+    if (this.wired || typeof window === 'undefined') return
+    this.wired = true
+    const kick = () => { const c = this.ctx; if (this.enabled && c && c.state !== 'running' && !document.hidden) c.resume().catch(() => {}) }
+    for (const ev of ['pointerup', 'touchend', 'keydown']) window.addEventListener(ev, kick, { passive: true })
+    document.addEventListener('visibilitychange', () => {
+      const c = this.ctx; if (!c) return
+      if (document.hidden) { if (c.state === 'running') c.suspend().catch(() => {}) }
+      else kick()
+    })
+  }
+  /** a returning visitor's saved choice: armed for their first gesture (call once at boot) */
+  restore() {
+    let saved: string | null = null
+    try { saved = localStorage.getItem('st-sound') } catch { /* private mode */ }
+    if (saved !== '1' || typeof window === 'undefined') return
+    const first = () => { off(); if (!this.enabled) this.toggle(true) }
+    const off = () => { for (const ev of ['pointerup', 'touchend', 'keydown']) window.removeEventListener(ev, first) }
+    for (const ev of ['pointerup', 'touchend', 'keydown']) window.addEventListener(ev, first, { passive: true })
+  }
   async toggle(on = !this.enabled) {
     if (!this.ctx) this.build()
+    this.wire()
     const ctx = this.ctx!
-    if (ctx.state === 'suspended') await ctx.resume()
     this.enabled = on
+    try { localStorage.setItem('st-sound', on ? '1' : '0') } catch { /* private mode */ }
+    this.listeners.forEach((f) => f(on))
     this.master.gain.cancelScheduledValues(ctx.currentTime)
     this.master.gain.setTargetAtTime(on ? 0.7 : 0, ctx.currentTime, 0.4)
-    this.listeners.forEach((f) => f(on))
+    if (on && ctx.state !== 'running') { try { await ctx.resume() } catch { /* the next gesture resumes it */ } }
   }
   /** a single droplet: sine with a fast downward pitch glide, into the reverb */
   plip(intensity = 0.5, pitch = 1) {
@@ -108,6 +149,11 @@ class AudioService {
     n.connect(f); f.connect(g); g.connect(this.master); g.connect(this.reverb); n.start(t)
     for (let i = 0; i < 6; i++) setTimeout(() => this.plip(0.6, 0.7 + Math.random() * 0.6), 80 + i * 70)
   }
+  private aims = [NaN, NaN, NaN, NaN]
+  private aim(i: number, p: AudioParam, v: number, t: number, tc: number, eps: number) {
+    if (Math.abs(v - this.aims[i]) < eps) return
+    this.aims[i] = v; p.cancelScheduledValues(t); p.setTargetAtTime(v, t, tc)
+  }
   /** called every frame by the clock */
   update(dt: number) {
     if (!this.ctx || !this.enabled) return
@@ -116,10 +162,12 @@ class AudioService {
     const wantUnder = props.stage === 'dive' && !diveState.under ? 0 : props.look.dive
     this.underK += (wantUnder - this.underK) * (1 - Math.exp(-3 * dt))
     const dive = this.underK
-    this.bedFilter.frequency.setTargetAtTime(700 - dive * 520 + props.scrollStrength * 400, t, 0.2)
-    this.bedGain.gain.setTargetAtTime(0.1 * (1 - dive * 0.6) + props.scrollStrength * 0.05, t, 0.3)
-    this.droneGain.gain.setTargetAtTime(dive * 0.12, t, 0.5)
-    this.droneFilter.frequency.setTargetAtTime(160 + (1 - dive) * 600, t, 0.4)
+    // W25 R6.55 (sound audit #8): these ran setTargetAtTime four times per frame forever, piling automation events on the
+    // timeline (Safari keeps them: CPU creeps over a long visit). Now a target is re-scheduled only when it actually moves
+    this.aim(0, this.bedFilter.frequency, 700 - dive * 520 + props.scrollStrength * 400, t, 0.2, 2)
+    this.aim(1, this.bedGain.gain, 0.1 * (1 - dive * 0.6) + props.scrollStrength * 0.05, t, 0.3, 0.001)
+    this.aim(2, this.droneGain.gain, dive * 0.12, t, 0.5, 0.001)
+    this.aim(3, this.droneFilter.frequency, 160 + (1 - dive) * 600, t, 0.4, 2)
     // the cursor paint speaks in droplets
     this.plipClock -= dt
     if (props.waterPointerActive && this.plipClock <= 0) { this.plip(0.4); this.plipClock = 0.16 + Math.random() * 0.25 }
