@@ -18,6 +18,7 @@ class Visuals {
   stages = new Map<string, StageDef>()
   private ownerKey = -1
   private tones: Record<number, string> = {}
+  private hdrTones: Record<number, string> = {}   // W25 R6.46: header ink per block (fixed waterline rule)
   private acc?: Look; private keys?: (keyof Look)[] // PERF HOOK
   register(name: string, pose: () => Pose, look: Partial<Record<keyof Look, any>>) {
     const s = { name, pose, look: makeLook(look), weight: 0 }
@@ -122,6 +123,17 @@ class Visuals {
     this.tones[clip.owner] = want
     if (clip.boundary) { const under = clip.yTop > 64 ? clip.lower - 1 : clip.lower; if (this.tones[under]) want = this.tones[under] }
     if (document.documentElement.dataset.bg !== want) document.documentElement.dataset.bg = want
+    // W25 R6.46 HEADER INK, LOCKED (Shifat 2:22 AM PT Oct 21, m:caaa9cab: "Only on above water surface, keep logo & sound line
+    // black. Then full white. Lock it"): the wordmark and the sound line are ink while the camera is above the lake (the hero,
+    // the statement, the dive until the lens goes under) and white from the surface down, through every later section to the
+    // footer; back above the water (scrolling up, or the loop returning to the hero) they are ink again. One switch at the
+    // waterline, no measurement; the colour change is the header's existing .5 s cross-fade, and during a block boundary the
+    // header keeps the outgoing block's ink until the card reaches it (as data-bg does above). No changes without his go.
+    const above = props.stage === 'hero' || props.stage === 'statement' || (props.stage === 'dive' && !dive.under)
+    let hdr = above ? 'light' : 'dark'
+    this.hdrTones[clip.owner] = hdr
+    if (clip.boundary) { const under = clip.yTop > 64 ? clip.lower - 1 : clip.lower; if (this.hdrTones[under]) hdr = this.hdrTones[under] }
+    if (document.documentElement.dataset.hdr !== hdr) document.documentElement.dataset.hdr = hdr
     return out
   }
 }
