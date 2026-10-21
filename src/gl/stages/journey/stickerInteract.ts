@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { stickerMask } from '../../systems/stickerMask'
 import { Spring } from '../../../core/spring'
 import { browser } from '../../../services/settings'
 import { audio } from '../../../services/audio'
@@ -381,6 +382,7 @@ export function createStickerInteraction(c: Ctx): StickerInteraction {
     const want = on && a >= 0.97 && journey.active && !props.overlayOpen
     if (want !== active) {
       active = want
+      if (!want) stickerMask.on = 0
       if (want) { mount(); rectKey = ''; domDirty = true }
       layer.style.display = want ? 'block' : 'none'
       if (!want) { cancelPending(); end(true) }
@@ -448,9 +450,12 @@ export function createStickerInteraction(c: Ctx): StickerInteraction {
         if (st.el.style.transform !== css) st.el.style.transform = css
         const ds = `${d.toFixed(1)}px`
         if (st.el.style.width !== ds) { st.el.style.width = ds; st.el.style.height = ds }
+        stickerMask.c[i * 4] = sp.x; stickerMask.c[i * 4 + 1] = sp.y; stickerMask.c[i * 4 + 2] = d / 2; stickerMask.c[i * 4 + 3] = 1
       }
+      if (st.fly > 0) stickerMask.c[i * 4 + 3] = 0
     }
     c.aSt.needsUpdate = true; c.aInt.needsUpdate = true
+    stickerMask.on = active && mounted ? 1 : 0
   }
 
   const dispose = () => {

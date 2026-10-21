@@ -13,6 +13,7 @@ import { InlineSharpenEffect } from './perfEffects' // PERF HOOK
 import type { Look } from '../../state/props'
 import { ufx } from '../ufx/ufx'
 import { SharpText } from './SharpText'
+import { stickerMask } from '../systems/stickerMask'
 import { makeSelective, syncSelective } from '../fx/hotBloom' // CINEMATIC: selective bloom (hot spots only)
 import { gpuTimer } from '../systems/perfGovernor' // SHARP: the governor's GPU frame timer ends after the last draw
 
@@ -228,10 +229,13 @@ void main(){
     const d = (n: string) => this.distortion.u(n)
     d('u_amount').value = L.paintAmount; d('u_rgbShift').value = L.paintRGBShift
     d('u_multiplier').value = L.paintMultiplier; d('u_colorMultiplier').value = L.paintColorMultiplier
-    // W23: the trail's dark-wall mode follows the UI tone in the journey (the space and the CTA wall), eased so it never pops
-    const wantDark = props.stage === 'journey' && document.documentElement.dataset.bg === 'dark' ? 1 : 0
+    // W23: the trail's dark-wall mode follows the UI tone in the journey (space) and on the CTA wall, eased so it never pops
+    const wantDark = (props.stage === 'journey' || props.stage === 'contact') && document.documentElement.dataset.bg === 'dark' ? 1 : 0   // the CTA wall is the 'contact' stage
     const ud = d('u_dark'), now = performance.now(), kd = 1 - Math.exp(-Math.min(1, (now - this.darkT) / 1000) * 6); this.darkT = now
     ud.value += (((window as any).__trailDark ?? wantDark) - ud.value) * kd
+    // W23: the stickers keep out of the trail's smear (stickerInteract.ts writes where they sit)
+    d('u_stkOn').value = stickerMask.on && !(window as any).__stkSmear ? 1 : 0
+    if (stickerMask.on) { const v = d('u_stk').value as THREE.Vector4[]; for (let i = 0; i < 4; i++) v[i].fromArray(stickerMask.c, i * 4); (d('u_view').value as THREE.Vector2).set(innerWidth, innerHeight) }
   }
   render(dt: number) {
     this.sync()

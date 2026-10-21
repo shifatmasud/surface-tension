@@ -363,11 +363,15 @@ export function buildCta(portrait: boolean) {
   const PLACE_WIDE: [number, number, number, number][] = [
     // fx, fy, size (× wall height), tilt (deg)
     // W19 (Shifat 20:30Z/20:31Z: Vercel and React stickers removed): four left, one per corner, balanced
-    [-0.37, 0.31, 0.22, -9], [0.355, 0.30, 0.21, 8], [-0.345, -0.33, 0.21, 10], [0.36, -0.315, 0.2, -5],
+    // W23 (scorer-r618/r621: 'a centred headline inside a symmetric ring'): still one per corner and balanced, but balanced
+    // on the diagonal rather than mirrored: the top-left and bottom-right sheets a size larger, each corner its own tilt
+    // and inset (the headline and the pill stay centred by Shifat's rules)
+    [-0.385, 0.32, 0.24, -12], [0.34, 0.285, 0.19, 6], [-0.335, -0.31, 0.195, 4], [0.37, -0.335, 0.225, -9],
   ]
   const PLACE_TALL: [number, number, number, number][] = [
     // W19: four stickers, one per corner (the upper pair over the headline, the lower pair either side of the crewmate)
-    [-0.3, 0.335, 0.29, -9], [0.31, 0.325, 0.28, 8], [-0.38, -0.12, 0.19, 7], [0.38, -0.08, 0.19, -6],   // W19 (20:50Z): the lower pair smaller and further out, clear of the crewmate
+    // W23: the same diagonal balance on phones (top-left and bottom-right larger); the lower pair stays out at the edges, clear of the crewmate
+    [-0.31, 0.345, 0.31, -12], [0.30, 0.31, 0.26, 5], [-0.375, -0.11, 0.17, 4], [0.385, -0.095, 0.2, -9],
   ]
   let typeY = 0   // the headline's first baseline (tablet-local), set by layout()
   const lay: CtaLayout = { C: new THREE.Vector3(), D: 20, hw: 12, wv: 19, fov: 34, textZ: WALL_Z + 1.4, em: 1, crewZ: 6, crewY: 0, crewScale: 1, crewH: 1 }
