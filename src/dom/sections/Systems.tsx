@@ -9,6 +9,7 @@ import { clamp, mix } from '../../core/math'
 import { vfovFor, portrait } from '../../core/frame'
 import { sys, SYSTEMS_ORIGIN, TOKENS, type ControlId } from '../../gl/stages/systems/state'
 import { noOrphan } from '../a11y/noOrphans'
+import { scroll } from '../../services/scroll'
 
 const ease = (t: number) => t * t * (3 - 2 * t)
 const PAPER = new THREE.Color('#f7f7f8'), DIM = new THREE.Color('#c9ccd1')
@@ -57,7 +58,14 @@ export function Systems() {
       <div className="sticky systems__inner">
         <div className="systems__eyebrow eyebrow">Systems</div>
         <div className="systems__parts" ref={layer} role="group" aria-label="Shade DS, live parts"
-          onFocus={() => (sys.focus = 1)} onBlur={() => (sys.focus = 0)}>
+          onFocus={() => {
+            sys.focus = 1
+            // W25 R6.53 (scorer-r652 #2): a keyboard stop on a Shade DS control brings the drum on screen first (the middle of
+            // the pin, where the parts have formed), so focus never sits on a control below the fold
+            const sec = ref.current; if (!sec) return
+            const r = sec.getBoundingClientRect()
+            if (r.top > 1 || r.bottom < window.innerHeight - 1) scroll.scrollTo(sec, { offset: Math.max(0, sec.offsetHeight - window.innerHeight) * 0.5 })
+          }} onBlur={() => (sys.focus = 0)}>
           <button type="button" className="systems__hit systems__hit--toggle" role="switch" aria-checked={on} ref={bind('toggle')}
             onPointerDown={press('toggle')} onClick={() => { sys.on = !sys.on; setOn(sys.on); if (!gl) press('toggle')() }}>
             <span className="systems__label">Light</span>
