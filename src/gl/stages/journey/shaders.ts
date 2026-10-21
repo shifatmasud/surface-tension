@@ -171,6 +171,9 @@ export function screenMaterial(tex: THREE.Texture, size: THREE.Vector2) {
       u_bulge: { value: 0 }, u_width: { value: 1.5 },
       u_ringT: { value: -1 }, u_ringAmp: { value: 0 },
       u_bright: { value: 1 }, u_time: { value: 0 }, u_gloss: { value: 0 },
+      // TUNNEL DRAMA (tunnelBlur.ts): the half-res zoom-blurred picture, how much of it to show (u_zoom), the vanishing
+      // point it smears toward (u_zoomC, uv), the chromatic split at speed (u_chroma) and the warp flash (u_flash)
+      u_blur: { value: tex }, u_zoom: { value: 0 }, u_zoomC: { value: new THREE.Vector2(0.5, 0.5) }, u_chroma: { value: 0 }, u_flash: { value: 0 },
     },
     vertexShader: /* glsl */ `
       uniform vec2 u_center; uniform float u_bulge, u_width, u_ringT, u_ringAmp, u_time;
@@ -199,6 +202,7 @@ export function screenMaterial(tex: THREE.Texture, size: THREE.Vector2) {
       }`,
     fragmentShader: /* glsl */ `
       uniform sampler2D u_map; uniform vec2 u_size; uniform float u_bright, u_time, u_gloss;
+      uniform sampler2D u_blur; uniform vec2 u_zoomC; uniform float u_zoom, u_chroma, u_flash;
       varying vec2 vUv; varying vec3 vWPos; varying float vH;
       void main(){
         vec3 n = normalize(cross(dFdx(vWPos), dFdy(vWPos)));
@@ -207,10 +211,23 @@ export function screenMaterial(tex: THREE.Texture, size: THREE.Vector2) {
         // refraction: the bent normal shifts the lookup (water over a picture)
         vec2 off = n.xy * 0.11;
         float disp = clamp(abs(vH) * 0.5, 0.0, 1.0);
+        // TUNNEL DRAMA: the chromatic split pulls the channels apart along the zoom direction at peak speed (the same
+        // three taps as before, so it costs nothing); the split and the smear both grow with the distance from the
+        // vanishing point, so the crewmate at the centre stays clean
+        vec2 rad = vUv - u_zoomC;
+        float dist = length(rad);
+        vec2 ca = rad * u_chroma * dist;
         vec3 col;
-        col.r = texture2D(u_map, vUv - off * (1.0 + 0.10 * disp)).r;
+        col.r = texture2D(u_map, vUv - off * (1.0 + 0.10 * disp) + ca).r;
         col.g = texture2D(u_map, vUv - off).g;
-        col.b = texture2D(u_map, vUv - off * (1.0 - 0.10 * disp)).b;
+        col.b = texture2D(u_map, vUv - off * (1.0 - 0.10 * disp) - ca).b;
+        if (u_zoom > 0.001) {
+          // one extra tap of the half-res zoom blur, mixed in by distance from the vanishing point
+          vec3 blr = texture2D(u_blur, vUv - off).rgb;
+          float k = min(0.65, u_zoom * smoothstep(0.03, 0.55, dist) * 1.2); // the lines keep their edge, the smear trails them
+          col = mix(col, blr, k);
+        }
+        col += vec3(0.78, 0.86, 1.0) * u_flash * (1.0 - 0.6 * dist); // the warp flash on entry / exit
         col *= u_bright;
         // liquid glass highlights: Fresnel sheen + one soft key, only where the surface actually bends
         float bend = 1.0 - n.z;  // 0 on flat glass

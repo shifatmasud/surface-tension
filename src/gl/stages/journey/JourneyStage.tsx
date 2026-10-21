@@ -15,7 +15,8 @@ import { buildForest, buildShadows, longShadowGeometry, longShadowMaterial } fro
 import { buildSunFan, buildMist, buildMotes } from './forestFx'
 import { buildFoliage } from './foliage' // FOLIAGE HOOK (foliage helper): fluffy grass + trees
 import { buildFireflies, buildCanopy } from './nightFx'
-import { buildTunnel } from './tunnel'
+import { buildTunnel, buildTunnelLights } from './tunnel'
+import { buildTunnelBlur } from './tunnelBlur' // TUNNEL DRAMA: half-res zoom blur
 import { buildCta, WALL_Z } from './ctaScene'
 import { skyMaterial, starMaterial, glintStarMaterial, screenMaterial, backdropMaterial, SUN_DIR } from './shaders'
 import { buildShatterGeometry, shatterMaterial, buildGlints } from './shatter'
@@ -123,6 +124,7 @@ export function JourneyStage(): JSX.Element {
     const p = props.journey, dt = Math.min(props.dt, 1 / 20), time = props.time
     const snap = journey.snap || S.lastP < 0 || Math.abs(p - S.lastP) > 0.06
     journey.snap = false
+    const prevP = S.lastP
     S.lastP = p
     if (!nb.active) journey.beat = journeyAudio(p) // NEIGHBOUR HOOK: the soundtrack follows the live section only
 
@@ -167,8 +169,30 @@ export function JourneyStage(): JSX.Element {
       tu.u_travel.value = u * 900 + time * 6                                     // the rush is the scroll; a slow shimmer on top
       tu.u_phase.value = u * 5.0; tu.u_bend.value = 0.6 + 0.4 * Math.sin(u * Math.PI)
       tu.u_exit.value = ss(0.6, 1.0, u); tu.u_time.value = time
-      S.tunnel.mesh.visible = u > 0 && u < 1
-      if (S.tunnel.mesh.visible) { S.tunnel.mesh.position.copy(S.icam.position); S.tunnel.mesh.quaternion.copy(S.icam.quaternion) }
+      // TUNNEL DRAMA (Shifat Oct 21 12:44Z): the RUSH is the scroll speed (smoothed, 0..1; a brisk notch reads ~1), and it
+      // drives the streak stretch, the zoom blur and the chromatic split; the hue drifts down the bore; the rings pulse
+      // with the travel; a warp flash on the way in and on the way out. All scroll-driven, reversible, no clock state
+      // beyond one smoothed number (no per-frame allocations).
+      const vel = snap ? 0 : Math.abs(p - prevP) / Math.max(dt, 1e-3)
+      S.rush += (Math.min(1, vel / 0.09) - S.rush) * (1 - Math.exp(-dt / 0.12))
+      tu.u_rush.value = S.rush
+      tu.u_hue.value = u * 0.9 + time * 0.01
+      tu.u_pulse.value = 0.6 + 0.4 * Math.sin(tu.u_travel.value * 0.15)
+      const vis = u > 0 && u < 1
+      S.tunnel.mesh.visible = vis; S.tunnelLights.orbs.visible = vis; S.tunnelLights.rings.visible = vis
+      if (vis) {
+        S.tunnel.mesh.position.copy(S.icam.position); S.tunnel.mesh.quaternion.copy(S.icam.quaternion)
+        S.tunnelLights.orbs.position.copy(S.icam.position); S.tunnelLights.orbs.quaternion.copy(S.icam.quaternion)
+        S.tunnelLights.rings.position.copy(S.icam.position); S.tunnelLights.rings.quaternion.copy(S.icam.quaternion)
+      }
+      const flash = (Math.exp(-Math.pow((u - 0.07) / 0.03, 2)) * 0.32 + Math.exp(-Math.pow((u - 0.9) / 0.04, 2)) * 0.28) * (vis ? 1 : 0)
+      S.tunnelFx.zoom = vis ? tu.u_stretch.value * tu.u_on.value * (0.35 + 0.65 * S.rush) + flash * 0.6 : 0
+      S.tunnelFx.chroma = vis ? 0.028 * tu.u_stretch.value * (0.25 + 0.75 * S.rush) + flash * 0.03 : 0
+      S.tunnelFx.flash = flash
+      // the vanishing point: where the bent bore goes at mid-depth, projected into the screen picture's uv
+      const dd = 0.7, bendK = tu.u_bend.value * dd * 0.12 / Math.tan((S.icam.fov * Math.PI) / 360)
+      S.tunnelFx.cx = 0.5 + 0.5 * Math.sin(tu.u_phase.value + dd * 2.2) * bendK / S.icam.aspect
+      S.tunnelFx.cy = 0.5 + 0.5 * Math.cos(tu.u_phase.value * 0.7 + dd * 1.7) * 0.6 * bendK
     }
     // W18 (13:24Z): stars → fireflies, then the fall through the canopy
     {
@@ -265,6 +289,8 @@ export function JourneyStage(): JSX.Element {
     su.u_bulge.value = O.bulge; su.u_width.value = O.width; su.u_center.value.copy(O.center)
     su.u_ringT.value = O.ringT; su.u_ringAmp.value = O.ringAmp; su.u_bright.value = O.screenBright
     su.u_time.value = time; su.u_gloss.value = O.gloss
+    su.u_zoom.value = S.tunnelFx.zoom; su.u_chroma.value = S.tunnelFx.chroma; su.u_flash.value = S.tunnelFx.flash
+    su.u_zoomC.value.set(S.tunnelFx.cx, S.tunnelFx.cy)
     S.backdropMat.uniforms.u_amount.value = O.gloss
     // the backdrop always sits square behind what the REAL camera looks at (the rig damps toward journey.pose, so on
     // the pull-back and on a fast scroll it lags O.camPos; a plane aimed at O.camPos was seen at an angle and its edge
@@ -318,6 +344,12 @@ export function JourneyStage(): JSX.Element {
       gl.setRenderTarget(S.rt)
       gl.clear()
       gl.render(S.inner, S.icam)
+      // TUNNEL DRAMA: the half-res zoom blur of that picture, only while the tunnel wants it (tunnelBlur.ts)
+      if (S.tunnelFx.zoom > 0.005) {
+        const bu = S.tunnelBlur.material.uniforms
+        bu.u_amt.value = 0.3 * Math.min(1, S.tunnelFx.zoom); bu.u_c.value.set(S.tunnelFx.cx, S.tunnelFx.cy)
+        S.tunnelBlur.render(gl)
+      }
       gl.setRenderTarget(prev)
     }
   }, group)
@@ -451,7 +483,10 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   innerScene.add(sky, stars, fan.mesh, forest, shadow, crewIn.root, hemi, lightRig)
   const fireflies = buildFireflies(260), canopy = buildCanopy()
   const tunnel = buildTunnel()
-  innerScene.add(fireflies.points, canopy.mesh, tunnel.mesh)
+  // TUNNEL DRAMA: the light objects share the wall's uniforms (one set per frame); the blur reads the inner target
+  const tunnelLights = buildTunnelLights(tunnel.uniforms)
+  const tunnelBlur = buildTunnelBlur(rt, (settings.TIER === 'low' || low ? 'low' : settings.TIER === 'mid' ? 'mid' : 'high'))
+  innerScene.add(fireflies.points, canopy.mesh, tunnel.mesh, tunnelLights.orbs, tunnelLights.rings)
 
   // ===== outer world: the tablet + the crewmate that breaks out
   const outerG = new THREE.Group()
@@ -464,6 +499,7 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   if (portrait) lens.position.set(0, sh / 2 + 0.23, 0.283); else lens.position.set(0, sh / 2 + 0.23, 0.283)
   const segX = low ? 72 : 144, segY = Math.round(segX * (sh / sw))
   const screenMat = screenMaterial(rt.texture, new THREE.Vector2(sw, sh))
+  screenMat.uniforms.u_blur.value = tunnelBlur.rt.texture // TUNNEL DRAMA
   screenMat.side = THREE.DoubleSide
   const screen = new THREE.Mesh(new THREE.PlaneGeometry(sw, sh, segX, segY), screenMat)
   screen.position.z = SCREEN_Z; screen.frustumCulled = false
@@ -511,7 +547,7 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
     ;[innerScene, outerG].forEach((root) => root.traverse((o: any) => { if (o.geometry && !keep.has(o.geometry)) o.geometry.dispose?.(); if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m: any) => m.dispose()) }))
   }
   return {
-    sw, sh, rt, envs, inner: innerScene, fireflies, canopy, tunnel, grass, foliage, fan, mist, motes, treeRim, icam, bcam, sky, skyMat, stars, starMat, glintMat, forest, crewIn, innerMats, shadow, shadowMat, hemi, sun, rim, lightRig,
+    sw, sh, rt, envs, inner: innerScene, fireflies, canopy, tunnel, tunnelLights, tunnelBlur, rush: 0, tunnelFx: { zoom: 0, chroma: 0, flash: 0, cx: 0.5, cy: 0.5 }, grass, foliage, fan, mist, motes, treeRim, icam, bcam, sky, skyMat, stars, starMat, glintMat, forest, crewIn, innerMats, shadow, shadowMat, hemi, sun, rim, lightRig,
     outer: outerG, cta, rimU, ctaKey: '', par: new THREE.Vector2(), backdrop, backdropMat, screenMat, crewOut, shards, shardMat, shardKey: '', tier, glints, c, I, IB, O, lastP: -1,
     tmp: new THREE.Vector3(), tmp2: new THREE.Vector3(), o3: new THREE.Object3D(), dispose,
   }
