@@ -8,6 +8,27 @@ import { inkWipe } from './inkWipe'
 import { labGL } from '../../gl/stages/lab/labGL'
 import { browser } from '../../services/settings'
 import { HOUSE } from '../../core/house'
+import { morphGL } from './morphGL'
+import { blurFadeIn, blurFadeOut } from '../../services/blurFade'
+
+/** MOCKUP (Shifat 12:49Z "The cards x button must have frosted glassy fully circular 1:1 container"): the close X is a
+ *  1:1 frosted-glass circle over the media's top-right corner. The glass fill is light; the glyph flips dark / light from
+ *  the poster's luminance under the button (top-right ~20 % × 30 %), measured once per poster on a 16×10 canvas. */
+const toneCache = new Map<string, 'light' | 'dark'>()
+function toneOf(src: string, cb: (t: 'light' | 'dark') => void) {
+  const hit = toneCache.get(src); if (hit) { cb(hit); return }
+  const im = new Image(); im.decoding = 'async'; im.src = src
+  const done = () => {
+    try {
+      const c = document.createElement('canvas'); c.width = 16; c.height = 10
+      const g = c.getContext('2d', { willReadFrequently: true })!; g.drawImage(im, 0, 0, 16, 10)
+      const d = g.getImageData(12, 0, 4, 3).data; let l = 0
+      for (let i = 0; i < d.length; i += 4) l += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]
+      const t = l / (d.length / 4) > 128 ? 'light' : 'dark'; toneCache.set(src, t); cb(t)
+    } catch { cb('dark') }
+  }
+  if (im.complete && im.naturalWidth) done(); else { im.onload = done; im.onerror = () => cb('dark') }
+}
 
 /**
  * Project detail card.
@@ -42,6 +63,8 @@ export function ProjectOverlay() {
   const [id, setId] = useState<string | null>(null)
   const [phase, setPhase] = useState('idle')
   const [shown, setShown] = useState(false)       // details revealed (after the morph lands)
+  const [tone, setTone] = useState<'light' | 'dark'>('dark')   // MOCKUP: the close X glyph tone from the poster under it
+  useEffect(() => { const pp = id ? PROJECTS.find((x) => x.id === id) : null; if (pp) toneOf(pp.poster, setTone) }, [id])
   const vid = useRef<HTMLVideoElement>(null)
   const panel = useRef<HTMLDivElement>(null)
   const media = useRef<HTMLDivElement>(null)
@@ -98,12 +121,12 @@ export function ProjectOverlay() {
     return `inset(${(mr.top - pr.top).toFixed(1)}px ${(pr.right - mr.right).toFixed(1)}px ${(pr.bottom - mr.bottom).toFixed(1)}px ${(mr.left - pr.left).toFixed(1)}px round ${r}px)`
   }
   const FULL = 'inset(0px 0px 0px 0px round 28px)'
-  const texts = (pn: HTMLElement) => pn.querySelectorAll<HTMLElement>('.overlay__title, .overlay__in, .overlay__close')
+  const texts = (pn: HTMLElement) => pn.querySelectorAll<HTMLElement>('.overlay__title, .overlay__in')
   // the masked risers in reading order: eyebrow, title, the blurb's own rendered lines (split on demand), the link
   const split = useRef<SplitText | null>(null)
   const risers = (pn: HTMLElement) => {
     const bl = pn.querySelector<HTMLElement>('.overlay__line')
-    if (bl && !bl.querySelector('.ov-line')) { split.current?.revert(); split.current = new SplitText(bl, { type: 'lines', mask: 'lines', linesClass: 'ov-line' }) }
+    if (bl && !bl.querySelector('.ov-line')) { split.current?.revert(); split.current = new SplitText(bl, { type: 'lines', mask: 'lines', linesClass: 'ov-line', aria: 'none' /* W29: no aria-label on the <p> (axe aria-prohibited-attr); the split lines keep the real text, so it still reads natively */ }) }
     return Array.from(pn.querySelectorAll<HTMLElement>('.ov-rise, .ov-line'))
   }
   const blurIn = (ms: number, delay = 0) => bg.current?.animate(
@@ -119,6 +142,8 @@ export function ProjectOverlay() {
     const p = PROJECTS.find((x) => x.id === id)!
     const pn = panel.current!, md = media.current!, gl = glass.current!
     const from = slideRect(id, overlay.from)
+    // MOCKUP (12:51Z blur fade, non-text only): the X is hidden until the glass has unfolded, then blur-wobbles in
+    const xIn = (d: number) => { if (closeBtn.current) { closeBtn.current.style.opacity = '0'; blurFadeIn(closeBtn.current, d) } }
     const land = () => {
       pn.style.visibility = ''; md.style.opacity = ''; setShown(true); morphing.current = false; overlay.opened(); closeBtn.current?.focus({ preventScroll: true })
     }
@@ -135,7 +160,7 @@ export function ProjectOverlay() {
     if (reduced || !from) {
       pn.style.visibility = ''
       pn.animate([{ opacity: 0 }, { opacity: 1 }], { duration: reduced ? 240 : 420, easing: reduced ? HOUSE.CSS_INOUT : HOUSE.CSS_IN })
-      blurIn(reduced ? 240 : 420); arrive(0); land(); return
+      blurIn(reduced ? 240 : 420); arrive(0); xIn(reduced ? 0 : 160); land(); return
     }
     morphing.current = true
     const mr = md.getBoundingClientRect()
@@ -143,16 +168,30 @@ export function ProjectOverlay() {
     // the card is visible from the start, but only its glass (clipped to the thumb, so it is hidden under the flying
     // image) — the thumb itself waits for the image to land, the text waits for the glass
     md.style.opacity = '0'
-    texts(pn).forEach((el) => { el.style.opacity = '0' })
+    texts(pn).forEach((el) => { el.style.opacity = '0' }); if (closeBtn.current) closeBtn.current.style.opacity = '0'
     pn.style.visibility = ''
     labGL.hidden.add(id); cardEl(id)?.classList.add('is-lifted')
-    blurIn(T_OPEN * 0.9)
-    const g = gl.animate([{ clipPath: glassClip(pn, md), opacity: 0.0 }, { clipPath: glassClip(pn, md), opacity: 1, offset: 0.12 }, { clipPath: FULL, opacity: 1 }],
-      { duration: T_OPEN * 0.62, delay: T_OPEN * 0.4, easing: HOUSE.CSS_IN, fill: 'both' })
-    holdQA([g])
-    texts(pn).forEach((el) => { el.style.opacity = '' })
-    arrive(T_OPEN * 0.72)
-    fly({ ...from }, imgTo, p.poster, T_OPEN * 0.88, EASE_OPEN).then(land)
+    // MOCKUP v2 (Shifat 11:44–11:46Z): the image comes toward the viewer as a soft body and settles FLAT on the thumb;
+    // only then does the card reveal from behind it (the glass unfolds out from under the image, then the copy rises)
+    const glassAt = (d: number) => {
+      const g = gl.animate([{ clipPath: glassClip(pn, md), opacity: 0.0 }, { clipPath: glassClip(pn, md), opacity: 1, offset: 0.12 }, { clipPath: FULL, opacity: 1 }],
+        { duration: T_OPEN * 0.62, delay: d, easing: HOUSE.CSS_IN, fill: 'both' })
+      holdQA([g])
+    }
+    const fallback = () => {
+      glassAt(T_OPEN * 0.4); texts(pn).forEach((el) => { el.style.opacity = '' }); arrive(T_OPEN * 0.72); xIn(T_OPEN * 0.8)
+      fly({ ...from }, imgTo, p.poster, T_OPEN * 0.88, EASE_OPEN).then(land)
+    }
+    const FLY = 800
+    blurIn(FLY * 0.9)
+    gl.style.opacity = '0'
+    morphGL.fly({ ...from }, imgTo, p.poster, 1, FLY).then((m) => {
+      gl.style.opacity = ''
+      if (!m) { fallback(); return }
+      const flatAt = FLY + 560
+      glassAt(flatAt); texts(pn).forEach((el) => { el.style.opacity = '' }); arrive(flatAt + T_OPEN * 0.32); xIn(flatAt + T_OPEN * 0.45)
+      m.flat.then(() => { land(); requestAnimationFrame(m.hide) })
+    })
   }, [id])
 
   // W24 (framer-motion removed, −~45 KB gz of JS): the non-morph open it played — the dialog fades in over 0.42 s
@@ -183,13 +222,19 @@ export function ProjectOverlay() {
     // the text leaves, the glass folds back under the thumb, then the image flies home and the blur lifts
     risers(pn).forEach((el, i) => el.animate([{ transform: 'translate3d(0,0,0) rotate(0deg)' }, { transform: 'translate3d(0,-108%,0) rotate(-1.5deg)' }],
       { duration: 380, delay: i * 30, easing: 'cubic-bezier(.65,0,.35,1)', fill: 'forwards' }))
+    blurFadeOut(closeBtn.current)   // MOCKUP (12:51Z): the X blur-wobbles out with the copy, never cut
     gl.animate([{ clipPath: FULL, opacity: 1 }, { clipPath: glassClip(pn, md), opacity: 1, offset: 0.88 }, { clipPath: glassClip(pn, md), opacity: 0 }],
       { duration: T_CLOSE * 0.55, delay: 90, easing: HOUSE.CSS_INOUT, fill: 'forwards' })
     blurOut(T_CLOSE * 0.9, T_CLOSE * 0.25)
     setTimeout(() => {
       const mr = md.getBoundingClientRect()
       md.style.opacity = '0'
-      fly({ left: mr.left, top: mr.top, width: mr.width, height: mr.height, radius: 18 }, { ...to }, p.poster, T_CLOSE * 0.8, EASE_CLOSE).then(() => { pn.style.visibility = 'hidden'; finish() })
+      const fr = { left: mr.left, top: mr.top, width: mr.width, height: mr.height, radius: 18 }
+      morphGL.fly(fr, { ...to }, p.poster, -1, 680).then((m) => {
+        if (!m) { fly(fr, { ...to }, p.poster, T_CLOSE * 0.8, EASE_CLOSE).then(() => { pn.style.visibility = 'hidden'; finish() }); return }
+        pn.style.visibility = 'hidden'
+        m.flat.then(() => { finish(); requestAnimationFrame(m.hide) })
+      })
     }, 90 + T_CLOSE * 0.5)
   }
 
@@ -242,7 +287,7 @@ export function ProjectOverlay() {
       {p && (
         <div ref={outer} className={'overlay' + (shown ? ' is-shown' : '')} role="dialog" aria-modal="true" aria-label={p.title}>
           <div className="overlay__bg" ref={bg} onClick={() => overlay.close()} />
-          <div className="overlay__panel" ref={panel}
+          <div className="overlay__panel" ref={panel} data-tone={tone}
             style={morph ? { visibility: 'hidden' } : undefined}
             onPointerMove={(e) => { if (e.pointerType !== 'mouse') return; const r = e.currentTarget.getBoundingClientRect(); e.currentTarget.style.setProperty('--tx', (((e.clientY - r.top) / r.height - 0.5) * -4).toFixed(2) + 'deg'); e.currentTarget.style.setProperty('--ty', (((e.clientX - r.left) / r.width - 0.5) * 5).toFixed(2) + 'deg') }}
             onPointerLeave={(e) => { e.currentTarget.style.setProperty('--tx', '0deg'); e.currentTarget.style.setProperty('--ty', '0deg') }}>

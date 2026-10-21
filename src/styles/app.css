@@ -170,7 +170,14 @@ html.gl-cards .card__dom { visibility: hidden; }
 .overlay__line { margin: 0; color: #d6d9de; font-size: var(--fs-small); line-height: 1.5; max-width: 42ch; }
 .overlay__link { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; color: #fff; font-size: var(--fs-small); text-decoration: none; padding: 10px 16px; border-radius: 99px; background: rgba(255,255,255,.1); }
 .overlay__link:hover, .overlay__link:focus-visible { background: rgba(255,255,255,.18); }
-.overlay__close { position: absolute; top: 20px; right: 20px; z-index: 3; transform: translateZ(40px); }
+.overlay__close { position: absolute; top: 16px; right: 16px; z-index: 3; transform: translateZ(40px); width: 44px; height: 44px; padding: 0; border-radius: 50%; justify-content: center; color: #fff;
+  background: rgba(255, 255, 255, .24); backdrop-filter: blur(16px) saturate(1.4); -webkit-backdrop-filter: blur(16px) saturate(1.4); box-shadow: none; }
+/* MOCKUP (Shifat 12:49Z): a 1:1 frosted-glass circle; the X reads on any image: dark glyph over a bright poster corner, white over a dark one (ProjectOverlay data-tone) */
+.overlay__panel[data-tone='light'] .overlay__close { color: #111; background: rgba(255, 255, 255, .34); }
+.overlay__close svg { display: block; }
+@media (hover: hover) { .overlay__close:hover { transform: translateZ(40px) scale(1.06); background: rgba(255, 255, 255, .34); } .overlay__panel[data-tone='light'] .overlay__close:hover { background: rgba(255, 255, 255, .46); } }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .overlay__close, .overlay__panel[data-tone='light'] .overlay__close { background: rgba(255, 255, 255, .88); color: #111; } }
+@media (max-width: 812px) { .overlay__close { top: 12px; right: 12px; } }
 @media (max-width: 812px) { .overlay { padding: 16px; } .overlay__panel { width: 100%; overflow-y: auto; overscroll-behavior: contain; animation: none; } }
 @media (prefers-reduced-motion: reduce) { .overlay__panel { animation: none; transition: none; } }
 
