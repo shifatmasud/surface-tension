@@ -35,7 +35,7 @@ export const wrapFade = {
       if (foot) {
         const fc = foot.cloneNode(true) as HTMLElement
         fc.removeAttribute('id'); fc.querySelectorAll('[id]').forEach((e) => e.removeAttribute('id'))
-        fc.style.zIndex = '0'
+        fc.style.zIndex = fc.classList.contains('site-footer--world') ? '2' : '0'   // FOOTER MOCKUP: its world is in the frozen canvas below it
         ov.appendChild(fc)
       }
       const r = src.getBoundingClientRect()

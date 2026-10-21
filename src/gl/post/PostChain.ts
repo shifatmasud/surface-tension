@@ -15,6 +15,7 @@ import { ufx } from '../ufx/ufx'
 import { SharpText } from './SharpText'
 import { stickerMask, gemMask } from '../systems/stickerMask'
 import { makeSelective, syncSelective } from '../fx/hotBloom' // CINEMATIC: selective bloom (hot spots only)
+import { FOOT_MODE, FooterWorldEffect } from './footerWorld' // FOOTER MOCKUP (VITE_FOOT 1|2; 0 = live, effect absent)
 import { gpuTimer } from '../systems/perfGovernor' // SHARP: the governor's GPU frame timer ends after the last draw
 
 /**
@@ -88,7 +89,8 @@ export class PostChain {
     const fxaa = new FXAAEffect()
     const renderScale = () => props.dpr / Math.max(1, Math.min(window.devicePixelRatio || 1, 2))
     // sharpen (convolution) first, then the grade on its result: one pass instead of two when below native size
-    const gradeOnly = new EffectPass(camera, this.grade)
+    // FOOTER MOCKUP: the footer's world and the in-frame curtain ride in the Grade pass (no extra full-screen pass)
+    const gradeOnly = FOOT_MODE ? new EffectPass(camera, this.grade, new FooterWorldEffect(FOOT_MODE)) : new EffectPass(camera, this.grade)
     const sharpGrade = new EffectPass(camera, new InlineSharpenEffect(), this.grade)
     const sharp = () => false && renderScale() < 0.99   // W18: CAS in the final upscale replaces the inline sharpen
     this.entries = [

@@ -5,6 +5,7 @@ import { browser } from '../../../services/settings'
 import { audio } from '../../../services/audio'
 import { props } from '../../../state/props'
 import { journey } from './journeyState'
+import { FOOT_MODE } from '../../post/footerWorld'
 
 /**
  * STICKERS — interactive vinyl on the CTA wall (Shifat 15:29Z: "Make stickers interactive draggable peelable").
@@ -405,7 +406,7 @@ export function createStickerInteraction(c: Ctx): StickerInteraction {
       const key = `${Math.round(props.scroll)}|${innerWidth}|${innerHeight}|${host?.style.transform ?? ''}`
       if (key !== rectKey && host && mounted) {
         rectKey = key
-        const r = host.getBoundingClientRect(); host0.left = r.left; host0.top = r.top; host0.width = r.width; host0.height = r.height
+        const r = host.getBoundingClientRect(); host0.left = r.left; host0.top = r.top - (FOOT_MODE ? journey.lift || 0 : 0); host0.width = r.width; host0.height = r.height   // FOOTER MOCKUP: the in-frame curtain
         const l = layer.getBoundingClientRect(); lay0.left = l.left; lay0.top = l.top
         domDirty = true
       }

@@ -18,6 +18,8 @@ import { ProjectLinks } from '../a11y/ProjectLinks'
 import { noOrphan } from '../a11y/noOrphans'
 import { lineRoll, type LineRoll } from '../ui/maskedRoll'
 import { bindInk } from '../../services/inkButton'
+import { FOOT_MODE } from '../../gl/post/footerWorld'
+let footEl: HTMLElement | null = null
 
 /** W19: the fixed footer's height (50vh / 50svh since 19:06Z), cached by a ResizeObserver so the frame loop reads no layout */
 let footH = 0
@@ -89,7 +91,14 @@ export function Contact() {
         const fh = footerH(vh)
         const k0 = Math.max(0, vh - (top + range.height)), k = Math.round(Math.min(k0, fh + 2))
         // (W21 tried a soft mask on the curtain's lower edge: it read as a grey gradient band, against the no-gradient rule; the edge stays hard)
-        if (k !== lastK && canvasEl) { lastK = k; canvasEl.style.transform = k > 0 ? `translate3d(0, ${-k}px, 0)` : '' }
+        // FOOTER MOCKUP: the canvas no longer slides; the curtain lifts inside the frame (gl/post/footerWorld.ts reads
+        // journey.lift) and the footer's DOM (now over the canvas, transparent) is uncovered by the same edge (--k clip)
+        if (k !== lastK && canvasEl) {
+          lastK = k
+          if (FOOT_MODE) { footEl ??= document.querySelector<HTMLElement>('.site-footer'); footEl?.style.setProperty('--k', `${k}px`) }
+          else canvasEl.style.transform = k > 0 ? `translate3d(0, ${-k}px, 0)` : ''
+        }
+
         journey.lift = k   // W21: how far the curtain has lifted (css px); read by nothing that moves the picture (see Scene.tsx)
         // W21 (scorer-r614: 'Say hi on X' crossed the crewmate's visor in the runway): the canvas stops lifting at the
         // footer's height, but the section's DOM kept scrolling, so the pill slid up over the held picture. It now holds
@@ -108,6 +117,7 @@ export function Contact() {
         const f = clamp((k0 - fh - 2) / Math.max(1, runwayPx(vh, fh) - 6))
         props.overscroll = f
         footerBar.el?.style.setProperty('--f', f.toFixed(3))
+        if (FOOT_MODE) footerBar.el?.parentElement?.parentElement?.style.setProperty('--f', f.toFixed(3))   // FOOTER MOCKUP: the lime glow reads it
         if (f > 0.985 && !fired) { fired = true; audio.swell(false); scroll.wrapToTop(); setTimeout(() => (fired = false), 900) }
       },
     }
@@ -159,7 +169,7 @@ export function Footer() {
     return () => { footRolls.splice(0).forEach((r) => r.destroy()); footP = -1 }
   }, [])
   return createPortal(
-    <footer className="site-footer" aria-label="Footer">
+    <footer className={FOOT_MODE ? `site-footer site-footer--world site-footer--w${FOOT_MODE}` : 'site-footer'} aria-label="Footer">
       <div className="site-footer__top">
         <p className="site-footer__name" data-roll="marked"><span data-roll-line=""><span className="site-footer__lockup" role="img" aria-label={SITE.name}><span className="site-footer__mark" aria-hidden="true"><Logo size="100%" /></span><span aria-hidden="true">Shifat</span></span></span><span data-roll-line=""><span>{SITE.role}.</span></span></p>
         <nav className="site-footer__links" aria-label="Elsewhere" data-roll="marked">

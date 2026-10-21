@@ -113,3 +113,24 @@ html.no-gl .stickers { position: relative; inset: auto; height: 50vh; }
 html.no-gl .contact__grid { position: relative; left: auto; right: auto; bottom: auto; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 5vh; padding: 18vh var(--pad-x) 10vh; }
 html.no-gl .contact__cta { position: static; transform: none; }
 html.no-gl .a11y-work ul { justify-content: center; }
+
+/* FOOTER MOCKUP (VITE_FOOT 1|2; class added only then): the footer sits OVER the canvas, transparent, so its world is the
+   WebGL frame itself (gl/post/footerWorld.ts) and the cursor trail bends it; it is uncovered by the same edge the
+   curtain lifts with (--k, set by Contact.tsx), so nothing of it shows or takes a tap before the curtain clears it.
+   Text: untouched (same type, size, colour, roll timing). */
+.site-footer--world { z-index: 3; background: transparent; clip-path: inset(max(0px, calc(100% - var(--k, 0px))) 0 0 0); }
+.site-footer--world .overscroll__bar { position: relative; }
+/* Shifat 13:24Z "Make the scroll progress fill super lime green glowy" + "In footer": electric lime fill on an ink track
+   (lime on the light grey track was 1.2:1; on ink it is 14:1), a layered soft neon glow that grows with the fill */
+.site-footer--world .overscroll__track { background: var(--c-ink); box-shadow: none; overflow: hidden; z-index: 1; }
+.site-footer--world .overscroll__fill { background: #a3ff12; }
+.site-footer--world .overscroll__fill::after { background: rgba(255, 255, 255, .55); }
+.site-footer--world .overscroll__fill { box-shadow: 0 0 6px #a3ff12, 0 0 14px rgba(163, 255, 18, .8); }
+.site-footer--world .overscroll__bar::after { content: ''; position: absolute; left: 0; bottom: 0; height: 12px; width: 100%; border-radius: 999px;
+  background: #a3ff12; transform-origin: 0 50%; transform: scaleX(var(--f, 0)); filter: blur(9px); opacity: calc(0.55 + 0.45 * var(--f, 0));
+  transition: transform .32s var(--ease); pointer-events: none; }
+.site-footer--world .overscroll__bar::before { content: ''; position: absolute; left: -6px; bottom: -10px; height: 32px; width: calc(100% + 12px); border-radius: 999px;
+  background: #b8ff3c; transform-origin: 6px 50%; transform: scaleX(var(--f, 0)); filter: blur(24px); opacity: calc(0.45 + 0.4 * var(--f, 0));
+  transition: transform .32s var(--ease); pointer-events: none; }
+/* FOOTER MOCKUP: no WebGL = no world to draw: the plain paper footer, in flow, as before */
+html.no-gl .site-footer--world { clip-path: none; background: var(--c-paper); }
