@@ -331,14 +331,18 @@ function layout(o: FoliageOptions): Spot[] {
   }
   if (o.portrait) {
     // phones: the frame is narrow, so the framing trees stand closer to the axis and further back
-    add(-3.1, -3.2, 1.5, 'round'); add(3.9, -5.5, 1.9, 'round'); add(-4.6, -8.5, 2.1, 'pine'); add(5.8, -12, 2.2, 'pine')
+    // W22: the right framing broadleaf stands further back so its crown clears the menu icon (header row, top ~120 px)
+    add(-3.1, -3.2, 1.5, 'round'); add(4.5, -9.5, 1.7, 'round'); add(-4.6, -8.5, 2.1, 'pine'); add(5.8, -12, 2.2, 'pine')
     add(-6.5, -14, 1.8, 'round')
   } else {
-    add(-7.4, 1.6, 2.35, 'round'); add(-9.9, -1.8, 2.2, 'pine'); add(-6.2, -4.6, 1.6, 'round')
-    add(8.4, 0.2, 2.15, 'round'); add(10.6, -3.6, 2.3, 'pine'); add(6.9, -6.8, 1.5, 'round')
+    // W22 (scorer-r614/r618: the header sat over the two nearest crowns at the top corners): the near broadleaves stand a
+    // little further back and out, and a touch smaller, so their crowns stay below the header row (top ~120 px)
+    add(-13.5, -14.0, 1.6, 'round'); add(-9.9, -1.8, 2.2, 'pine'); add(-9.0, -14.5, 1.3, 'round')
+    add(9.6, -4.4, 1.75, 'round'); add(10.6, -3.6, 2.3, 'pine'); add(8.0, -11.0, 1.35, 'round')
   }
   // PERF HOOK (same object count on every tier): phones plant the full tree set too; their crowns are cheaper (q below)
-  cluster(-14, -13, 4, 5, 1.3, 1.8); cluster(12.5, -11, 3.5, 4, 1.2, 1.7); cluster(-8.5, -24, 3, 3, 1.1, 1.5)
+  cluster(-17.5, -17, 4, 5, 1.3, 1.8);   // W22: back and out, crowns under the header row
+  cluster(12.5, -11, 3.5, 4, 1.2, 1.7); cluster(-8.5, -24, 3, 3, 1.1, 1.5)
   cluster(-30, -40, 8, 8, 1.4, 2.0, 0.5); cluster(27, -44, 9, 8, 1.4, 2.0, 0.5); cluster(-3, -64, 10, 6, 1.6, 2.1, 0.6)
   cluster(50, -70, 12, 6, 1.7, 2.3, 0.6); cluster(-55, -66, 12, 6, 1.7, 2.3, 0.6)
   // keep the sky gap behind the crewmate clear
