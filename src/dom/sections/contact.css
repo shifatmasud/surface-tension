@@ -107,3 +107,9 @@ html.no-gl .stickers { position: relative; inset: auto; height: 50vh; }
 
 /* W19 (Shifat 20:50Z m:a3a8c617, phone only): the CTA label stays on ONE line */
 @media (max-width: 760px) { .contact .big-btn { white-space: nowrap; min-width: max-content; } }
+
+/* W21 (scorer-r610 side note): on the no-GL page the project list rides inside the pinned CTA box, so the box grew up
+   over the centred headline. There the headline stands clear above the box (button + list), and the list centres. The no-GL CTA is plain flow: headline, then the button and the list under it. */
+html.no-gl .contact__grid { position: relative; left: auto; right: auto; bottom: auto; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 5vh; padding: 18vh var(--pad-x) 10vh; }
+html.no-gl .contact__cta { position: static; transform: none; }
+html.no-gl .a11y-work ul { justify-content: center; }

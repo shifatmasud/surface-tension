@@ -13,6 +13,19 @@ import { TabletWindow } from '../journey/tabletWindow'; import { tabletPose } fr
 /** QA: ?atom holds the sequence at the atom, ?drum at the drum; window.__morph (0..1) pins it */
 const KEEP_EYE = new THREE.Vector3(0, 0, -1e3), KEEP_F = new THREE.Vector3(0, 0, 1), KEEP_V = new THREE.Vector3() // POLISH-2: the main lens, for the ring's keep-out
 const STONE_D = new THREE.Vector3() // W20: the eye→stone direction (phones' stone keep-out)
+const BAND_P = new THREE.Vector3() // W21: a part's world point, for the wide-screen text band keep-out
+let BAND_TOP = 0, BAND_AT = 0
+/** W21: the top of the text slot (SYSTEMS, title, caption) in css px, minus a little air; read at most every 250 ms */
+function bandTop() {
+  const now = performance.now()
+  if (now > BAND_AT) {
+    BAND_AT = now + 250
+    const b = document.querySelector('.slot .slot__beat[data-beat="systems"]') as HTMLElement | null  // the drum only plays under this beat
+    const rc = b?.getBoundingClientRect()
+    BAND_TOP = rc && rc.height > 0 ? rc.top - 16 : props.height * 0.66
+  }
+  return BAND_TOP
+}
 const KB_V = new THREE.Vector3(), KB_CORNERS: [number, number][] = [[-1.05, -0.42], [1.05, -0.42], [1.05, 0.42], [-1.05, 0.42]] // W20: a part's face, for the keyboard proxy box
 const ss = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
 const QS = typeof location !== 'undefined' ? location.search : ''
@@ -442,7 +455,7 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
     s.visible = pf > 0.002
     // and as the camera pushes into the stone the drum dissolves around it (nothing ever crosses the lens)
     // W20: phones dissolve the drum a little earlier on the push, so a part opening past the lens never crosses the lede
-    const fv = pf * (1 - ss(0.3 - 0.15 * portrait(), 0.8 - 0.3 * portrait(), pw))
+    const fv = pf * (1 - ss(0.2 - 0.05 * portrait(), 0.65 - 0.15 * portrait(), pw))   // W21: wide screens dissolve a little earlier on the push (phones unchanged: 0.15 → 0.5)
     s.visible = fv > 0.002
     if (Math.abs(fv - built.fade.v) > 1e-3) { built.fade.v = fv; for (const f of built.fades) f.m.opacity = f.base * fv }
     atom.mat.uniforms.u_amb.value = dive.abyss
@@ -486,7 +499,7 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
           // W20 (root 22:55Z, r22): on phones a lower-row part sliding DOWN out of the corridor crossed the Shade DS
           // eyebrow/title at the bottom of the screen. Phones move lower parts SIDEWAYS instead, straight away from the
           // lens axis by the same clearance (the same smooth path change, never a fade or a pop).
-          if (dodge < 0 && portrait() > 0) {
+          if (dodge < 0) {   // W21: wide screens too (a lower part dodging down crossed the 1440 caption on the push)
             const lx = KEEP_V.x - z * KEEP_F.x, lz = KEEP_V.z - z * KEEP_F.z, ln = Math.hypot(lx, lz)
             const sx = ln > 1e-4 ? lx / ln : Math.sin(wa), sz = ln > 1e-4 ? lz / ln : Math.cos(wa), m = -dodge, ry = s.rotation.y
             sideX = (sx * Math.cos(ry) - sz * Math.sin(ry)) * m; sideZ = (sx * Math.sin(ry) + sz * Math.cos(ry)) * m
@@ -514,6 +527,26 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
           const push = (0.5 * (lat + rk + Math.sqrt((lat - rk) * (lat - rk) + e * e)) - lat) * kw
           const wx = KEEP_V.x / lat * push, wy = KEEP_V.y / lat * push, wz = KEEP_V.z / lat * push
           kx = wx * cr - wz * sr; ky = wy; kz = wx * sr + wz * cr
+        }
+      }
+      // W21 (root 00:26Z: 'no 3D over text' — at 1440 the turned drum's bottom row crossed the Shade DS caption): on wide
+      // screens no part may come down into the text band at the bottom of the screen (the slot: SYSTEMS, the title and
+      // the caption). The part's lower edge is projected; past the band's top it rises by a soft-max in world Y, the
+      // same smooth path change as the other keep-outs, never a fade or a pop. Phones keep their own framing above.
+      const bw = 1 - portrait()
+      if (bw > 0.001 && !nb.active) {
+        const ry = s.rotation.y, cr = Math.cos(ry), sr = Math.sin(ry)
+        const lx1 = Math.sin(it.a) * rr + sideX + kx, lz1 = Math.cos(it.a) * rr + sideZ + kz, ly1 = iy + dodge + ky + s.position.y
+        BAND_P.set(r.position.x + lx1 * cr + lz1 * sr, r.position.y + ly1, r.position.z - lx1 * sr + lz1 * cr)
+        const depth = (BAND_P.x - KEEP_EYE.x) * KEEP_F.x + (BAND_P.y - KEEP_EYE.y) * KEEP_F.y + (BAND_P.z - KEEP_EYE.z) * KEEP_F.z
+        if (depth > 0.5) {
+          const cam = state.camera as THREE.PerspectiveCamera, H = props.height
+          const mpp = 2 * Math.tan(THREE.MathUtils.degToRad(cam.fov || 40) / 2) * depth / H   // metres per css px at the part
+          BAND_P.project(cam)
+          const yc = (1 - BAND_P.y) * 0.5 * H, half = 0.42 * it.g.scale.y / mpp                 // a part is ≈0.84 m tall
+          const d = bandTop() - (yc + half), e = 28
+          const pushPx = 0.5 * (d + Math.sqrt(d * d + e * e)) - d                                 // ≈0 when well clear
+          ky += pushPx * mpp * bw
         }
       }
       it.g.position.set(Math.sin(it.a) * rr + sideX + kx, iy + dodge + ky + Math.sin(t * 0.6 + it.ph) * 0.05, Math.cos(it.a) * rr + sideZ + kz)

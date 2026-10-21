@@ -79,7 +79,13 @@ function current(dropped: boolean): number {
   // slot exactly where the tail unpins: lab pin 1 = systems.top − vh)
   // (only a pinned systems section gates on the push: under reduced motion sections are 100vh and the push would clear
   // "Shade DS" before the section is even on screen — cut-review P1-2)
-  if (R.systems && s >= R.systems.top - vh) return dive.push > 0.5 && R.systems.h > vh * 1.5 ? -1 : IDX.get('systems')!
+  // W21 (no 3D over text): in the pinned section the stone and its particle ring are still sinking through the bottom
+  // band until the Systems turn begins (measured at 1440: the ring crossed the caption at dive.sys = 0, clear by 0.067),
+  // so the beat waits for the stone to settle; the descent stays wordless a moment longer
+  if (R.systems && s >= R.systems.top - vh) {
+    const pinned = R.systems.h > vh * 1.5
+    return pinned && (dive.push > 0.5 || dive.sys < 0.04) ? -1 : IDX.get('systems')!
+  }
   // the work beats show only while their GL cards are on screen (0 < pin < 1); before that "Under the surface" holds
   const pl = R.lab ? pin('lab') : -1
   if (pl > 0 && pl < 1) {
@@ -150,6 +156,10 @@ export function TextLayer() {
             const inner = document.createElement('span'); inner.className = 'slot__in'
             while (line.firstChild) inner.appendChild(line.firstChild)
             line.appendChild(inner)
+            // W21: the DOM fallback starts every line below its mask and unseen; the tick rolls the active beat in. (Before,
+            // every beat's copy painted stacked for a frame at mount: a flash of overlapping text on the no-GL page, and
+            // the stacked Shade DS caption became the page's largest paint.)
+            if (!gl) { inner.style.transform = 'translate3d(0, 110%, 0)'; inner.style.opacity = '0' }
             st[bi].dom.push(inner)
             if (!gl) continue
             const r = line.getBoundingClientRect()
@@ -168,6 +178,7 @@ export function TextLayer() {
         b.style.visibility = ''; b.style.display = ''
       })
       if (gl) host.classList.add('is-gl')
+      host.classList.add('is-built')   // W21: until the lines are split and masked, no beat paints (app.css)
     }
     let active = -1, built = false
     const set = (i: number) => {

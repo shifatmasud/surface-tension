@@ -445,3 +445,7 @@ html:not(.is-ready) .hdr-roll > .mroll__in { transform: translate3d(0, calc(100%
    ring is white on the dark deep. */
 .systems:not(.systems--dom) .systems__hit { pointer-events: none; }
 html[data-bg='dark'] .systems .systems__hit:focus-visible, html[data-bg='dark'] .systems .systems__hit--range:focus-within { outline-color: var(--c-white); }
+
+/* W21: the slot's beats are stacked in one place; until TextLayer has split and masked their lines they paint nothing
+   (the no-GL page flashed every beat's copy on top of each other at mount) */
+.slot:not(.is-built) .slot__beat { visibility: hidden; }

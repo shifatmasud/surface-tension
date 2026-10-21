@@ -42,9 +42,13 @@ function Wave({ on }: { on: boolean }) {
     raf = requestAnimationFrame(draw)
     // W20 (scorer-r610 #3: the icon stayed dark on every dark section): a settled, silent wave stops drawing, so it kept
     // the colour it had when it stopped. Redraw once whenever the UI tone (html[data-bg]) flips.
-    const mo = new MutationObserver(() => { toneUntil = performance.now() + 700; if (!raf) { last = performance.now(); raf = requestAnimationFrame(draw) } }) // follows the .5 s colour transition
+    // W21: a slow device (or a cold jump, a few frames a second) can sample the colour mid-transition and then stop on
+    // that in-between grey. One more redraw is pinned to the end of the .5 s transition, whatever the frame rate.
+    const kick = (ms: number) => { toneUntil = Math.max(toneUntil, performance.now() + ms); if (!raf) { last = performance.now(); raf = requestAnimationFrame(draw) } }
+    let tt = 0
+    const mo = new MutationObserver(() => { kick(700); clearTimeout(tt); tt = window.setTimeout(() => kick(120), 620) }) // follows the .5 s colour transition
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-bg'] })
-    return () => { if (raf) cancelAnimationFrame(raf); mo.disconnect() }
+    return () => { if (raf) cancelAnimationFrame(raf); clearTimeout(tt); mo.disconnect() }
   }, [on])
   return <canvas ref={ref} className="wave" aria-hidden />
 }
@@ -52,6 +56,30 @@ function Wave({ on }: { on: boolean }) {
 export function Header() {
   const [sound, setSound] = useState(false)
   useEffect(() => audio.onChange(setSound), [])
+  // W21: the no-GL page has no GL frame to set the UI tone (html[data-bg]), so its header (and the text slot) stayed
+  // black on the dark sections. There the tone follows the section under the header: an opaque dark background or an
+  // image/gradient section (the dive, the journey, the CTA) reads dark.
+  useEffect(() => {
+    const html = document.documentElement
+    if (!html.classList.contains('no-gl')) return
+    let raf = 0
+    const tone = (y: number) => {
+      let el = document.elementFromPoint(innerWidth / 2, y) as HTMLElement | null
+      while (el && el !== document.body) {
+        const cs = getComputedStyle(el)
+        if (cs.backgroundImage !== 'none') return 'dark'
+        const m = cs.backgroundColor.match(/[\d.]+/g)
+        if (m && (m.length < 4 || +m[3] > 0.5)) return (0.2126 * +m[0] + 0.7152 * +m[1] + 0.0722 * +m[2]) < 128 ? 'dark' : 'light'
+        el = el.parentElement
+      }
+      return 'light'
+    }
+    const run = () => { raf = 0; const t = tone(Math.max(8, Math.min(60, innerHeight * 0.05))); if (html.dataset.bg !== t) html.dataset.bg = t }
+    const on = () => { if (!raf) raf = requestAnimationFrame(run) }
+    run(); addEventListener('scroll', on, { passive: true }); addEventListener('resize', on)
+    const iv = window.setInterval(on, 400)   // the virtual scroller moves the page without native scroll events
+    return () => { removeEventListener('scroll', on); removeEventListener('resize', on); clearInterval(iv); if (raf) cancelAnimationFrame(raf) }
+  }, [])
   const go = (id: string) => { scroll.scrollTo('#' + id, { duration: 2 }); audio.swell(true) }
   return (
     <header className="header">
