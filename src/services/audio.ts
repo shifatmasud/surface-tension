@@ -1,7 +1,8 @@
 import { props } from '../state/props'
 import { dive as diveState } from '../gl/stages/dive/diveState'
+import * as K from './soundKit'
 /**
- * Web Audio — every sound synthesised (no files): a filtered-noise water bed, a sub drone that low-passes
+ * Web Audio — every sound synthesised (no files; the voices live in soundKit.ts): a soft low-passed water bed, a sub drone that low-passes
  * under the dive, droplet "plips" from the cursor paint, hover ticks and section swells.
  * Muted until the first gesture + the speaker toggle (autoplay policy).
  */
@@ -15,6 +16,20 @@ class AudioService {
   reverb!: ConvolverNode
   wet!: GainNode
   enabled = false
+  private legacy: ConvolverNode | null = null
+  /** the R6.55 room (2.6 s decaying-noise impulse, wet 0.32), kept ONLY for the glass shatter, which Shifat locked
+   *  (11:40Z "No lock current glass sound"); built on the first shatter */
+  get legacyReverb(): ConvolverNode {
+    if (!this.legacy) {
+      const ctx = this.ctx!, cv = ctx.createConvolver()
+      const len = ctx.sampleRate * 2.6, ir = ctx.createBuffer(2, len, ctx.sampleRate)
+      for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2) }
+      cv.buffer = ir
+      const w = ctx.createGain(); w.gain.value = 0.32; cv.connect(w); w.connect(this.master)
+      this.legacy = cv
+    }
+    return this.legacy
+  }
   analyser: AnalyserNode | null = null
   private plipClock = 0
   private underK = 0
@@ -30,29 +45,15 @@ class AudioService {
     const lim = ctx.createDynamicsCompressor()
     lim.threshold.value = -6; lim.knee.value = 6; lim.ratio.value = 12; lim.attack.value = 0.003; lim.release.value = 0.25
     this.master.connect(lim); lim.connect(this.analyser); this.analyser.connect(ctx.destination)
-    // convolution reverb from a generated decaying-noise impulse
+    // W25 sound redesign: a short dark room (1.6 s, the highs dying first) in place of the bright 2.6 s noise impulse
     this.reverb = ctx.createConvolver()
-    const len = ctx.sampleRate * 2.6, ir = ctx.createBuffer(2, len, ctx.sampleRate)
-    for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2) }
-    this.reverb.buffer = ir
-    this.wet = ctx.createGain(); this.wet.gain.value = 0.32
+    this.reverb.buffer = K.reverbIR(ctx)
+    this.wet = ctx.createGain(); this.wet.gain.value = K.WET
     this.reverb.connect(this.wet); this.wet.connect(this.master)
-    // water bed: pink-ish noise → bandpass, slow LFO on the filter
-    // W25 R6.55 (sound audit #5): the 4 s bed loop had a seam: the pink filter starts at rest and ends mid-swing, so every 4 s
-    // the loop jumped (a soft click / level dip). The noise is now generated 0.5 s longer and that tail is cross-faded
-    // (equal power) into the head, so the end flows into the start
-    const SR = ctx.sampleRate, L = SR * 4, X = Math.floor(SR * 0.5)
-    const raw = new Float32Array(L + X)
-    let b0 = 0, b1 = 0, b2 = 0
-    for (let i = 0; i < raw.length; i++) { const w = Math.random() * 2 - 1; b0 = 0.99765 * b0 + w * 0.099046; b1 = 0.963 * b1 + w * 0.2965164; b2 = 0.57 * b2 + w * 1.0526913; raw[i] = (b0 + b1 + b2 + w * 0.1848) * 0.18 }
-    const nb = ctx.createBuffer(1, L, SR), nd = nb.getChannelData(0)
-    for (let i = 0; i < L; i++) nd[i] = raw[i]
-    for (let i = 0; i < X; i++) { const k = i / X; nd[i] = raw[i] * Math.sin(k * Math.PI / 2) + raw[L + i] * Math.cos(k * Math.PI / 2) }
-    const noise = ctx.createBufferSource(); noise.buffer = nb; noise.loop = true
-    this.bedFilter = ctx.createBiquadFilter(); this.bedFilter.type = 'bandpass'; this.bedFilter.frequency.value = 700; this.bedFilter.Q.value = 0.6
-    this.bedGain = ctx.createGain(); this.bedGain.gain.value = 0.12
-    noise.connect(this.bedFilter); this.bedFilter.connect(this.bedGain); this.bedGain.connect(this.master); this.bedGain.connect(this.reverb)
-    noise.start()
+    // water bed. W25 sound redesign: brown noise behind a 2.2 kHz ceiling and a moving low-pass (no bandpassed pink hiss),
+    // breathing slowly. R6.55's seamless loop (#5) is kept: the 8 s loop's tail is cross-faded into its head (soundKit.bedBuffer)
+    const bed = K.buildBed(ctx, [this.master, this.reverb])
+    this.bedFilter = bed.filter; this.bedGain = bed.gain
     // drone for the deep: two detuned sines → lowpass
     this.droneFilter = ctx.createBiquadFilter(); this.droneFilter.type = 'lowpass'; this.droneFilter.frequency.value = 300
     this.droneGain = ctx.createGain(); this.droneGain.gain.value = 0
@@ -98,57 +99,17 @@ class AudioService {
     this.master.gain.setTargetAtTime(on ? 0.7 : 0, ctx.currentTime, 0.4)
     if (on && ctx.state !== 'running') { try { await ctx.resume() } catch { /* the next gesture resumes it */ } }
   }
-  /** a single droplet: sine with a fast downward pitch glide, into the reverb */
-  plip(intensity = 0.5, pitch = 1) {
-    if (!this.enabled || !this.ctx) return
-    const ctx = this.ctx, t = ctx.currentTime
-    const o = ctx.createOscillator(), g = ctx.createGain()
-    o.type = 'sine'
-    const f = (900 + Math.random() * 700) * pitch
-    o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(f * 0.42, t + 0.12)
-    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.06 * intensity, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22)
-    o.connect(g); g.connect(this.master); g.connect(this.reverb); o.start(t); o.stop(t + 0.25)
-  }
-  tick() {
-    if (!this.enabled || !this.ctx) return
-    const ctx = this.ctx, t = ctx.currentTime
-    const o = ctx.createOscillator(), g = ctx.createGain(), hp = ctx.createBiquadFilter()
-    hp.type = 'highpass'; hp.frequency.value = 2400
-    o.type = 'triangle'; o.frequency.value = 3200
-    g.gain.setValueAtTime(0.02, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04)
-    o.connect(hp); hp.connect(g); g.connect(this.master); o.start(t); o.stop(t + 0.05)
-  }
-  swell(up = true) {
-    if (!this.enabled || !this.ctx) return
-    const ctx = this.ctx, t = ctx.currentTime
-    const n = ctx.createBufferSource(); const b = ctx.createBuffer(1, ctx.sampleRate * 1.6, ctx.sampleRate); const d = b.getChannelData(0)
-    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1
-    n.buffer = b
-    const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 2
-    f.frequency.setValueAtTime(up ? 200 : 2000, t); f.frequency.exponentialRampToValueAtTime(up ? 2400 : 160, t + 1.4)
-    const g = ctx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.05, t + 0.6); g.gain.linearRampToValueAtTime(0, t + 1.5)
-    n.connect(f); f.connect(g); g.connect(this.master); g.connect(this.reverb); n.start(t)
-  }
+  private get bus(): K.Bus { return { ctx: this.ctx!, master: this.master, reverb: this.reverb } }
+  /** a single droplet (soundKit.plip: a rounded sine bloop) */
+  plip(intensity = 0.5, pitch = 1) { if (this.enabled && this.ctx) K.plip(this.bus, intensity, pitch) }
+  /** hover: a tiny round tok (was a 3.2 kHz triangle through a 2.4 kHz high-pass) */
+  tick() { if (this.enabled && this.ctx) K.tick(this.bus) }
+  /** section swell: low-passed brown noise and a quiet fifth (was a white-noise bandpass sweep to 2.4 kHz) */
+  swell(up = true) { if (this.enabled && this.ctx) K.swell(this.bus, up) }
   /** a bubbly rising "bloop" for the journey and resurface */
-  bubble(pitch = 1) {
-    if (!this.enabled || !this.ctx) return
-    const ctx = this.ctx, t = ctx.currentTime
-    const o = ctx.createOscillator(), g = ctx.createGain()
-    o.type = 'sine'; o.frequency.setValueAtTime(220 * pitch, t); o.frequency.exponentialRampToValueAtTime(880 * pitch, t + 0.09)
-    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.05, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14)
-    o.connect(g); g.connect(this.master); g.connect(this.reverb); o.start(t); o.stop(t + 0.16)
-  }
-  splash() {
-    if (!this.enabled || !this.ctx) return
-    const ctx = this.ctx, t = ctx.currentTime
-    const n = ctx.createBufferSource(); const b = ctx.createBuffer(1, ctx.sampleRate * 1.2, ctx.sampleRate); const d = b.getChannelData(0)
-    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 4)
-    n.buffer = b
-    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.setValueAtTime(5000, t); f.frequency.exponentialRampToValueAtTime(400, t + 0.9)
-    const g = ctx.createGain(); g.gain.value = 0.12
-    n.connect(f); f.connect(g); g.connect(this.master); g.connect(this.reverb); n.start(t)
-    for (let i = 0; i < 6; i++) setTimeout(() => this.plip(0.6, 0.7 + Math.random() * 0.6), 80 + i * 70)
-  }
+  bubble(pitch = 1) { if (this.enabled && this.ctx) K.bubble(this.bus, pitch) }
+  /** opening a work card: a soft low water plunge and six droplets at the same offsets (was a 5 kHz white-noise burst) */
+  splash() { if (this.enabled && this.ctx) K.splash(this.bus) }
   private aims = [NaN, NaN, NaN, NaN]
   private aim(i: number, p: AudioParam, v: number, t: number, tc: number, eps: number) {
     if (Math.abs(v - this.aims[i]) < eps) return
@@ -164,8 +125,8 @@ class AudioService {
     const dive = this.underK
     // W25 R6.55 (sound audit #8): these ran setTargetAtTime four times per frame forever, piling automation events on the
     // timeline (Safari keeps them: CPU creeps over a long visit). Now a target is re-scheduled only when it actually moves
-    this.aim(0, this.bedFilter.frequency, 700 - dive * 520 + props.scrollStrength * 400, t, 0.2, 2)
-    this.aim(1, this.bedGain.gain, 0.1 * (1 - dive * 0.6) + props.scrollStrength * 0.05, t, 0.3, 0.001)
+    this.aim(0, this.bedFilter.frequency, K.bedCutoff(dive, props.scrollStrength), t, 0.2, 2)
+    this.aim(1, this.bedGain.gain, K.bedLevel(dive, props.scrollStrength), t, 0.3, 0.001)
     this.aim(2, this.droneGain.gain, dive * 0.12, t, 0.5, 0.001)
     this.aim(3, this.droneFilter.frequency, 160 + (1 - dive) * 600, t, 0.4, 2)
     // the cursor paint speaks in droplets
