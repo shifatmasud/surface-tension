@@ -1,7 +1,6 @@
 import { SplitText } from 'gsap/SplitText'
 import { Odometer } from './Odometer'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowUpRight, X } from '@phosphor-icons/react'
 import { overlay } from './overlayState'
 import { PROJECTS } from '../../content/site'
@@ -49,6 +48,7 @@ export function ProjectOverlay() {
   const glass = useRef<HTMLDivElement>(null)
   const bg = useRef<HTMLDivElement>(null)
   const closeBtn = useRef<HTMLButtonElement>(null)
+  const outer = useRef<HTMLDivElement>(null)       // W24: the dialog root (framer-motion removed; WAAPI plays its fades)
   const back = useRef<HTMLElement | null>(null)   // where focus returns on close
   const morphing = useRef(false)
 
@@ -82,7 +82,12 @@ export function ProjectOverlay() {
     if (s === 'hiding') { back.current = returnTarget(cur); inkWipe.play('in').then(() => overlay.advance()) }
     if (s === 'loading') { setId(cur); setShown(true); setTimeout(() => overlay.advance(), 60) }
     if (s === 'showing') inkWipe.play('out').then(() => overlay.advance())
-    if (s === 'closing') { inkWipe.play('in').then(() => { setId(null); inkWipe.play('out'); overlay.advance(); back.current?.focus?.() }) }
+    if (s === 'closing') { inkWipe.play('in').then(() => {
+      // W24: the 0.24 s exit fade framer-motion's AnimatePresence played, as WAAPI; the node leaves when it ends
+      const a = outer.current?.animate([{ opacity: 1 }, { opacity: 0 }], { duration: HOUSE.DUR_FADE * 1000, easing: HOUSE.CSS_INOUT, fill: 'forwards' })
+      inkWipe.play('out'); overlay.advance(); back.current?.focus?.()
+      if (a) { a.onfinish = () => setId(null); a.oncancel = () => setId(null) } else setId(null)
+    }) }
   }), [])
 
   // W18 (Shifat 13:47Z + 13:48Z): the slide image morphs into a COMPACT card. The image flies from its slide to the
@@ -148,6 +153,14 @@ export function ProjectOverlay() {
     texts(pn).forEach((el) => { el.style.opacity = '' })
     arrive(T_OPEN * 0.72)
     fly({ ...from }, imgTo, p.poster, T_OPEN * 0.88, EASE_OPEN).then(land)
+  }, [id])
+
+  // W24 (framer-motion removed, −~45 KB gz of JS): the non-morph open it played — the dialog fades in over 0.42 s
+  // (HOUSE.IN) and the panel settles from 40 px low at 97 % (its spring, stiffness 140 / damping 20, as a curve)
+  useLayoutEffect(() => {
+    if (!id || overlay.morph) return
+    outer.current?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 420, easing: HOUSE.CSS_IN })
+    panel.current?.animate([{ transform: 'translate3d(0,40px,0) scale(0.97)' }, { transform: 'translate3d(0,0,0) scale(1)' }], { duration: 700, easing: 'cubic-bezier(0.25, 1.05, 0.4, 1)' })
   }, [id])
 
   const morphOut = () => {
@@ -225,14 +238,12 @@ export function ProjectOverlay() {
   const p = PROJECTS.find((x) => x.id === id)
   const morph = overlay.morph
   return (
-    <AnimatePresence>
+    <>
       {p && (
-        <motion.div className={'overlay' + (shown ? ' is-shown' : '')} role="dialog" aria-modal="true" aria-label={p.title}
-          initial={morph ? false : { opacity: 0 }} animate={{ opacity: 1, transition: { duration: 0.42, ease: HOUSE.IN } }} exit={morph ? { opacity: 1, transition: { duration: 0 } } : { opacity: 0, transition: { duration: HOUSE.DUR_FADE, ease: HOUSE.INOUT } }}>
+        <div ref={outer} className={'overlay' + (shown ? ' is-shown' : '')} role="dialog" aria-modal="true" aria-label={p.title}>
           <div className="overlay__bg" ref={bg} onClick={() => overlay.close()} />
-          <motion.div className="overlay__panel" ref={panel}
-            initial={morph ? false : { y: 40, scale: 0.97 }} animate={{ y: 0, scale: 1 }} exit={morph ? undefined : { y: 30, scale: 0.98 }}
-            transition={{ type: 'spring', stiffness: 140, damping: 20 }} style={morph ? { visibility: 'hidden' } : undefined}
+          <div className="overlay__panel" ref={panel}
+            style={morph ? { visibility: 'hidden' } : undefined}
             onPointerMove={(e) => { if (e.pointerType !== 'mouse') return; const r = e.currentTarget.getBoundingClientRect(); e.currentTarget.style.setProperty('--tx', (((e.clientY - r.top) / r.height - 0.5) * -4).toFixed(2) + 'deg'); e.currentTarget.style.setProperty('--ty', (((e.clientX - r.left) / r.width - 0.5) * 5).toFixed(2) + 'deg') }}
             onPointerLeave={(e) => { e.currentTarget.style.setProperty('--tx', '0deg'); e.currentTarget.style.setProperty('--ty', '0deg') }}>
             <div className="overlay__glass" ref={glass} aria-hidden="true" />
@@ -246,10 +257,10 @@ export function ProjectOverlay() {
               <p className="overlay__in overlay__line" key={p.id}>{p.blurb}</p>
               <span className="ov-mask overlay__in"><a className="overlay__link ov-rise" href={p.url} target="_blank" rel="noreferrer">Live demo <ArrowUpRight size={16} weight="bold" /></a></span>
             </div>
-          </motion.div>
-        </motion.div>
+          </div>
+        </div>
       )}
       {phase === 'never' && null}
-    </AnimatePresence>
+    </>
   )
 }

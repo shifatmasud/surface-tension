@@ -1,5 +1,4 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { motion } from 'framer-motion'
 import { boot } from '../../app/boot'
 import { mix } from '../../core/math'
 import { buildReels, paintReels, rollPositions } from './maskedRoll'
@@ -20,6 +19,7 @@ export function Intro() {
   const [hidden, setHidden] = useState(false)
   const reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
   const count = useRef<HTMLDivElement>(null)
+  const root = useRef<HTMLDivElement>(null)
   // DIAG: paint the reels before the first paint. Unpainted strips sit at their first glyph, so for the 2–3 frames
   // between mount and the first rAF the counter read "000" (the shell had just shown e.g. "019"): a visible drop to zero
   // PRELOAD (Shifat 18:46Z "first number jumps & changes"): adopt the shell's own reels (index.html), which have been
@@ -75,17 +75,22 @@ export function Intro() {
     raf = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(raf)
   }, [])
+  // W24 (framer-motion removed): the curtain lift as WAAPI — same curve (expo in-out, 1.05 s), same reduced-motion fade
+  useEffect(() => {
+    const el = root.current; if (!gone || !el) return
+    const a = reduced
+      ? el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 350, easing: HOUSE.CSS_INOUT, fill: 'forwards' })
+      : el.animate([{ transform: 'translateY(0%)' }, { transform: 'translateY(-100%)' }], { duration: /[?&]introslow/.test(location.search) ? 12000 : 1050, easing: 'cubic-bezier(0.87, 0, 0.13, 1)', fill: 'forwards' })
+    a.onfinish = () => { setHidden(true); document.documentElement.classList.add('is-lifted') }
+  }, [gone])
   // hidden, never unmounted: removing the node mid-commit could tear down the sibling Canvas
   return (
     // Shifat 08:51Z: the black panel lifts off like a curtain (expo in-out, flat edge) over the already-rendered hero;
     // reduced motion: a quick fade
-    <motion.div className="intro" aria-hidden={gone} initial={reduced ? { opacity: 1 } : { y: '0%' }}
-      animate={reduced ? { opacity: gone ? 0 : 1 } : { y: gone ? '-100%' : '0%' }}
-      transition={reduced ? { duration: 0.35, ease: HOUSE.INOUT } : { duration: /[?&]introslow/.test(location.search) ? 12 : 1.05, ease: [0.87, 0, 0.13, 1] }}
-      onAnimationComplete={() => { if (gone) { setHidden(true); document.documentElement.classList.add('is-lifted') } }}
+    <div ref={root} className="intro" aria-hidden={gone}
       style={{ pointerEvents: gone ? 'none' : undefined, visibility: hidden ? 'hidden' : undefined }}>
       <div className="intro__count" ref={count} aria-label="Loading" />
       {/* W19 (Shifat 21:21Z m:f74347cc "Just remove the text content"): the preloader is the odometer only */}
-    </motion.div>
+    </div>
   )
 }
