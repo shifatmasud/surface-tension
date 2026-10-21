@@ -170,8 +170,12 @@ void main(){
     // W25 R6.50: the inner bell: a faint translucent body seen through the outer bell, its margin lit with the pulse;
     // defocus softens it like the outer bell, so it stays edge ambience
     float fr = 1.0 - abs(dot(normalize(vN), vV));
-    col = vec3(0.86, 0.56, 0.98) * (0.035 + 0.3 * pow(fr, 1.6)) * (1.0 - 0.5 * vCoc);
-    col += lum * glow * 0.55 * smoothstep(mix(0.72, 0.5, vCoc), 1.0, vT) * (1.0 - 0.4 * vCoc);
+    // R6.51 (Tab 10:37Z: the inner rim read hard and flat): a dome falloff (brightest under the apex), the lit margin is a
+    // soft band that peaks inside the rim, and the last stretch to the rim feathers out (wider when defocused)
+    col = vec3(0.86, 0.56, 0.98) * (0.03 + 0.05 * (1.0 - vT) + 0.24 * pow(fr, 1.6)) * (1.0 - 0.5 * vCoc);
+    float band = smoothstep(mix(0.5, 0.35, vCoc), 0.82, vT) * (1.0 - smoothstep(0.82, 1.0, vT));
+    col += lum * glow * 0.5 * band * (1.0 - 0.4 * vCoc);
+    col *= 1.0 - smoothstep(mix(0.8, 0.62, vCoc), 1.0, vT);
     float fe = max(fwidth(fr), 1e-3);
     col *= mix(0.3, 1.0, 1.0 - smoothstep(1.0 - 3.0 * fe, 1.0, fr));
   } else {
