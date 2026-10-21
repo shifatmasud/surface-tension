@@ -8,7 +8,7 @@ import * as THREE from 'three'
  */
 export function brilliantGeometry(r = 1) {
   const N = 8
-  const tableR = 0.56 * r, crownH = 0.16 * r, girdleH = 0.025 * r, pavH = 0.43 * r * 2 * 0.5 * 2 * 0.5
+  const tableR = 0.56 * r, crownH = 0.16 * r, girdleH = 0 * r /* W23: knife-edge girdle; the 2.5 % band was 1–4 px at phone density and drew as a dark dotted rim */, pavH = 0.43 * r * 2 * 0.5 * 2 * 0.5
   const pav = 0.86 * r // pavilion depth (≈43 % of diameter)
   const ring = (n: number, rad: number, y: number, off = 0) =>
     Array.from({ length: n }, (_, i) => { const a = ((i + off) / n) * Math.PI * 2; return new THREE.Vector3(Math.cos(a) * rad, y, Math.sin(a) * rad) })
@@ -54,5 +54,46 @@ export function brilliantGeometry(r = 1) {
   }
   geo.computeVertexNormals()
   geo.computeBoundingSphere()
+  addSilhouetteAttrs(geo)
   return geo
+}
+
+/**
+ * W23 (390 stepped outline): per-triangle data for an analytic silhouette edge in the stone's shader. The stone is convex,
+ * so an edge is on the silhouette exactly when the face across it turns away from the eye. Each triangle carries its
+ * barycentric coordinates (aSilB: the distance to the edge opposite each vertex, which fwidth turns into pixels) and the
+ * normals of the three faces across its edges (aSilN0..2, for the edge opposite vertex 0, 1, 2). Coplanar neighbours share
+ * a normal, so the inner edges of a facet never count.
+ */
+function addSilhouetteAttrs(geo: THREE.BufferGeometry) {
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute
+  const n = pos.count, faces = n / 3
+  const key = (i: number) => `${pos.getX(i).toFixed(4)},${pos.getY(i).toFixed(4)},${pos.getZ(i).toFixed(4)}`
+  const fn: THREE.Vector3[] = []
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3()
+  for (let f = 0; f < faces; f++) {
+    a.fromBufferAttribute(pos, f * 3); b.fromBufferAttribute(pos, f * 3 + 1); c.fromBufferAttribute(pos, f * 3 + 2)
+    const nn = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a))
+    fn.push(nn.lengthSq() < 1e-12 ? new THREE.Vector3(NaN, NaN, NaN) : nn.normalize())   // a zero-area triangle (the knife-edge girdle) has no side
+  }
+  const edges = new Map<string, number[]>()
+  const ek = (i: number, j: number) => { const p = key(i), q = key(j); return p < q ? p + '|' + q : q + '|' + p }
+  for (let f = 0; f < faces; f++) for (let k = 0; k < 3; k++) {
+    const e = ek(f * 3 + (k + 1) % 3, f * 3 + (k + 2) % 3)
+    const l = edges.get(e); if (l) l.push(f); else edges.set(e, [f])
+  }
+  const bary = new Float32Array(n * 3), nb = [new Float32Array(n * 3), new Float32Array(n * 3), new Float32Array(n * 3)]
+  for (let f = 0; f < faces; f++) {
+    for (let k = 0; k < 3; k++) {
+      bary[(f * 3 + k) * 3 + k] = 1
+      const l = edges.get(ek(f * 3 + (k + 1) % 3, f * 3 + (k + 2) % 3)) || []
+      const g = l.find((x) => x !== f && !Number.isNaN(fn[x].x))
+      const m = g === undefined || Number.isNaN(fn[f].x) ? new THREE.Vector3(0, 0, 0) : fn[g]   // no real neighbour: never fades (dot 0 is not < 0)
+      for (let v = 0; v < 3; v++) { nb[k][(f * 3 + v) * 3] = m.x; nb[k][(f * 3 + v) * 3 + 1] = m.y; nb[k][(f * 3 + v) * 3 + 2] = m.z }
+    }
+  }
+  geo.setAttribute('aSilB', new THREE.BufferAttribute(bary, 3))
+  geo.setAttribute('aSilN0', new THREE.BufferAttribute(nb[0], 3))
+  geo.setAttribute('aSilN1', new THREE.BufferAttribute(nb[1], 3))
+  geo.setAttribute('aSilN2', new THREE.BufferAttribute(nb[2], 3))
 }

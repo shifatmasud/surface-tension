@@ -14,6 +14,7 @@ export type StageDef = { name: string; pose: () => Pose; look: Look; weight: num
 
 const _pos = new THREE.Vector3(), _tgt = new THREE.Vector3() // PERF HOOK
 class Visuals {
+  private upLit = false
   stages = new Map<string, StageDef>()
   private ownerKey = -1
   private tones: Record<number, string> = {}
@@ -110,7 +111,12 @@ class Visuals {
       else if (v instanceof THREE.Color) (L as any)[k].lerp(v, snap ? 1 : 1 - Math.exp(-lam * dt))
     }
     // UI tone follows the field every frame (black UI on light water, white UI in the deep / in space)
-    const dark = props.stage === 'dive' ? dive.under : L.dive > 0.5
+    // W23 (scorer-r618/r621 #4): under water, while the lens looks up at the lit surface (Shifat's +40° godray look-up) the
+    // header row sits on bright cyan, where the white UI vanished; the UI goes to ink there. Hysteresis 14°/20° so it
+    // never flickers; the slot is empty in this stretch (TEXT GAP rule), so only the header follows it.
+    const hz = Math.hypot(out.target.x - out.pos.x, out.target.z - out.pos.z), up = (out.target.y - out.pos.y) / Math.max(1e-3, hz)
+    this.upLit = this.upLit ? up > Math.tan((14 * Math.PI) / 180) : up > Math.tan((20 * Math.PI) / 180)
+    const dark = props.stage === 'dive' ? dive.under && !this.upLit : L.dive > 0.5
     let want = dark ? 'dark' : 'light'
     // during a boundary the header still sits over the outgoing block until the card reaches it
     this.tones[clip.owner] = want

@@ -41,12 +41,20 @@ export const sink = { depth: 0 }
  *     (The blown white facet itself was the sheen's warm key lighting a whole flat facet: fixed in gemSheen.ts.)
  * (The stepped 390 outline is the anti-aliasing's: post/PostChain.ts now runs SMAA at its HIGH preset.)
  */
+const gemSil = { value: 1 }    // W23: silhouette coverage on (QA: window.__gemSil = 0 turns it off)
 const gemFill = { value: 0 }   // 0 in the hero (its dark/bright sparkle is kept as is), full in the dive (set per frame)
 function gemPatch(fresPow: string, lod: string) {
-  return (sh: { fragmentShader: string; uniforms: Record<string, { value: unknown }> }) => {
+  return (sh: { vertexShader: string; fragmentShader: string; uniforms: Record<string, { value: unknown }> }) => {
     sh.uniforms.w22Fill = gemFill
+    sh.uniforms.w23Sil = gemSil
+    // W23 (390 stepped outline): the stone's silhouette edges get analytic coverage (diamond.ts addSilhouetteAttrs): on a
+    // triangle whose neighbour across an edge faces away, alpha ramps from 0 at that edge to 1 over ~1.75 scene pixels,
+    // so the outline stops stepping when the phone's scene (≈1.3–1.5× density) is scaled up. No MSAA (SMAA-only rule).
+    sh.vertexShader = sh.vertexShader
+      .replace('varying vec3 vNormal;', 'varying vec3 vNormal;\n  attribute vec3 aSilB; attribute vec3 aSilN0; attribute vec3 aSilN1; attribute vec3 aSilN2;\n  varying vec3 vSilB; varying vec3 vSilN0; varying vec3 vSilN1; varying vec3 vSilN2;')
+      .replace('gl_Position = projectionMatrix * viewMatrix * modelMatrix * transformedPosition;', 'vSilB = aSilB; mat3 w23M = mat3(modelMatrix); vSilN0 = w23M * aSilN0; vSilN1 = w23M * aSilN1; vSilN2 = w23M * aSilN2;\n    gl_Position = projectionMatrix * viewMatrix * modelMatrix * transformedPosition;')
     sh.fragmentShader = sh.fragmentShader
-      .replace('uniform float bounces;', 'uniform float bounces;\n  uniform float w22Fill;')
+      .replace('uniform float bounces;', 'uniform float bounces;\n  uniform float w22Fill;\n  uniform float w23Sil;\n  varying vec3 vSilB; varying vec3 vSilN0; varying vec3 vSilN1; varying vec3 vSilN2;')
       .replace('pow( 1.0 + dot( viewDirection, worldNormal), 10.0 )', `pow( clamp(1.0 + dot( viewDirection, worldNormal), 0.0, 1.0), ${fresPow} )`)
       .replace('gl_FragColor = vec4(mix(diffuseColor.rgb, vec3(1.0), nFresnel), diffuseColor.a);', `
     #ifdef ENVMAP_TYPE_CUBEM
@@ -63,7 +71,16 @@ function gemPatch(fresPow: string, lod: string) {
     #endif
       float w22M = max(max(diffuseColor.r, diffuseColor.g), diffuseColor.b);
       if (w22M > 2.1) diffuseColor.rgb *= (2.1 + 0.7 * (1.0 - exp(-(w22M - 2.1) / 0.7))) / w22M;
-      gl_FragColor = vec4(mix(diffuseColor.rgb, vec3(1.0), nFresnel), diffuseColor.a);`)
+      gl_FragColor = vec4(mix(diffuseColor.rgb, vec3(1.0), nFresnel), diffuseColor.a);
+      vec3 w23V = cameraPosition - vWorldPosition;
+      vec3 w23D = vSilB / max(fwidth(vSilB), vec3(1e-6));
+      float w23C = 1e3;
+      if (dot(vSilN0, w23V) < 0.0) w23C = min(w23C, w23D.x);
+      if (dot(vSilN1, w23V) < 0.0) w23C = min(w23C, w23D.y);
+      if (dot(vSilN2, w23V) < 0.0) w23C = min(w23C, w23D.z);
+      float w23A = clamp(w23C / 1.75, 0.0, 1.0);
+      if (w23Sil > 1.5) gl_FragColor = vec4(1.0 - w23A, w23A, 0.0, 1.0);   // QA: __gemSil = 2 shows the coverage (red = edge)
+      else gl_FragColor.a *= mix(1.0, w23A, w23Sil);`)
   }
 }
 const gemPatchHi = gemPatch('10.0', '4.0')
@@ -348,6 +365,12 @@ export function HeroStage() {
     // must draw after the dive backdrop there as well (the lake is cut at the line, so it never hides the pavilion)
     const crossing = dive.split > -0.5
     m.renderOrder = camUnder || crossing ? 11 : 0; sheenMesh.current.renderOrder = camUnder || crossing ? 15 : 2
+    // W23: the silhouette coverage needs blending, so the stone draws in the transparent list in the lake (after the
+    // water, sky and studio it sits on); under water and while the lens crosses it keeps its opaque place (renderOrder 11)
+    { const W = window as any; gemSil.value = W.__gemSil ?? 1; const gm = m.material as THREE.Material; const tr = !(camUnder || crossing) && gemSil.value > 0; if (gm.transparent !== tr) gm.transparent = tr
+      // in the transparent list the stone draws after everything else there (the lake's own transparent layers), so its edge
+      // blends over the finished background; the sheen shell stays on top of it
+      if (tr) { m.renderOrder = 20; sheenMesh.current.renderOrder = 21 } }
     // env capture: first frames, then every 24 frames on capable tiers (every 8 while the stone is under)
     // W19 (Shifat 19:50Z "diamond comes black"): the first 3 frames now run behind the preloader's warm gate, where the
     // studio/sky can still be unready, and a low tier never re-captured, so the stone kept a black env. Re-capture through
