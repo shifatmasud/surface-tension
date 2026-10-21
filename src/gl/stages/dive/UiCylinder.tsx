@@ -7,11 +7,13 @@ import { nb, useStageFrame } from '../../systems/neighbour' // NEIGHBOUR HOOK
 import { input } from '../../../services/input'
 import { SYSUI_LAYER } from '../hero/HeroStage'
 import { dive, SYS_C, TAB_F } from './diveState'
+import { sys, type ControlId } from '../systems/state' // W20: the Shade DS keyboard proxies (dom/sections/Systems.tsx)
 import { AtomField } from './Atom'
 import { TabletWindow } from '../journey/tabletWindow'; import { tabletPose } from '../../world/handoff' // TABLET HOOK: the live 3D window (journey/tabletWindow.ts) + the tablet's pose (world/handoff.ts)
 /** QA: ?atom holds the sequence at the atom, ?drum at the drum; window.__morph (0..1) pins it */
 const KEEP_EYE = new THREE.Vector3(0, 0, -1e3), KEEP_F = new THREE.Vector3(0, 0, 1), KEEP_V = new THREE.Vector3() // POLISH-2: the main lens, for the ring's keep-out
 const STONE_D = new THREE.Vector3() // W20: the eye→stone direction (phones' stone keep-out)
+const KB_V = new THREE.Vector3(), KB_CORNERS: [number, number][] = [[-1.05, -0.42], [1.05, -0.42], [1.05, 0.42], [-1.05, 0.42]] // W20: a part's face, for the keyboard proxy box
 const ss = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
 const QS = typeof location !== 'undefined' ? location.search : ''
 // QA: ?drumlift=<m> tries another phone drum lift
@@ -374,6 +376,7 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
   }, [ia])
   const tbDir = useMemo(() => new THREE.Vector3(), []), tbLook = useMemo(() => new THREE.Vector3(), []), tbW = useMemo(() => new THREE.Vector3(), [])
   const st = useMemo(() => built.items.map(() => ({ h: 0, press: 0, turn: 0, turnT: 0 })), [built])
+  const kbState = useRef({ off: 0, map: null as null | Record<string, number>, focused: false, on: null as null | boolean, presses: 0, token: 0, level: 0 }) // W20 keyboard proxies
   useEffect(() => { built.items.forEach((it, i) => it.g.traverse((o) => { o.userData.part = i })) }, [built])
   const cursorHover = (on: boolean) => {
     document.querySelector('.cursor')?.classList.toggle('is-hover', on)
@@ -420,7 +423,7 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
       ;(tb.userData.tw as TabletWindow | undefined)?.update(state.camera, dive.push) // TABLET HOOK: render the 3D picture through the glass from this pass's camera
     }
     const t = props.time, dt = Math.min(props.dt, 0.05)
-    s.rotation.y = t * 0.035 + dive.sys * 1.9
+    s.rotation.y = t * 0.035 + dive.sys * 1.9 + kbState.current.off // W20: + the keyboard turn (a focused part comes to the front)
     // W20 (root 22:43Z + 22:55Z: on phones a dark panel sat behind the 'DS' of the title, then just on the 'SYSTEMS'
     // eyebrow; text over busy 3D, r22): phones lift the DRUM (the spin group) so its bottom row keeps ~24 px of clear air
     // above the eyebrow as it turns. Only the drum moves: the particle atom stays centred on the stone (its morph targets
@@ -497,12 +500,14 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
       // parts already clear barely move), so nothing tucks in front of or behind the diamond. Fades out as the push
       // begins (the drum dissolves and the stone drifts aside there).
       let kx = 0, ky = 0, kz = 0
-      const kw = portrait() * (1 - ss(0.2, 0.5, pw))
+      // (W20 00:0xZ: wide screens too — the 1440 'Aa' panel sat over the stone. Parts are placed from the root, which wide
+      // screens lift by 1 m, so the part's world point uses r.position)
+      const kw = 1 - ss(0.2, 0.5, pw)
       if (kw > 0.001) {
         const ry = s.rotation.y, cr = Math.cos(ry), sr = Math.sin(ry)
         const lx0 = Math.sin(it.a) * rr + sideX, lz0 = Math.cos(it.a) * rr + sideZ, ly0 = iy + dodge + s.position.y
         STONE_D.set(SYS_C.x - KEEP_EYE.x, SYS_C.y - KEEP_EYE.y, SYS_C.z - KEEP_EYE.z).normalize()
-        KEEP_V.set(SYS_C.x + lx0 * cr + lz0 * sr - KEEP_EYE.x, SYS_C.y + ly0 - KEEP_EYE.y, SYS_C.z - lx0 * sr + lz0 * cr - KEEP_EYE.z)
+        KEEP_V.set(r.position.x + lx0 * cr + lz0 * sr - KEEP_EYE.x, r.position.y + ly0 - KEEP_EYE.y, r.position.z - lx0 * sr + lz0 * cr - KEEP_EYE.z)
         KEEP_V.addScaledVector(STONE_D, -KEEP_V.dot(STONE_D)) // the part's offset from the eye→stone line
         const lat = KEEP_V.length(), rk = 1.35, e = 0.25
         if (lat > 1e-4 && lat < rk + 1.0) {
@@ -521,6 +526,40 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
         A.v += (A.vT - A.v) * (1 - Math.exp(-9 * dt))
         A.fill.scale.x = A.L * A.v; A.fill.position.x = -A.L / 2 + (A.L / 2) * A.v; A.thumb.position.x = -A.L / 2 + A.L * A.v
       } else if (A.kind === 'segmented') { const x = A.step * (A.i - 1); A.pill.position.x += (x - A.pill.position.x) * (1 - Math.exp(-12 * dt)) }
+    }
+    // W20 (root 00:0xZ, keyboard): the Shade DS controls are real DOM buttons (Systems.tsx). They are no tab stops until
+    // the drum has formed (the layer is inert), then each one sits over its drum part (a ≥44 px box, so the focus ring
+    // shows where the part is) and the focused part lifts like a hover. Enter / Space plays the part, as a tap would.
+    if (!nb.active) {
+      const layer = sys.layer, formed = pf > 0.9 && fv > 0.6 && props.stage === 'dive'
+      if (layer) {
+        if ((layer as any).inert !== !formed) (layer as any).inert = !formed
+        const kb = kbState.current
+        if (!kb.map) { kb.map = {}; built.items.forEach((it, i) => { const k = (it.g.userData.act as any).kind as string; if (!(k in kb.map!)) kb.map![k] = i }) }
+        const M = kb.map, idx: Record<ControlId, number | undefined> = { toggle: M.toggle, button: M.button, slider: M.slider, chip0: M.segmented, chip1: M.segmented, chip2: M.segmented }
+        if (formed) {
+          const top = layer.getBoundingClientRect().top, W2 = props.width / 2, H2 = props.height / 2
+          let focusPart = -1
+          for (const id of Object.keys(idx) as ControlId[]) {
+            const el = sys.els[id], i = idx[id]; if (!el || i === undefined) continue
+            const g = built.items[i].g; g.updateMatrixWorld()
+            let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9
+            for (const [cx, cy] of KB_CORNERS) { KB_V.set(cx, cy, 0).applyMatrix4(g.matrixWorld).project(state.camera); const px = (KB_V.x + 1) * W2, py = (1 - KB_V.y) * H2; x0 = Math.min(x0, px); x1 = Math.max(x1, px); y0 = Math.min(y0, py); y1 = Math.max(y1, py) }
+            const ww = Math.max(44, x1 - x0), hh = Math.max(44, y1 - y0), cx = (x0 + x1) / 2, cy = (y0 + y1) / 2
+            el.style.transform = `translate3d(${(cx - ww / 2).toFixed(1)}px, ${(cy - hh / 2 - top).toFixed(1)}px, 0)`; el.style.width = `${ww.toFixed(1)}px`; el.style.height = `${hh.toFixed(1)}px`
+            if (document.activeElement && (el === document.activeElement || el.contains(document.activeElement))) focusPart = i
+          }
+          if (focusPart >= 0) { ia.hover = focusPart; kb.focused = true } else if (kb.focused) { ia.hover = -1; kb.focused = false }
+          // a focused part on the far side of the drum turns to the front (eased; the turn stays where it lands, no snap back)
+          if (focusPart >= 0) { let d = Math.PI - built.items[focusPart].a - s.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); kb.off += d * (1 - Math.exp(-4 * dt)) }
+        }
+        // keyboard activation: the DOM owns the values; play the matching part when one changes
+        if (kb.on === null) { kb.on = sys.on; kb.presses = sys.presses; kb.token = sys.token; kb.level = sys.level }
+        if (sys.on !== kb.on && M.toggle !== undefined) { kb.on = sys.on; play(M.toggle) }
+        if (sys.presses !== kb.presses && M.button !== undefined) { kb.presses = sys.presses; play(M.button) }
+        if (sys.token !== kb.token && M.segmented !== undefined) { kb.token = sys.token; const A = built.items[M.segmented].g.userData.act as any; A.i = (sys.token + 2) % 3; play(M.segmented) }
+        if (sys.level !== kb.level && M.slider !== undefined) { kb.level = sys.level; (built.items[M.slider].g.userData.act as any).vT = Math.min(0.95, Math.max(0.05, sys.level)) }
+      }
     }
     if (atom.points.visible) {
       // the morph targets follow the drum as it turns (part matrices in the atom's space = the root's)
