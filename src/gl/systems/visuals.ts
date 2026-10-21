@@ -19,6 +19,8 @@ class Visuals {
   private ownerKey = -1
   private tones: Record<number, string> = {}
   private hdrTones: Record<number, string> = {}   // W25 R6.46: header ink per block (fixed waterline rule)
+  private hdrJump = 0          // W25 R6.49: frames left in a jump window (ink read off the landing pose)
+  private hdrCutFrames = 0     // W25 R6.49: frames the no-fade cut stays on
   private acc?: Look; private keys?: (keyof Look)[] // PERF HOOK
   register(name: string, pose: () => Pose, look: Partial<Record<keyof Look, any>>) {
     const s = { name, pose, look: makeLook(look), weight: 0 }
@@ -129,11 +131,22 @@ class Visuals {
     // footer; back above the water (scrolling up, or the loop returning to the hero) they are ink again. One switch at the
     // waterline, no measurement; the colour change is the header's existing .5 s cross-fade, and during a block boundary the
     // header keeps the outgoing block's ink until the card reaches it (as data-bg does above). No changes without his go.
-    const above = props.stage === 'hero' || props.stage === 'statement' || (props.stage === 'dive' && !dive.under)
+    // W25 R6.49 (scorer-r647 #1/#2): after a JUMP (more than half a viewport in one frame, the same jump test the trail uses: nav, deep link, the loop wrap) the
+    // camera springs to its new pose over several frames, and a slow device saw the old ink for seconds. For a jump the rule is
+    // read off the pose the camera is landing on, and the ink is cut, not faded; scrolled crossings keep the lens itself and
+    // the .5 s fade. The jump window ends when the lens agrees with the pose (or after 90 frames).
+    const docEl = document.documentElement
+    if (Math.abs(props.scrollDelta) > props.height * 0.5) this.hdrJump = 90
+    const lensUnder = this.hdrJump > 0 ? out.pos.y < 0 : dive.under
+    if (this.hdrJump > 0) { this.hdrJump--; if (props.stage === 'dive' && dive.under === out.pos.y < 0) this.hdrJump = 0 }
+    const above = props.stage === 'hero' || props.stage === 'statement' || (props.stage === 'dive' && !lensUnder)
     let hdr = above ? 'light' : 'dark'
     this.hdrTones[clip.owner] = hdr
     if (clip.boundary) { const under = clip.yTop > 64 ? clip.lower - 1 : clip.lower; if (this.hdrTones[under]) hdr = this.hdrTones[under] }
-    if (document.documentElement.dataset.hdr !== hdr) document.documentElement.dataset.hdr = hdr
+    if (docEl.dataset.hdr !== hdr) {
+      if (this.hdrJump > 0 || Math.abs(props.scrollDelta) > props.height * 0.5) { docEl.dataset.hdrcut = ''; this.hdrCutFrames = 3 }
+      docEl.dataset.hdr = hdr
+    } else if (this.hdrCutFrames > 0 && --this.hdrCutFrames === 0) delete docEl.dataset.hdrcut
     return out
   }
 }

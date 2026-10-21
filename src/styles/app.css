@@ -40,6 +40,9 @@ html[data-stk-drag], html[data-stk-drag] * { user-select: none; -webkit-user-sel
 html[data-hdr='light'] .header, html[data-hdr='light'] .header .pill { color: var(--c-ink); }
 html[data-hdr='dark'] .header, html[data-hdr='dark'] .header .pill { color: var(--c-white); }
 .header { transition: color var(--dur-ui) var(--ease); }
+/* W25 R6.49: a jump cuts the header ink (no fade); scrolled crossings keep the fade */
+html[data-hdrcut] .header { transition: none; }
+html[data-hdrcut] .header .pill { transition: background .5s var(--ease), transform .5s var(--ease); }
 .wordmark { font-weight: 400; font-size: var(--fs-body); letter-spacing: -0.04em; text-decoration: none; display: inline-flex; align-items: baseline; gap: 1px; }
 .wordmark__mark { display: inline-block; width: .82em; height: .82em; margin-right: .4em; align-self: center; }
 .wordmark__mark svg { display: block; }
