@@ -43,10 +43,12 @@ export const sink = { depth: 0 }
  * (The stepped 390 outline is the anti-aliasing's: post/PostChain.ts now runs SMAA at its HIGH preset.)
  */
 const gemSil = { value: 1 }    // W23: silhouette coverage on (QA: window.__gemSil = 0 turns it off)
+const gemLift = { value: 0.35 }   // W23: the facet floor (QA: window.__gemLift)
 const gemFill = { value: 0.7 }   // W23: 0.7 in the hero (the darkest navy chips lift toward the env blue), 0.85 in the dive (set per frame)
 function gemPatch(fresPow: string, lod: string) {
   return (sh: { vertexShader: string; fragmentShader: string; uniforms: Record<string, { value: unknown }> }) => {
     sh.uniforms.w22Fill = gemFill
+    sh.uniforms.w23Lift = gemLift
     sh.uniforms.w23Sil = gemSil
     // W23 (390 stepped outline): the stone's silhouette edges get analytic coverage (diamond.ts addSilhouetteAttrs): on a
     // triangle whose neighbour across an edge faces away, alpha ramps from 0 at that edge to 1 over ~1.75 scene pixels,
@@ -55,7 +57,7 @@ function gemPatch(fresPow: string, lod: string) {
       .replace('varying vec3 vNormal;', 'varying vec3 vNormal;\n  attribute vec3 aSilB; attribute vec3 aSilN0; attribute vec3 aSilN1; attribute vec3 aSilN2;\n  varying vec3 vSilB; varying vec3 vSilN0; varying vec3 vSilN1; varying vec3 vSilN2;')
       .replace('gl_Position = projectionMatrix * viewMatrix * modelMatrix * transformedPosition;', 'vSilB = aSilB; mat3 w23M = mat3(modelMatrix); vSilN0 = w23M * aSilN0; vSilN1 = w23M * aSilN1; vSilN2 = w23M * aSilN2;\n    gl_Position = projectionMatrix * viewMatrix * modelMatrix * transformedPosition;')
     sh.fragmentShader = sh.fragmentShader
-      .replace('uniform float bounces;', 'uniform float bounces;\n  uniform float w22Fill;\n  uniform float w23Sil;\n  varying vec3 vSilB; varying vec3 vSilN0; varying vec3 vSilN1; varying vec3 vSilN2;')
+      .replace('uniform float bounces;', 'uniform float bounces;\n  uniform float w22Fill;\n  uniform float w23Sil;\n  uniform float w23Lift;\n  varying vec3 vSilB; varying vec3 vSilN0; varying vec3 vSilN1; varying vec3 vSilN2;')
       .replace('pow( 1.0 + dot( viewDirection, worldNormal), 10.0 )', `pow( clamp(1.0 + dot( viewDirection, worldNormal), 0.0, 1.0), ${fresPow} )`)
       .replace('gl_FragColor = vec4(mix(diffuseColor.rgb, vec3(1.0), nFresnel), diffuseColor.a);', `
     #ifdef ENVMAP_TYPE_CUBEM
@@ -69,6 +71,10 @@ function gemPatch(fresPow: string, lod: string) {
       float w22E = dot(w22Soft, vec3(0.2126, 0.7152, 0.0722));
       float w22K = w22Fill * (1.0 - smoothstep(0.12 * w22E, 0.55 * w22E, w22L));
       diffuseColor.rgb = mix(diffuseColor.rgb, w22Soft * 0.8, w22K);
+      // W23 (scorer-r6261/r630 #1: navy facets in the 1440 dive): a facet-level floor in the stone's own blue, so an exit ray
+      // into a dark patch of the env (where the soft env is dark too and the fill above has nothing to lift toward) reads
+      // as deep blue glass rather than a navy hole
+      diffuseColor.rgb = max(diffuseColor.rgb, vec3(0.035, 0.075, 0.45) * (w23Lift / 0.35));
     #endif
       float w22M = max(max(diffuseColor.r, diffuseColor.g), diffuseColor.b);
       if (w22M > 2.1) diffuseColor.rgb *= (2.1 + 0.7 * (1.0 - exp(-(w22M - 2.1) / 0.7))) / w22M;
@@ -252,6 +258,7 @@ export function HeroStage() {
     const jumped = Math.abs(props.scrollDelta) > props.height * 0.5
     if (!vis) return
     // W22: the stone's dark-chip fill: off in the hero, full once the dive guides the stone (QA: window.__gemFill)
+    gemLift.value = (window as any).__gemLift ?? 0.35
     gemFill.value = (window as any).__gemFill ?? (0.7 + 0.15 * Math.min(1, Math.max(0, dive.gemMix)))   // W23 (scorer-r621 #1, root 02:55Z): the hero lifts its darkest chips too (0.7; 0.85 in the dive)
     { const W = window as any; if (W.__gemFres !== undefined) (gemMesh.current.material as any).fresnel = W.__gemFres; if (W.__sheenTp !== undefined) sheen.uniforms.u_tp.value = W.__sheenTp; if (W.__sheenWarm !== undefined) sheen.uniforms.u_warm.value = W.__sheenWarm; if (W.__sheenStr !== undefined) sheen.uniforms.u_strength.value = W.__sheenStr; if (W.__gemHide !== undefined) sheenMesh.current.visible = !W.__gemHide }   // QA hooks (W22 stone A/B)
     waterMesh.current.visible = lakeOn; dome.visible = lakeOn

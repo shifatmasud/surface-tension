@@ -394,7 +394,9 @@ export function buildCta(portrait: boolean) {
     // STICKERS LANE (REVIEW-visual #8): the crewmate no longer stands on the second line. Its x is the stage's (centre),
     // and the word gap there is far narrower than the crewmate, so it floats in the clear band UNDER the headline: the
     // type is lifted (typeY), the crewmate dropped and trimmed a touch so it clears the descenders and the CTA row
-    lay.crewScale = (hAtCrew * (portrait ? 0.24 : 0.25)) / crewHeight
+    // W23 (scorer-r630 #3: at 1440 the bobbing crewmate's feet came within ~10 px of the pill): 8 % smaller on wide screens,
+    // centred where it was, so it clears the descenders above and the pill below by ~30 px through its whole bob
+    lay.crewScale = (hAtCrew * (portrait ? 0.24 : 0.23)) / crewHeight
     lay.crewY = lay.C.y - hw * (portrait ? 0.09 : 0.15) * (D - (lay.crewZ - WALL_Z)) / D
     typeY = lay.C.y + lay.em * 0.42 + hw * (portrait ? 0.1 : 0.125)
     const P = portrait ? PLACE_TALL : PLACE_WIDE

@@ -28,6 +28,7 @@ export class ScreenPaintDistortionEffect extends Effect {
         vec4 data = texture2D(u_screenPaintTexture, uv);
         float weight = (data.z + data.w) * 0.5;
         vec2 vel = (0.5 - data.xy - 0.001) * 2.0 * weight;           // signed, flipped, fades with paint
+        vel *= mix(1.0, weight, u_dark);                              // W23 R6.32: on dark walls the smear dies with the paint's square (≈2x faster tail)
         // W23: no smear on or next to a sticker (it dragged the die-cut white margin out across the wall as a wedge)
         float stkM = 1.0;
         if (u_stkOn > 0.5) {
@@ -48,7 +49,7 @@ export class ScreenPaintDistortionEffect extends Effect {
         if (u_dark > 0.001) {
           vec3 orig = min(spd_encode(texture2D(inputBuffer, uv).rgb), 1.0);
           vec3 hi3 = max(orig, acc.rgb);   // brightest channel: the red crewmate is dim in luminance but far off the grey wall
-          keep = u_dark * smoothstep(0.2, 0.34, max(max(hi3.r, hi3.g), hi3.b));
+          keep = u_dark * smoothstep(0.15, 0.27, max(max(hi3.r, hi3.g), hi3.b));   // R6.32: a lower knee, so the crewmate's dark rim is kept too (it smeared into a pale halo)
           acc.rgb = mix(acc.rgb, orig, keep);
         }
         if (u_debug > 0.5) acc = vec4(vec3(0.5 + 0.35 * weight), 1.0);
@@ -59,7 +60,7 @@ export class ScreenPaintDistortionEffect extends Effect {
         // only ever lightens, as a soft glassy tint at a third of the strength; its dark half (which clipped to black
         // contours on the wall) is dropped. Light sections are unchanged.
         // W23 (scorer-r6261 #5): on dark it is also colourless now (the chromatic phase read as an oily fringe), and off anything bright
-        vec3 glass = vec3(dot(max(fringe, 0.0), vec3(0.3333))) * 0.35;
+        vec3 glass = vec3(dot(max(fringe, 0.0), vec3(0.3333))) * 0.35 * smoothstep(0.05, 0.35, weight);   // R6.32: the glass fades out with the paint (its thin contours lingered)
         acc.rgb += mix(fringe, glass * (1.0 - keep), u_dark) * stkM;
         if (u_iridescence > 0.0) {
           // accumulated thin film on the wake edges: the long-tail weight is the film thickness,
