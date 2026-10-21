@@ -159,18 +159,22 @@ void main(){
     float fr = 1.0 - abs(dot(normalize(vN), vV));
     vec3 film = 0.5 + 0.5 * cos(6.2832 * (fr * 1.4 + vHue + vec3(0.0, 0.33, 0.67)));     // thin-film iridescence
     col = mix(vec3(0.74, 0.44, 0.98), film, 0.1) * (0.03 + 0.95 * pow(fr, mix(2.2, 1.1, vCoc)));   // W19: defocus softens the rim
-    col += vec3(0.984, 0.812, 0.91) * smoothstep(mix(0.84, 0.55, vCoc), 0.99, vT) * 0.44 * (1.0 - 0.5 * vCoc);                        // the bright bell margin
+    // W27 R6.58 (scorer-r655 #3): the lit margin is a soft band that peaks INSIDE the rim (as the R6.51 inner bell), so
+    // nothing bright sits on the last pixel of the hem
+    float band = smoothstep(mix(0.6, 0.4, vCoc), 0.86, vT) * (1.0 - smoothstep(0.86, 1.0, vT));
+    col += vec3(0.984, 0.812, 0.91) * band * 0.44 * (1.0 - 0.5 * vCoc);                        // the bright bell margin
     // W24 polish: the face fill was nearly flat (bells read as opaque lilac discs); a thinner face and a stronger
     // fresnel/margin make a translucent glass bell that glows at its edge
     col += vec3(0.78, 0.46, 0.98) * 0.07 * (1.0 - vT) * (0.4 + 0.6 * fr);                 // a faint inner glow
-    col += lum * glow * (1.45 * smoothstep(mix(0.8, 0.5, vCoc), 1.0, vT)                    // the glowing margin ring (hot spot)
+    col += lum * glow * (1.45 * band                                                         // the glowing margin ring (hot spot), inside the hem
                        + 0.2 * (1.0 - smoothstep(0.0, 0.4, vT)));                           // the lit core under the apex
     // W24: a soft silhouette — the brightest fresnel sat on the last pixel and drew a hard, stepped outline
     float fe = max(fwidth(fr), 1e-3);
     col *= mix(0.3, 1.0, 1.0 - smoothstep(1.0 - 3.0 * fe, 1.0, fr));
     // W25 R6.54 (scorer-r652 #3: the lower lip read as a hard flat ellipse): the glowing margin stays, but the last stretch to
     // the lip feathers out (wider when defocused), as the R6.51 inner bell does
-    col *= 1.0 - 0.8 * smoothstep(mix(0.93, 0.8, vCoc), 1.0, vT);
+    // W27 R6.58: the margin's luminance now goes to ZERO over the last ~15 % of the bell (wider when defocused)
+    col *= 1.0 - smoothstep(mix(0.86, 0.68, vCoc), 1.0, vT);
   } else if (vKind > 2.5){
     // W25 R6.50: the inner bell: a faint translucent body seen through the outer bell, its margin lit with the pulse;
     // defocus softens it like the outer bell, so it stays edge ambience
@@ -339,7 +343,11 @@ function jellyGeometry(segW: number, segH: number, filSeg: number) {
     const th = (iy / segH) * (Math.PI / 2) * 1.12
     for (let ix = 0; ix <= segW; ix++) {
       const ph = (ix / segW) * Math.PI * 2
-      pos.push(Math.sin(th) * Math.cos(ph), Math.cos(th), Math.sin(th) * Math.sin(ph)); f.push(0, iy / segH, 0)
+      // W27 R6.58 (scorer-r655 #3: the lower lip read as a straight cut / bright ring): the hem is scalloped, eight soft
+      // lobes that dip and flare a touch over the last quarter of the bell, so the outline is a rounded hem, not an ellipse
+      const t = iy / segH, sc = Math.pow(Math.max(0, (t - 0.72) / 0.28), 2), lobe = 0.5 - 0.5 * Math.cos(8 * ph)
+      const r = Math.sin(th) * (1 + 0.035 * sc * Math.cos(8 * ph)), y = Math.cos(th) - 0.07 * sc * lobe
+      pos.push(r * Math.cos(ph), y, r * Math.sin(ph)); f.push(0, t, 0)
     }
   }
   for (let iy = 0; iy < segH; iy++) for (let ix = 0; ix < segW; ix++) {
