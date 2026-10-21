@@ -81,7 +81,9 @@ export class PostChain {
     makeSelective(this.bloom) // CINEMATIC: the same bloom pass, its luminance pre-pass masked to hot spots
     this.preUfx = new RenderPass(ufxUnder, ufxCamera); this.preUfx.clear = false; this.preUfx.ignoreBackground = true
     this.postUfx = new RenderPass(ufxOver, ufxCamera); this.postUfx.clear = false; this.postUfx.ignoreBackground = true
-    const smaa = new SMAAEffect({ preset: SMAAPreset.MEDIUM })
+    // W22 (scorer-r614 #3, the stepped stone outline at 390): MEDIUM searches 8 px along an edge, so the stone's long, shallow
+    // silhouette (upscaled ~2x on phones) kept its stair steps. HIGH searches 16: same three passes, more taps on edge pixels only
+    const smaa = new SMAAEffect({ preset: SMAAPreset.HIGH })
     const fxaa = new FXAAEffect()
     const renderScale = () => props.dpr / Math.max(1, Math.min(window.devicePixelRatio || 1, 2))
     // sharpen (convolution) first, then the grade on its result: one pass instead of two when below native size

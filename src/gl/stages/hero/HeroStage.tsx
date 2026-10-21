@@ -31,6 +31,44 @@ export const sink = { depth: 0 }
  * S1 — the lake. One star: a blue brilliant-cut glass diamond hovering over calm water, its tip kissing
  * the surface every few seconds (soft rings). Water: real optics, cheap tricks (see materials/water.ts).
  */
+/**
+ * W22 stone finish (scorer-r614 #3), patched into drei's refraction shader:
+ * (1) FILL: a ray that leaves the stone into a dark studio card gave a near-black chip (the dark specks in the dive).
+ *     Where the traced sample is much darker than the environment's soft average in the same direction (a high mip of
+ *     the same cube), it takes that average instead: the chip fills with the surrounding blue, big dark facets keep
+ *     most of their depth.
+ * (2) CAP: a soft knee on the brightest channel, so no refracted facet blows out; the hue is kept (scaled, not clipped).
+ *     (The blown white facet itself was the sheen's warm key lighting a whole flat facet: fixed in gemSheen.ts.)
+ * (The stepped 390 outline is the anti-aliasing's: post/PostChain.ts now runs SMAA at its HIGH preset.)
+ */
+const gemFill = { value: 0 }   // 0 in the hero (its dark/bright sparkle is kept as is), full in the dive (set per frame)
+function gemPatch(fresPow: string, lod: string) {
+  return (sh: { fragmentShader: string; uniforms: Record<string, { value: unknown }> }) => {
+    sh.uniforms.w22Fill = gemFill
+    sh.fragmentShader = sh.fragmentShader
+      .replace('uniform float bounces;', 'uniform float bounces;\n  uniform float w22Fill;')
+      .replace('pow( 1.0 + dot( viewDirection, worldNormal), 10.0 )', `pow( clamp(1.0 + dot( viewDirection, worldNormal), 0.0, 1.0), ${fresPow} )`)
+      .replace('gl_FragColor = vec4(mix(diffuseColor.rgb, vec3(1.0), nFresnel), diffuseColor.a);', `
+    #ifdef ENVMAP_TYPE_CUBEM
+      #ifdef CHROMATIC_ABERRATIONS
+        vec3 w22Dir = rayDirectionG;
+      #else
+        vec3 w22Dir = rayDirection;
+      #endif
+      vec3 w22Soft = color * textureLod(envMap, w22Dir, ${lod}).rgb;
+      float w22L = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+      float w22E = dot(w22Soft, vec3(0.2126, 0.7152, 0.0722));
+      float w22K = w22Fill * (1.0 - smoothstep(0.12 * w22E, 0.55 * w22E, w22L));
+      diffuseColor.rgb = mix(diffuseColor.rgb, w22Soft * 0.8, w22K);
+    #endif
+      float w22M = max(max(diffuseColor.r, diffuseColor.g), diffuseColor.b);
+      if (w22M > 2.1) diffuseColor.rgb *= (2.1 + 0.7 * (1.0 - exp(-(w22M - 2.1) / 0.7))) / w22M;
+      gl_FragColor = vec4(mix(diffuseColor.rgb, vec3(1.0), nFresnel), diffuseColor.a);`)
+  }
+}
+const gemPatchHi = gemPatch('10.0', '4.0')
+const gemPatchLo = gemPatch('10.0', '3.0')
+
 export function HeroStage() {
   const { gl, scene, camera, size } = useThree()
   const group = useRef<THREE.Group>(null!)
@@ -195,6 +233,9 @@ export function HeroStage() {
     // first frame after the wrap is a normal hero frame (no tilt swing from the CTA pose, no lift settling)
     const jumped = Math.abs(props.scrollDelta) > props.height * 0.5
     if (!vis) return
+    // W22: the stone's dark-chip fill: off in the hero, full once the dive guides the stone (QA: window.__gemFill)
+    gemFill.value = (window as any).__gemFill ?? (0.85 * Math.min(1, Math.max(0, dive.gemMix)))
+    { const W = window as any; if (W.__gemFres !== undefined) (gemMesh.current.material as any).fresnel = W.__gemFres; if (W.__sheenTp !== undefined) sheen.uniforms.u_tp.value = W.__sheenTp; if (W.__sheenWarm !== undefined) sheen.uniforms.u_warm.value = W.__sheenWarm; if (W.__sheenStr !== undefined) sheen.uniforms.u_strength.value = W.__sheenStr; if (W.__gemHide !== undefined) sheenMesh.current.visible = !W.__gemHide }   // QA hooks (W22 stone A/B)
     waterMesh.current.visible = lakeOn; dome.visible = lakeOn
     waterInput.frame(camera, lakeOn)   // WATER HOOK: touch trails (even mid-scroll) + the sim's visibility
     // W18-DIVE OVER-UNDER: the lake is cut at the lens waterline for the main camera only (never in the env/mirror captures)
@@ -346,7 +387,7 @@ export function HeroStage() {
           paths, so whole facets came out pure green, dark red or black (A/B on live: 0 removes them). Now a thin
           fast-chroma fringe (direction offset, one traced path) on every tier: the fire stays, the chips go */}
       <mesh ref={gemMesh} geometry={gemGeo} onUpdate={(o) => o.layers.enable(GEM_LAYER)} onBeforeRender={gemRes}>
-        <MeshRefractionMaterial envMap={env.rt.texture as any} bounces={hi ? 3 : 2} ior={2.2} fresnel={0.85} aberrationStrength={hi ? 0.006 : 0.008} fastChroma color={new THREE.Color(0.1, 0.34, 2.1)} toneMapped />
+        <MeshRefractionMaterial envMap={env.rt.texture as any} bounces={hi ? 3 : 2} ior={2.2} fresnel={0.85} aberrationStrength={hi ? 0.006 : 0.008} fastChroma color={new THREE.Color(0.1, 0.34, 2.1)} toneMapped onBeforeCompile={hi ? gemPatchHi : gemPatchLo} />
       </mesh>
       <mesh ref={sheenMesh} geometry={gemGeo} material={sheen.material} renderOrder={2} onUpdate={(o) => o.layers.enable(GEM_LAYER)} />
     </group>

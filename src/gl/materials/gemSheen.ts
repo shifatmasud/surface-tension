@@ -41,9 +41,10 @@ export function createGemSheen(opts: { strength?: number; warm?: number } = {}) 
     depthTest: true,
     blending: THREE.AdditiveBlending,
     vertexShader: /* glsl */ `
-      varying vec3 vN; varying vec3 vW; varying vec3 vO; varying vec3 vON;
+      varying vec3 vN; varying vec3 vW; varying vec3 vO; varying vec3 vON; varying vec3 vOW;
       void main() {
         vO = position;
+        vOW = mat3(modelMatrix) * position;   // W22: the stone's round direction (world), for the warm key's soft spot
         vON = normal;   // DIAG: object-space facet normal (the facet's id must not change as the stone spins)
         vec4 w = modelMatrix * vec4(position * 1.004, 1.0);
         vW = w.xyz;
@@ -52,7 +53,7 @@ export function createGemSheen(opts: { strength?: number; warm?: number } = {}) 
       }`,
     fragmentShader: /* glsl */ `
       uniform float u_time, u_strength, u_warm, u_surfaceY, u_under, u_tp; uniform vec3 u_key, u_rim;
-      varying vec3 vN; varying vec3 vW; varying vec3 vO; varying vec3 vON;
+      varying vec3 vN; varying vec3 vW; varying vec3 vO; varying vec3 vON; varying vec3 vOW;
       ${THIN_FILM}
       float h31(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
       ${causticsChunk()}
@@ -72,11 +73,17 @@ export function createGemSheen(opts: { strength?: number; warm?: number } = {}) 
         vec3 iri = film * F * 0.55;
         // warm key glints (small, hot) and a cool rim from behind
         vec3 r = reflect(-v, n);
-        float k = pow(max(dot(r, u_key), 0.0), 90.0);
+        // W22 (scorer-r614 #3: a blown white facet with a hard straight edge on the stone's right): the key's tight lobe
+        // on a FLAT facet lit the whole facet at once (r is constant across it) at 2.4x: a white slab with cut edges. The
+        // glint now reflects off a normal bent halfway toward the stone's round shape, so it is a small spot that slides
+        // across the facet (graded, never the facet's full outline), and its peak is capped below white.
+        vec3 nG = normalize(mix(n, normalize(vOW), 0.55));
+        vec3 rG = reflect(-v, nG);
+        float k = min(pow(max(dot(rG, u_key), 0.0), 60.0) * 1.5, 0.9) * (0.6 + 0.4 * pow(max(dot(r, u_key), 0.0), 8.0));
         float k2 = pow(max(dot(r, u_key), 0.0), 14.0) * 0.12;
         float rim = pow(max(dot(r, u_rim), 0.0), 24.0) * F;
         vec3 warm = vec3(1.0, 0.82, 0.58);
-        vec3 col = iri * u_strength + warm * (k * 2.4 + k2) * u_warm + vec3(0.55, 0.75, 1.0) * rim * 0.5;
+        vec3 col = iri * u_strength + warm * (k + k2) * u_warm + vec3(0.55, 0.75, 1.0) * rim * 0.5;
         // underwater (as the stone sinks): the warm key is gone (the surface scatters it), and the surface's caustic
         // network plays over every facet that faces up, slightly split in colour, fading with depth; a bright
         // meniscus line rides the facets right at the waterline
