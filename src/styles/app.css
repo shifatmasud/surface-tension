@@ -178,6 +178,8 @@ html.gl-cards .card__dom { visibility: hidden; }
 @media (hover: hover) { .overlay__close:hover { transform: translateZ(40px) scale(1.06); background: rgba(255, 255, 255, .34); } .overlay__panel[data-tone='light'] .overlay__close:hover { background: rgba(255, 255, 255, .46); } }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .overlay__close, .overlay__panel[data-tone='light'] .overlay__close { background: rgba(255, 255, 255, .88); color: #111; } }
 @media (max-width: 812px) { .overlay__close { top: 12px; right: 12px; } }
+/* W29 (scorer-r669): the X's keyboard ring was a thin dark ring on the see-through circle over the dark panel; now a dark ring sandwiched in light (#fafafa) so it reads on any poster, focus-visible only */
+.overlay__close:focus-visible, .overlay__panel[data-tone='light'] .overlay__close:focus-visible { outline: 2px solid #111; outline-offset: 2px; box-shadow: 0 0 0 6px #fafafa; }
 @media (max-width: 812px) { .overlay { padding: 16px; } .overlay__panel { width: 100%; overflow-y: auto; overscroll-behavior: contain; animation: none; } }
 @media (prefers-reduced-motion: reduce) { .overlay__panel { animation: none; transition: none; } }
 
