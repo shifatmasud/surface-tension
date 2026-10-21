@@ -56,7 +56,7 @@ export function Cursor() {
     <div className="cursor" ref={ref} aria-hidden>
       <div className="cursor__ring" />
       <div className="cursor__dot" />
-      {label && <div className="cursor__label">{label}</div>}
+      {label && <div className="cursor__label" data-k={label.toLowerCase()}>{label}</div>}
     </div>
   )
 }

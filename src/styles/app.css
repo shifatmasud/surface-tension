@@ -72,6 +72,8 @@ html[data-bg='dark'] .pill { background: rgba(30, 31, 34, .55);  color: #fff; }
 .cursor { opacity: 0; transition: opacity var(--dur-ui) var(--ease); }
 .cursor.is-live { opacity: 1; }
 .cursor__label { position: absolute; left: 22px; top: 14px; font-size: var(--fs-small); font-weight: 400; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+/* W23 (scorer-r6261: the white 'DRAG' hint vanished over the white sticker it was dragging): the sticker hints sit on a solid black pill (the CTA pill's language) so they read over the wall and over a sheet alike */
+.cursor__label[data-k='drag'], .cursor__label[data-k='peel'] { background: var(--c-black); color: var(--c-white); padding: 5px 10px; border-radius: 99px; line-height: 1; top: 12px; }
 @media (hover: none) { .cursor { display: none; } }
 
 /* water level (scroll progress) */
