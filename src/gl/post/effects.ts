@@ -39,6 +39,16 @@ export class ScreenPaintDistortionEffect extends Effect {
         vec4 acc = vec4(0.0);
         for (int i = 0; i < 9; i++) { vec4 s = texture2D(inputBuffer, p); acc += vec4(min(spd_encode(s.rgb), 1.0), s.a); p += stepUv; }  // each tap as the reference's 8-bit buffer holds it
         acc /= 9.0;
+        // W23 (scorer-r6261 #5: on the dark wall the smear dragged a red streak off the crewmate's legs): on dark sections the
+        // smear only moves the dark wall itself; wherever the pixel or what it would pull in is brighter than the wall (the
+        // crewmate, the stickers, the type) the frame stays as rendered
+        float keep = 0.0;
+        if (u_dark > 0.001) {
+          vec3 orig = min(spd_encode(texture2D(inputBuffer, uv).rgb), 1.0);
+          vec3 hi3 = max(orig, acc.rgb);   // brightest channel: the red crewmate is dim in luminance but far off the grey wall
+          keep = u_dark * smoothstep(0.2, 0.34, max(max(hi3.r, hi3.g), hi3.b));
+          acc.rgb = mix(acc.rgb, orig, keep);
+        }
         if (u_debug > 0.5) acc = vec4(vec3(0.5 + 0.35 * weight), 1.0);
         // wake fringe: strongest where weight is low, gone above 0.4
         vec3 fringe = sin(vec3(vel.x + vel.y) * 40.0 + vec3(0.0, 2.0, 4.0) * u_rgbShift)
@@ -46,7 +56,9 @@ export class ScreenPaintDistortionEffect extends Effect {
         // W23 (scorer-r618/r621: the trail on the dark CTA wall read as an oily navy smudge): on dark sections the fringe
         // only ever lightens, as a soft glassy tint at a third of the strength; its dark half (which clipped to black
         // contours on the wall) is dropped. Light sections are unchanged.
-        acc.rgb += mix(fringe, max(fringe, 0.0) * 0.35, u_dark) * stkM;
+        // W23 (scorer-r6261 #5): on dark it is also colourless now (the chromatic phase read as an oily fringe), and off anything bright
+        vec3 glass = vec3(dot(max(fringe, 0.0), vec3(0.3333))) * 0.35;
+        acc.rgb += mix(fringe, glass * (1.0 - keep), u_dark) * stkM;
         if (u_iridescence > 0.0) {
           // accumulated thin film on the wake edges: the long-tail weight is the film thickness,
           // the weight gradient finds the edges; off by default (the reference has only the sine fringe)

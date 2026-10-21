@@ -52,7 +52,9 @@ export function createSkyDome() {
     fragmentShader: /* glsl */ `
       ${SKY_PARS}
       varying vec3 v_dir;
-      void main(){ gl_FragColor = vec4(skyColor(v_dir, 1.0), 1.0);
+      // W23 (scorer-r621/r6261: a grey 1 px seam on the 1440 dive horizon): the lake ends a hair below the true horizon, and the
+      // dome's dim below-horizon floor showed through that gap; the dome itself never draws below the horizon colour
+      void main(){ gl_FragColor = vec4(skyColor(vec3(v_dir.x, max(v_dir.y, 0.0), v_dir.z), 1.0), 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }`,

@@ -366,12 +366,12 @@ export function buildCta(portrait: boolean) {
     // W23 (scorer-r618/r621: 'a centred headline inside a symmetric ring'): still one per corner and balanced, but balanced
     // on the diagonal rather than mirrored: the top-left and bottom-right sheets a size larger, each corner its own tilt
     // and inset (the headline and the pill stay centred by Shifat's rules)
-    [-0.385, 0.295, 0.222, -12], [0.34, 0.285, 0.19, 6], [-0.335, -0.31, 0.195, 4], [0.37, -0.335, 0.225, -9],
+    [-0.385, 0.242, 0.222, -12], [0.362, 0.26, 0.19, 6], [-0.335, -0.31, 0.195, 4], [0.37, -0.335, 0.225, -9],   // W23 (scorer-r6261 #4): the top pair down and out, ≥64 px clear of the header row and the headline
   ]
   const PLACE_TALL: [number, number, number, number][] = [
     // W19: four stickers, one per corner (the upper pair over the headline, the lower pair either side of the crewmate)
     // W23: the same diagonal balance on phones (top-left and bottom-right larger); the lower pair stays out at the edges, clear of the crewmate
-    [-0.31, 0.345, 0.31, -12], [0.30, 0.31, 0.26, 5], [-0.375, -0.11, 0.17, 4], [0.385, -0.095, 0.2, -9],
+    [-0.32, 0.323, 0.26, -12], [0.315, 0.313, 0.22, 5], [-0.346, -0.223, 0.21, 4], [0.362, -0.211, 0.24, -9],   // W23 (scorer-r6261 #4): the top pair smaller (clear of header and headline), the bottom pair larger and down into the corners above the pill
   ]
   let typeY = 0   // the headline's first baseline (tablet-local), set by layout()
   const lay: CtaLayout = { C: new THREE.Vector3(), D: 20, hw: 12, wv: 19, fov: 34, textZ: WALL_Z + 1.4, em: 1, crewZ: 6, crewY: 0, crewScale: 1, crewH: 1 }
