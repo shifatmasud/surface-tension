@@ -123,7 +123,7 @@ export function HeroStage() {
     return g
   }, [hi])
   const gemGeo = useMemo(() => brilliantGeometry(1), [])
-  const sheen = useMemo(() => createGemSheen({ strength: 0.75 }), [])
+  const sheen = useMemo(() => { const s = createGemSheen({ strength: 0.75 }); s.uniforms.u_feather = gemFeather; return s }, [])   // W25 R6.41: the shell's silhouette ramp = the stone's
   const sheenMesh = useRef<THREE.Mesh>(null!)
   // DIAG: the refraction shader maps gl_FragCoord / resolution to the camera ray it takes its mip gradients from, and
   // drei feeds it the CSS size. gl_FragCoord is in target pixels, so at DPR 2 (phones, retina) uv ran 0..2 (one mip

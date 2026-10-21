@@ -31,7 +31,8 @@ export function createGemSheen(opts: { strength?: number; warm?: number } = {}) 
     u_rim: { value: new THREE.Vector3(0.6, 0.35, -0.7).normalize() },
     u_surfaceY: { value: 0 },        // the lake's level: below it the stone is underwater
     u_under: { value: 1 },           // 0 disables the underwater look (caustics, absorption, waterline)
-    u_tp: { value: 1 },              // CINEMATIC: three-point strength (key from the surface underwater, fill, rim)
+    u_tp: { value: 1 },
+    u_feather: { value: 1.75 },     // W25 R6.41: silhouette coverage ramp (scene px), shared with the stone's (HeroStage gemFeather)              // CINEMATIC: three-point strength (key from the surface underwater, fill, rim)
     ...causticUniforms,
   }
   const material = new THREE.ShaderMaterial({
@@ -39,10 +40,22 @@ export function createGemSheen(opts: { strength?: number; warm?: number } = {}) 
     transparent: true,
     depthWrite: false,
     depthTest: true,
-    blending: THREE.AdditiveBlending,
+    // W25 R6.41: additive in colour, but the destination ALPHA is left alone. With three's AdditiveBlending the shell wrote
+    // alpha 1 over its whole (0.4 % larger, hard-edged) footprint in the lake's mirror and under-surface targets, whose
+    // alpha the water reads as the stone's coverage: a dark, un-antialiased ring 1-2 px outside the stone's own soft edge
+    // (the 390 grey-brown fringe; scorer-r636..r639). Colour is unchanged (src x1 + dst x1, as SRC_ALPHA with a = 1 was).
+    blending: THREE.CustomBlending,
+    blendEquation: THREE.AddEquation,
+    blendSrc: THREE.OneFactor,
+    blendDst: THREE.OneFactor,
+    blendSrcAlpha: THREE.ZeroFactor,
+    blendDstAlpha: THREE.OneFactor,
     vertexShader: /* glsl */ `
       varying vec3 vN; varying vec3 vW; varying vec3 vO; varying vec3 vON; varying vec3 vOW;
+      attribute vec3 aSilB; attribute vec3 aSilN0; attribute vec3 aSilN1; attribute vec3 aSilN2;
+      varying vec3 vSilB; varying vec3 vSilN0; varying vec3 vSilN1; varying vec3 vSilN2;
       void main() {
+        vSilB = aSilB; mat3 w25M = mat3(modelMatrix); vSilN0 = w25M * aSilN0; vSilN1 = w25M * aSilN1; vSilN2 = w25M * aSilN2;
         vO = position;
         vOW = mat3(modelMatrix) * position;   // W22: the stone's round direction (world), for the warm key's soft spot
         vON = normal;   // DIAG: object-space facet normal (the facet's id must not change as the stone spins)
@@ -52,8 +65,9 @@ export function createGemSheen(opts: { strength?: number; warm?: number } = {}) 
         gl_Position = projectionMatrix * viewMatrix * w;
       }`,
     fragmentShader: /* glsl */ `
-      uniform float u_time, u_strength, u_warm, u_surfaceY, u_under, u_tp; uniform vec3 u_key, u_rim;
+      uniform float u_time, u_strength, u_warm, u_surfaceY, u_under, u_tp, u_feather; uniform vec3 u_key, u_rim;
       varying vec3 vN; varying vec3 vW; varying vec3 vO; varying vec3 vON; varying vec3 vOW;
+      varying vec3 vSilB; varying vec3 vSilN0; varying vec3 vSilN1; varying vec3 vSilN2;
       ${THIN_FILM}
       float h31(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
       ${causticsChunk()}
@@ -114,6 +128,17 @@ export function createGemSheen(opts: { strength?: number; warm?: number } = {}) 
         // is negative on every facet above the waterline
         float wl = dz / 0.006;
         col += vec3(0.9, 0.97, 1.0) * exp(-wl * wl) * 0.9 * u_under;
+        // W25 R6.41 (scorer-r636..r639: a 1-2 px grey-brown fringe OUTSIDE the 390 stone's blue outline): diagnosed on staging
+        // (coverage off, SMAA off, CAS off: fringe stays; this shell hidden: fringe gone). The shell is drawn 0.4 % larger than
+        // the stone with a hard, un-antialiased outline, so its grazing-angle rim/key light lands on the lake just past the
+        // stone's soft edge. It now takes the stone's own analytic silhouette coverage: zero at the outline, full ~1.75 px in.
+        vec3 w25V = cameraPosition - vW;
+        vec3 w25D = vSilB / max(fwidth(vSilB), vec3(1e-6));
+        float w25C = 1e3;
+        if (dot(vSilN0, w25V) < 0.0) w25C = min(w25C, w25D.x);
+        if (dot(vSilN1, w25V) < 0.0) w25C = min(w25C, w25D.y);
+        if (dot(vSilN2, w25V) < 0.0) w25C = min(w25C, w25D.z);
+        col *= clamp(w25C / u_feather, 0.0, 1.0);
         gl_FragColor = vec4(col, 1.0);
       }`,
   })
