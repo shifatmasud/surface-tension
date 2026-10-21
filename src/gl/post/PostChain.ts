@@ -205,13 +205,15 @@ void main(){
   private hdrGen = 0
   private hdrY = 0
   private hdrEma = [-1, -1]
+  private hdrFresh = 0   // W25 R6.44: readings left in the post-jump fast path
+  private hdrFar = [0, 0]   // W25 R6.44: readings in a row far from the EMA, per half
   private hdrProbe() {
     const now = performance.now()
     // W24 R6.39 (scorer-r638 #1: ink lingered seconds on the deep after the dive): when the scene's own tone flips, the header
     // takes it at once and the measurement starts fresh; the readback then only corrects it where the frame disagrees
     const bg = document.documentElement.dataset.bg === 'dark' ? 'dark' : 'light'
     if (bg !== this.hdrBg) {
-      this.hdrBg = bg; this.hdrTone = bg; this.hdrVotes = 0; this.hdrEma = [-1, -1]; this.hdrGen++
+      this.hdrBg = bg; this.hdrTone = bg; this.hdrVotes = 0; this.hdrEma = [-1, -1]; this.hdrFar = [0, 0]; this.hdrGen++
       if (document.documentElement.dataset.hdr !== bg) document.documentElement.dataset.hdr = bg
     }
     if (this.hdrBusy || now - this.hdrT < 250) return
@@ -225,7 +227,7 @@ void main(){
     // R6.40 (scorer-r639: a direct jump within one tone took >7 s to settle): a jump of more than a viewport since the last
     // reading re-seeds the measurement (the tone stays until the new scene's readings decide)
     const sy = ((window as any).__scroll?.scroll as number | undefined) ?? scrollY
-    if (Math.abs(sy - this.hdrY) > innerHeight) { this.hdrEma = [-1, -1]; this.hdrVotes = 0; this.hdrGen++ }
+    if (Math.abs(sy - this.hdrY) > innerHeight) { this.hdrEma = [-1, -1]; this.hdrFar = [0, 0]; this.hdrVotes = 0; this.hdrGen++; this.hdrFresh = 2 }
     this.hdrY = sy
     const gen = this.hdrGen
     gl.readRenderTargetPixelsAsync(this.hdrRT, 0, 0, 16, 4, this.hdrBuf).then(() => {
@@ -243,7 +245,15 @@ void main(){
           sum += 0.2126 * lin(this.hdrBuf[i]) + 0.7152 * lin(this.hdrBuf[i + 1]) + 0.0722 * lin(this.hdrBuf[i + 2])
         }
         // R6.39 (scorer-r638 #1: the 390 sky blinked under passing leaves): an EMA over readings (~1 s at 250 ms)
-        const e0 = this.hdrEma[half], L = e0 < 0 ? sum / 32 : e0 + (sum / 32 - e0) * 0.3
+        // W25 R6.44 (scorer-r642 #2; staging diagnostic 09:05Z: after 11000 -> 11700 at 1440 the EMA still held the dark space it
+        // had measured at 11000 (0.0) and crept toward the lilac sky at 0.3 per reading): two readings in a row far from the EMA
+        // (luminance contrast > 1.8x) mean the scene under the header changed, not a leaf passing: re-seed to the new reading,
+        // and let the next two readings decide on their own (the post-jump fast path)
+        const s0 = sum / 32, e0 = this.hdrEma[half]
+        if (e0 >= 0 && Math.max((s0 + 0.05) / (e0 + 0.05), (e0 + 0.05) / (s0 + 0.05)) > 1.8) this.hdrFar[half]++; else this.hdrFar[half] = 0
+        const snap = this.hdrFar[half] >= 2
+        if (snap) { this.hdrFar[half] = 0; this.hdrFresh = 2 }
+        const L = e0 < 0 || snap ? s0 : e0 + (s0 - e0) * 0.3
         this.hdrEma[half] = L
         worstInk = Math.min(worstInk, (L + 0.05) / (0.0065 + 0.05))   // ink #121315 over it
         worstWhite = Math.min(worstWhite, (1.0 + 0.05) / (L + 0.05))  // white over it
@@ -261,7 +271,11 @@ void main(){
       const urgent = other !== '' && ct[cur] < 2.0 && ct[other] > ct[cur] * 1.25 && this.hdrVotes >= 1   // two readings in a row
       this.hdrVotes = other ? this.hdrVotes + 1 : 0
       const back = other === bg && ct[bg] >= 3.3   // one clear reading for the scene tone cancels an override
-      const want = other && (urgent || back || this.hdrVotes >= 3) ? other : cur
+      // W25 R6.44 (scorer-r642 #2: a direct jump onto the 1440 lilac sky stayed white >20 s on a loaded rig): right after a jump of
+      // more than a viewport there is no old scene left to smooth against, so the first two fresh readings decide on their own
+      // (two in a row agreeing, same 3:1 / 25 % thresholds); after that the normal ~0.75 s agreement applies again
+      const fresh = this.hdrFresh > 0 && this.hdrVotes >= 2; if (this.hdrFresh > 0) this.hdrFresh--
+      const want = other && (urgent || back || fresh || this.hdrVotes >= 3) ? other : cur
       if (want !== cur) this.hdrVotes = 0
       this.hdrTone = want
       if (document.documentElement.dataset.hdr !== want) document.documentElement.dataset.hdr = want
