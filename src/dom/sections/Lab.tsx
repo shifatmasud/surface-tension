@@ -7,6 +7,7 @@ import { Odometer } from '../ui/Odometer'
 import { overlay } from '../ui/overlayState'
 import { audio } from '../../services/audio'
 import { labGL } from '../../gl/stages/lab/labGL'
+import { scroll } from '../../services/scroll'
 import './lab.css'
 
 /**
@@ -57,7 +58,18 @@ export function Lab() {
           {PROJECTS.map((p, i) => (
             <div key={p.id} className={'card' + (i === active ? ' is-active' : '')} data-id={p.id} data-cursor data-cursor-label="Open" tabIndex={0} role="button"
               onClick={() => { overlay.open(p.id, { morph: true, from: labGL.rectOf(p.id) }); audio.splash() }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); overlay.open(p.id, { morph: true, from: labGL.rectOf(p.id) }) } }}
-              onFocus={() => labGL.hover(p.id, true)} onBlur={() => labGL.hover(p.id, false)}
+              onFocus={(e) => {
+                labGL.hover(p.id, true)
+                // W29 (scorer-r666 #1/#2): a keyboard stop on a card brings THAT card to the centre of the arc (its dwell, where
+                // the slide sits whole on screen), a jump-cut like Systems.tsx / the CTA. The browser's own focus scroll lands
+                // after this handler and the virtual engine adopts it as a glide (Water Sim landed at y928, Jelly Drag at y-163 at
+                // 1440), so the jump is re-applied on the next two frames. Keyboard focus only: a click or tap is untouched.
+                const el = e.currentTarget, sec = ref.current
+                if (!sec || !el.matches(':focus-visible')) return
+                const nn = PROJECTS.length - 1
+                const go = () => scroll.scrollTo(sec, { offset: Math.max(0, sec.offsetHeight - window.innerHeight) * (nn > 0 ? i / nn : 0), immediate: true })
+                go(); requestAnimationFrame(() => { go(); requestAnimationFrame(go) })
+              }} onBlur={() => labGL.hover(p.id, false)}
               onPointerEnter={(e) => { if (e.pointerType !== 'mouse') return; audio.tick(); labGL.hover(p.id, true) }} onPointerLeave={(e) => { if (e.pointerType === 'mouse') labGL.hover(p.id, false) }} aria-label={`${p.title}, ${p.year}, ${p.no} ${p.tags.join(' · ')} — ${p.blurb} Open project.`}>
               <div className="card__dom">
                 <img className="card__media" src={p.poster} alt="" loading="lazy" />

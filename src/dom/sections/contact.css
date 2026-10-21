@@ -141,3 +141,5 @@ html.foot-glbar:not(.no-gl) .site-footer--world .overscroll__bar::after,
 html.foot-glbar:not(.no-gl) .site-footer--world .overscroll__bar::before { content: none; }
 /* FOOTER MOCKUP: no WebGL = no world to draw: the plain paper footer, in flow, as before */
 html.no-gl .site-footer--world { clip-path: none; background: var(--c-paper); }
+/* W29 (scorer-r666 #3): the CTA's keyboard ring was currentColor (black) on the dark CTA wall; a light ring there, focus-visible only (the unfocused pill is unchanged) */
+html[data-bg='dark'] .contact .big-btn:focus-visible { outline-color: #fafafa; }
