@@ -58,21 +58,29 @@ function stepSpr(s: Spr, dt: number) {
   return true
 }
 
-/** the concentric-ring normal map, drawn once (768² so it is never magnified much: no blocky steps on the edge): R/G carry the outward normal × a damped ring profile (front at r 0.9) */
+/** the concentric-ring normal map, drawn once. W27 R6.59: 512² with the radial profile from a 1D table (the map is
+ *  radially symmetric), ~8× cheaper than the first 768² per-pixel version; it is built on the FIRST hover / press /
+ *  focus of any ink button, never at load (the 768² idle build landed inside Lighthouse's TBT window: 68 → 340–510 ms). */
 function ringMap() {
   if (ringURL) return ringURL
-  const N = 768, c = document.createElement('canvas'); c.width = c.height = N
+  const N = 512, c = document.createElement('canvas'); c.width = c.height = N
   const g = c.getContext('2d')!, img = g.createImageData(N, N), d = img.data
   const sm = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
-  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-    const u = (i + 0.5) / N * 2 - 1, v = (j + 0.5) / N * 2 - 1, r = Math.hypot(u, v)
-    let f = 0
-    if (r < 1 && r > 1e-4) {
-      const env = (1 - sm(0.9, 1, r)) * Math.exp(-2.6 * Math.max(0, 0.9 - r)) * sm(0.04, 0.3, r)
-      f = Math.sin((1 - r) * Math.PI * 2 * 1.75) * env         // two rings, the leading one strongest
+  const T = 1024, prof = new Float32Array(T + 1)
+  for (let k = 0; k <= T; k++) {
+    const r = k / T
+    const env = (1 - sm(0.9, 1, r)) * Math.exp(-2.6 * Math.max(0, 0.9 - r)) * sm(0.04, 0.3, r)
+    prof[k] = r < 1 && r > 1e-4 ? Math.sin((1 - r) * Math.PI * 2 * 1.75) * env / r : 0   // two rings, the leading one strongest; /r folds the normal
+  }
+  for (let j = 0; j < N; j++) {
+    const v = (j + 0.5) / N * 2 - 1
+    for (let i = 0; i < N; i++) {
+      const u = (i + 0.5) / N * 2 - 1, r2 = u * u + v * v
+      const k = (j * N + i) * 4
+      let fx = 0, fy = 0
+      if (r2 < 1) { const f = prof[Math.round(Math.sqrt(r2) * T)]; fx = u * f; fy = v * f }
+      d[k] = Math.round(128 + 127 * fx); d[k + 1] = Math.round(128 + 127 * fy); d[k + 2] = 128; d[k + 3] = 255
     }
-    const k = (j * N + i) * 4, nx = r > 1e-4 ? u / r : 0, ny = r > 1e-4 ? v / r : 0
-    d[k] = Math.round(128 + 127 * nx * f); d[k + 1] = Math.round(128 + 127 * ny * f); d[k + 2] = 128; d[k + 3] = 255
   }
   g.putImageData(img, 0, 0)
   ringURL = c.toDataURL('image/png')
@@ -80,6 +88,9 @@ function ringMap() {
 }
 
 const NS = 'http://www.w3.org/2000/svg'
+const mapSetters: (() => void)[] = []
+/** build the ring map (once) and hand it to every filter: called on the first hover / press / focus of any ink button */
+function armMaps() { for (const s of mapSetters) s() }
 function makeFilter(id: string) {
   if (!svgRoot) {
     svgRoot = document.createElementNS(NS, 'svg')
@@ -92,10 +103,8 @@ function makeFilter(id: string) {
   for (const [k, v] of [['filterUnits', 'userSpaceOnUse'], ['primitiveUnits', 'userSpaceOnUse'], ['color-interpolation-filters', 'sRGB']]) f.setAttribute(k, v)
   const flood = document.createElementNS(NS, 'feFlood'); flood.setAttribute('flood-color', 'rgb(128,128,128)'); flood.setAttribute('result', 'n')
   const im = document.createElementNS(NS, 'feImage') as SVGFEImageElement
-  const setMap = () => { im.setAttribute('href', ringMap()); im.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', ringMap()) }
-  // the map costs a few tens of ms once: drawn when the page is idle, never on the tap itself
-  const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback
-  if (ringURL) setMap(); else if (ric) ric(setMap, { timeout: 2500 }); else window.setTimeout(setMap, 1200)
+  const setMap = () => { if (im.getAttribute('href')) return; im.setAttribute('href', ringMap()); im.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', ringMap()) }
+  mapSetters.push(setMap); if (ringURL) setMap()
   im.setAttribute('preserveAspectRatio', 'none'); im.setAttribute('result', 'r')
   const mg = document.createElementNS(NS, 'feMerge'); mg.setAttribute('result', 'm')
   for (const s of ['n', 'r']) { const mn = document.createElementNS(NS, 'feMergeNode'); mn.setAttribute('in', s); mg.appendChild(mn) }
@@ -233,10 +242,11 @@ export function bindInk(el: HTMLElement | null, kind: Kind) {
   }
   btns.push(b); measure(b); kick()
   const P = (e: PointerEvent) => local(b, e.clientX, e.clientY)
-  const enter = (e: PointerEvent) => { if (e.pointerType === 'mouse') { flood(b, P(e)); roll(b) } }
+  const enter = (e: PointerEvent) => { armMaps(); if (e.pointerType === 'mouse') { flood(b, P(e)); roll(b) } }
   const leave = (e: PointerEvent) => { if (e.pointerType === 'mouse') { drain(b, P(e)); release(b) } }
   const down = (e: PointerEvent) => {
     if (e.button !== 0) return
+    armMaps()
     const p = P(e); b.pressT0 = now(); b.downPt = p
     if (e.pointerType !== 'mouse') flood(b, p)        // the finger: the flood starts where it lands
     press(b, p)
@@ -250,7 +260,7 @@ export function bindInk(el: HTMLElement | null, kind: Kind) {
       if (e.type === 'pointercancel' || now() >= at) drain(b, p); else { b.drainAt = at; b.drainPt = p; kick() }
     }
   }
-  const focus = () => { if (el.matches(':focus-visible')) { measure(b); flood(b, { x: b.w / 2, y: b.h / 2 }) } }
+  const focus = () => { armMaps(); if (el.matches(':focus-visible')) { measure(b); flood(b, { x: b.w / 2, y: b.h / 2 }) } }
   const blur = () => { if (b.on) { measure(b); drain(b, { x: b.w / 2, y: b.h / 2 }) } }
   const kd = (e: KeyboardEvent) => { if (!e.repeat && (e.key === 'Enter' || e.key === ' ')) { measure(b); b.downPt = { x: b.w / 2, y: b.h / 2 }; press(b, b.downPt) } }
   const ku = (e: KeyboardEvent) => { if ((e.key === 'Enter' || e.key === ' ') && b.downPt) { b.downPt = null; release(b); roll(b) } }
