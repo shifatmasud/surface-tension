@@ -35,6 +35,10 @@ html.no-gl .is-ufx, html.no-gl .is-ufx *, html.gl-lost .is-ufx, html.gl-lost .is
 /* ── header ─────────────────────────────────────────── */
 .header { position: fixed; top: 0; left: 0; right: 0; z-index: 50; display: flex; justify-content: space-between; align-items: center; padding: var(--pad-y) var(--pad-x); pointer-events: none; mix-blend-mode: normal; }
 .header > * { pointer-events: auto; }
+/* W24: the header's ink follows the frame measured behind it (PostChain hdrProbe; AA) — same logotype, same two colours */
+html[data-hdr='light'] .header, html[data-hdr='light'] .header .pill { color: var(--c-ink); }
+html[data-hdr='dark'] .header, html[data-hdr='dark'] .header .pill { color: var(--c-white); }
+.header { transition: color var(--dur-ui) var(--ease); }
 .wordmark { font-weight: 400; font-size: var(--fs-body); letter-spacing: -0.04em; text-decoration: none; display: inline-flex; align-items: baseline; gap: 1px; }
 .wordmark__mark { display: inline-block; width: .82em; height: .82em; margin-right: .4em; align-self: center; }
 .wordmark__mark svg { display: block; }

@@ -47,7 +47,7 @@ function Wave({ on }: { on: boolean }) {
     const kick = (ms: number) => { toneUntil = Math.max(toneUntil, performance.now() + ms); if (!raf) { last = performance.now(); raf = requestAnimationFrame(draw) } }
     let tt = 0
     const mo = new MutationObserver(() => { kick(700); clearTimeout(tt); tt = window.setTimeout(() => kick(120), 620) }) // follows the .5 s colour transition
-    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-bg'] })
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-bg', 'data-hdr'] })   // W24: the header's own measured tone too
     return () => { if (raf) cancelAnimationFrame(raf); clearTimeout(tt); mo.disconnect() }
   }, [on])
   return <canvas ref={ref} className="wave" aria-hidden />

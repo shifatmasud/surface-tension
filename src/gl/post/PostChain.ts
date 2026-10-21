@@ -165,6 +165,76 @@ void main(){
     gl.setRenderTarget(null); gl.autoClear = false
     gl.render(this.blitScene, this.blitCam)
     gl.autoClear = auto; gl.setRenderTarget(prev)
+    this.hdrProbe()
+  }
+  // W24 R6.36 (Shifat's AA rule; Tab 05:50Z): the header's ink follows the frame actually behind it. Every 250 ms the finished
+  // frame under the wordmark (left half) and the sound control (right half) is box-sampled into a 16×4 8-bit target with the
+  // screen's own encoding and read back ASYNCHRONOUSLY (PBO + fence: no GPU stall). The tone that gives the better worst-case
+  // WCAG contrast over both wins, with a 15 % margin before it flips back, so it never flickers; the CSS colour transition
+  // keeps the change continuous. Until the first reading (or on the no-GL page) the header keeps the scene's UI tone.
+  private hdrRT = (() => { const t = new THREE.WebGLRenderTarget(16, 4, { type: THREE.UnsignedByteType, format: THREE.RGBAFormat, depthBuffer: false }); t.texture.colorSpace = THREE.SRGBColorSpace; return t })()
+  private hdrBuf = new Uint8Array(16 * 4 * 4)
+  private hdrMat = new THREE.ShaderMaterial({
+    uniforms: { tMap: { value: null }, u_a: { value: new THREE.Vector4(0, 0, 0, 0) }, u_b: { value: new THREE.Vector4(0, 0, 0, 0) } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: `uniform sampler2D tMap; uniform vec4 u_a, u_b; varying vec2 vUv;
+void main(){
+  vec4 r = vUv.x < 0.5 ? u_a : u_b; float fx = fract(vUv.x * 2.0);
+  vec2 uv = vec2(mix(r.x, r.z, fx), mix(r.y, r.w, vUv.y));
+  vec3 e = clamp(texture2D(tMap, uv).rgb, 0.0, 1.0);
+  gl_FragColor = vec4(e, 1.0);
+  #include <colorspace_fragment>
+}`,
+    depthTest: false, depthWrite: false, toneMapped: false,
+  })
+  private hdrScene = (() => { const s = new THREE.Scene(); const m = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.hdrMat); m.frustumCulled = false; s.add(m); return s })()
+  private hdrT = 0
+  private hdrBusy = false
+  private hdrTone = ''
+  private hdrVotes = 0
+  private hdrRects() {
+    const W = innerWidth, H = innerHeight, toUv = (el: Element | null, fb: number[]) => {
+      const r = el ? el.getBoundingClientRect() : null
+      const [l, t, rr, b] = r && r.width > 2 ? [r.left - 6, r.top - 4, r.right + 6, r.bottom + 4] : fb
+      return [Math.max(0, l / W), Math.max(0, 1 - b / H), Math.min(1, rr / W), Math.min(1, 1 - t / H)]
+    }
+    ;(this.hdrMat.uniforms.u_a.value as THREE.Vector4).fromArray(toUv(document.querySelector('.header .wordmark'), [24, 16, 130, 58]))
+    ;(this.hdrMat.uniforms.u_b.value as THREE.Vector4).fromArray(toUv(document.querySelector('.header .pills'), [W - 90, 16, W - 20, 58]))
+  }
+  private hdrProbe() {
+    const now = performance.now()
+    if (this.hdrBusy || now - this.hdrT < 250) return
+    const gl = this.gl as THREE.WebGLRenderer & { readRenderTargetPixelsAsync?: (...a: unknown[]) => Promise<unknown> }
+    if (!gl.readRenderTargetPixelsAsync) return
+    this.hdrT = now; this.hdrBusy = true
+    this.hdrRects()
+    this.hdrMat.uniforms.tMap.value = this.composer.inputBuffer.texture
+    const prev = gl.getRenderTarget()
+    gl.setRenderTarget(this.hdrRT); gl.render(this.hdrScene, this.blitCam); gl.setRenderTarget(prev)
+    gl.readRenderTargetPixelsAsync(this.hdrRT, 0, 0, 16, 4, this.hdrBuf).then(() => {
+      this.hdrBusy = false
+      const lin = (c: number) => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4) }
+      let worstInk = 99, worstWhite = 99
+      for (let half = 0; half < 2; half++) {
+        // each half: the mean luminance of its 8×4 box samples (extremes swing with every bubble and frond that drifts past)
+        let sum = 0
+        for (let y = 0; y < 4; y++) for (let x = half * 8; x < half * 8 + 8; x++) {
+          const i = (y * 16 + x) * 4
+          sum += 0.2126 * lin(this.hdrBuf[i]) + 0.7152 * lin(this.hdrBuf[i + 1]) + 0.0722 * lin(this.hdrBuf[i + 2])
+        }
+        const L = sum / 32
+        worstInk = Math.min(worstInk, (L + 0.05) / (0.0065 + 0.05))   // ink #121315 over it
+        worstWhite = Math.min(worstWhite, (1.0 + 0.05) / (L + 0.05))  // white over it
+      }
+      const cur = this.hdrTone || (document.documentElement.dataset.bg === 'dark' ? 'dark' : 'light')
+      // flip only on a clear win (25 %) seen on two readings in a row (~0.5 s), so a passing frond never toggles it
+      const other = cur === 'dark' ? (worstInk > worstWhite * 1.25 ? 'light' : '') : (worstWhite > worstInk * 1.25 ? 'dark' : '')
+      this.hdrVotes = other ? this.hdrVotes + 1 : 0
+      const want = other && this.hdrVotes >= 2 ? other : cur
+      if (want !== cur) this.hdrVotes = 0
+      this.hdrTone = want
+      if (document.documentElement.dataset.hdr !== want) document.documentElement.dataset.hdr = want
+    }).catch(() => { this.hdrBusy = false })
   }
   /** the chain's own buffer size (scene density), independent of the canvas (text density) */
   bw = 1; bh = 1
