@@ -312,6 +312,9 @@ export function createWaterMaterial() {
             // the ripple slope drives the bend (review P1: the swell alone barely moved it), clamped so it never tears
             vec2 off = (N.xz * vec2(0.035, 0.05) + rg * 0.25) * (0.7 + 2.2 * gdp) * u_refrK;
             off *= min(1.0, 0.06 / max(length(off), 1e-4));
+            // W24 R6.38 (scorer-r636 #3: spikes on the ghost's edge are the offset pushing samples past the outline): the bend
+            // is scaled by the stone's own coverage at this pixel, so outside the true silhouette it nearly vanishes
+            off *= mix(0.2, 1.0, smoothstep(0.0, 0.9, texture2D(u_underTex, suv).a));
             float disp = 0.15 + 1.2 * min(length(rg), 0.4);
             // W24 R6.36 (scorer-r633 #3: at the 1440 dive the submerged ghost read as a jagged lilac silhouette): the stone's
             // under-pass is drawn at 0.4–0.6× and upscaled, so its edge stair-stepped; a 4-tap box of ~1.5 under-texels softens
