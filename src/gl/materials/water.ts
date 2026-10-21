@@ -274,9 +274,15 @@ export function createWaterMaterial() {
             ruv.x += band * 0.0035 * away * ruv.w * octAA(fp, 6.0) * mix(0.25, 1.0, smoothstep(0.2, 0.8, rcov));   // WATER LANE: gentler bands (0.0075 read as a jagged mosaic)
             }
             vec2 sv = vec2(0.0, 0.0008) * (1.0 + 4.0 * length(rg));   // WATER LANE: half the smear (it read as a blur blob)
+            #if HI
             vec4 pr = texture2DProj(u_reflTex, ruv) * 0.28;
             pr += (texture2DProj(u_reflTex, ruv + vec4(sv, 0.0, 0.0) * ruv.w) + texture2DProj(u_reflTex, ruv - vec4(sv, 0.0, 0.0) * ruv.w)) * 0.22;
             pr += (texture2DProj(u_reflTex, ruv + vec4(sv * 2.6, 0.0, 0.0) * ruv.w) + texture2DProj(u_reflTex, ruv - vec4(sv * 2.6, 0.0, 0.0) * ruv.w)) * 0.14;
+            #else
+            // WATERRES (Shifat 23:06Z 'just use reduced quality reflection'): phones smear with 3 taps (was 5), same span
+            vec4 pr = texture2DProj(u_reflTex, ruv) * 0.4;
+            pr += (texture2DProj(u_reflTex, ruv + vec4(sv * 1.6, 0.0, 0.0) * ruv.w) + texture2DProj(u_reflTex, ruv - vec4(sv * 1.6, 0.0, 0.0) * ruv.w)) * 0.3;
+            #endif
             gemR = vec4(pr.rgb / max(pr.a, 1e-3), pr.a);
           }
           // ---- REFRACTION (WATER LANE; Shifat 16:22Z "Refraction too") ------------------------------------

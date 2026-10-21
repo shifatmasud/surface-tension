@@ -217,7 +217,7 @@ export function HeroStage() {
     return { g, flags, uDeep }
   }, [])
   const refl = useMemo(() => {
-    const s = hi ? 0.75 : 0.35  // the mirror RT holds only the stone (gem layer): crisp facets in the lake cost little
+    const s = hi ? 0.75 : 0.2  // WATERRES (Shifat 23:06Z 'just use reduced quality reflection'): phones 0.2 (was 0.35, ≈1/3 the pixels); the mirror RT holds only the stone (gem layer): crisp facets in the lake cost little
     const rt = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType })
     const cam = new THREE.PerspectiveCamera()
     cam.layers.set(GEM_LAYER)
@@ -232,7 +232,7 @@ export function HeroStage() {
   useEffect(() => { wu.u_reflTex.value = refl.rt.texture; wu.u_reflOn.value = 1 }, [refl, wu])
   // the submerged part of the stone, seen from above THROUGH the water (screen-space refraction): the stone alone,
   // main camera, every frame its tip is in the water (the bob's dip, or the dive's sink); the lake samples it
-  const under = useMemo(() => ({ rt: new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType }), scale: hi ? 0.6 : 0.4 }), [hi])
+  const under = useMemo(() => ({ rt: new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType }), scale: hi ? 0.6 : 0.28 }), [hi])   // WATERRES: phones 0.28 (was 0.4, ≈half the pixels)
   useEffect(() => {
     // DIAG: follows the governor too (it was sized once from props.dpr, so a DPR step left it at the old size)
     // W19: follow the governor's MOVING rung only (noRest): the rest refinement toggles on every pointer stop/start, and

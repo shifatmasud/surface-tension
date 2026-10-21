@@ -78,11 +78,11 @@ export class RippleSim {
   ticks = 0
   lastS = 0
   constructor() {
-    // phones (low tier) 256², everything else 512²
-    this.size = settings.TIER === 'low' ? 256 : 512
+    // phones (low tier) 128² (WATERRES, Shifat 23:02Z: was 256²), everything else 512²
+    this.size = settings.TIER === 'low' ? 128 : 512
     this.a = fboHelper.createRenderTarget(this.size, this.size, { float: true })
     this.b = fboHelper.createRenderTarget(this.size, this.size, { float: true })
-    const k = this.size >= 512 ? 1.0 : 0.25     // equal world wave speed (see header); ≈1.3 m/s, a calm-water ring
+    const k = this.size >= 512 ? 1.0 : this.size >= 256 ? 0.25 : 0.0625     // equal world wave speed (see header); ≈1.3 m/s, a calm-water ring
     this.mat = fboHelper.track(new THREE.ShaderMaterial({
       vertexShader: FS_VERT, fragmentShader: FRAG,
       uniforms: {
