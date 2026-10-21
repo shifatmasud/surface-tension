@@ -247,7 +247,11 @@ export function createWaterMaterial() {
             // (x) that varies along the view depth (z), growing away from the waterline
             float band = gnoise(vec2(v_world.x * 2.0, v_world.z * 22.0 - u_time * 1.1)).x + 0.5 * gnoise(vec2(v_world.x * 4.0 + 7.0, v_world.z * 41.0 + u_time * 1.6)).x;
             float away = clamp(length(v_world.xz - u_gem.xz) * 1.6, 0.25, 1.0);
-            ruv.x += band * 0.0035 * away * ruv.w * octAA(fp, 6.0);   // WATER LANE: gentler bands (0.0075 read as a jagged mosaic)
+            // W25 R6.48 (scorer-r642 #3: a spike at each tip of the dive's mirror lobe): the band wobble shifts whole rows sideways,
+            // so at the mirror's outline a row could pull the stone's colour out past its edge as a thin horizontal spike. The wobble
+            // now follows the mirror's own (unwobbled) coverage: full inside the reflected stone, a quarter at and outside its edge
+            float rcov = texture2DProj(u_reflTex, ruv).a;
+            ruv.x += band * 0.0035 * away * ruv.w * octAA(fp, 6.0) * mix(0.25, 1.0, smoothstep(0.2, 0.8, rcov));   // WATER LANE: gentler bands (0.0075 read as a jagged mosaic)
             vec2 sv = vec2(0.0, 0.0008) * (1.0 + 4.0 * length(rg));   // WATER LANE: half the smear (it read as a blur blob)
             vec4 pr = texture2DProj(u_reflTex, ruv) * 0.28;
             pr += (texture2DProj(u_reflTex, ruv + vec4(sv, 0.0, 0.0) * ruv.w) + texture2DProj(u_reflTex, ruv - vec4(sv, 0.0, 0.0) * ruv.w)) * 0.22;
