@@ -132,5 +132,12 @@ html.no-gl .a11y-work ul { justify-content: center; }
 .site-footer--world .overscroll__bar::before { content: ''; position: absolute; left: -6px; bottom: -10px; height: 32px; width: calc(100% + 12px); border-radius: 999px;
   background: #b8ff3c; transform-origin: 6px 50%; transform: scaleX(var(--f, 0)); filter: blur(24px); opacity: calc(0.45 + 0.4 * var(--f, 0));
   transition: transform .32s var(--ease); pointer-events: none; }
+/* W28 (Shifat 16:20Z "Trail must bend glowbar too"): with WebGL the bar is drawn inside the picture (gl/post/footerWorld.ts,
+   same layers, same eased fill) so the cursor trail bends it; the DOM bar keeps its box and goes transparent */
+html.foot-glbar:not(.no-gl) .site-footer--world .overscroll__track,
+html.foot-glbar:not(.no-gl) .site-footer--world .overscroll__fill,
+html.foot-glbar:not(.no-gl) .site-footer--world .overscroll__fill::after { background: transparent; box-shadow: none; }
+html.foot-glbar:not(.no-gl) .site-footer--world .overscroll__bar::after,
+html.foot-glbar:not(.no-gl) .site-footer--world .overscroll__bar::before { content: none; }
 /* FOOTER MOCKUP: no WebGL = no world to draw: the plain paper footer, in flow, as before */
 html.no-gl .site-footer--world { clip-path: none; background: var(--c-paper); }

@@ -3,6 +3,7 @@ import { props, shared } from '../../state/props'
 import { BLUE_NOISE } from '../shaders/chunks'
 import { ufx } from '../ufx/ufx'
 import { paintState } from '../quality'
+import { journey } from '../stages/journey/journeyState'
 import type { ScreenPaintDistortionEffect } from './effects'
 const TEXT_BEND = /[?&]textbend\b/.test(location.search)   // W21: QA only
 
@@ -24,19 +25,26 @@ uniform sampler2D u_text;
 uniform sampler2D u_screenPaintTexture;
 uniform vec2 u_screenPaintTexelSize;
 uniform float u_amount, u_rgbShift, u_multiplier, u_colorMultiplier, u_shade, u_on;
+uniform float u_lift;   // W28: the footer curtain's lift, fraction of the screen height (footerWorld.ts u_fk)
 ${BLUE_NOISE}
 varying vec2 vUv;
 vec3 enc(vec3 c){ c = max(c, 0.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
 void main(){
+  // W28 (fast-scroll stress, 390 + 1440): the type belongs to the picture ABOVE the footer curtain. Footer B lifts the
+  // curtain inside the frame (footerWorld.ts shifts the picture up by u_fk and draws the footer under the edge), but this
+  // pass composites after it, so a beat still rolling out after a jump into the footer was drawn over the footer's own
+  // text. It now rides up with the picture and stops at the curtain's edge, as it did when the whole canvas slid (R6.63).
+  if (vUv.y < u_lift) discard;
+  vec2 tUv = vec2(vUv.x, vUv.y - u_lift);
   vec4 data = texture2D(u_screenPaintTexture, vUv);
   float weight = (data.z + data.w) * 0.5;
   vec2 vel = (0.5 - data.xy - 0.001) * 2.0 * weight;
   vec2 stepUv = vel * u_amount / 4.0 * u_screenPaintTexelSize * u_multiplier * u_on;
   vec4 acc;
-  if (dot(stepUv, stepUv) < 1e-12) acc = texture2D(u_text, vUv);
+  if (dot(stepUv, stepUv) < 1e-12) acc = texture2D(u_text, tUv);
   else {
     vec3 bn = getBlueNoise(gl_FragCoord.xy + vec2(17.0, 29.0));
-    vec2 p = vUv + bn.xy * stepUv;
+    vec2 p = tUv + bn.xy * stepUv;
     acc = vec4(0.0);
     for (int i = 0; i < 9; i++) { acc += texture2D(u_text, p); p += stepUv; }
     acc /= 9.0;
@@ -66,7 +74,7 @@ export class SharpText {
       blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
       blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
       uniforms: {
-        u_text: { value: this.rt.texture }, u_on: { value: 0 },
+        u_text: { value: this.rt.texture }, u_on: { value: 0 }, u_lift: { value: 0 },
         u_screenPaintTexture: d('u_screenPaintTexture'), u_screenPaintTexelSize: d('u_screenPaintTexelSize'),
         u_amount: d('u_amount'), u_rgbShift: d('u_rgbShift'), u_multiplier: d('u_multiplier'), u_colorMultiplier: d('u_colorMultiplier'), u_shade: d('u_shade'),
         u_blueNoise: shared.u_blueNoise as any, u_blueNoiseOffset: shared.u_blueNoiseOffset as any, u_blueNoiseSize: shared.u_blueNoiseSize as any,
@@ -135,6 +143,9 @@ export class SharpText {
     // W21 (scorer-r610/r614: the pointer trail refracted 'PORTFOLIO' and the name, so the type wobbled under the cursor):
     // the copy sits ABOVE the trail now; the trail bends the scene under it, never the words. (?textbend restores it)
     this.mat.uniforms.u_on.value = TEXT_BEND && props.look.paintAmount > 0 && !paintState.asleep ? 1 : 0
+    const lift = Math.max(0, journey.lift || 0)
+    this.mat.uniforms.u_lift.value = lift / Math.max(1, this.h)
+    if (b && lift > 0) b = { x: b.x, y: b.y - lift, w: b.w, h: b.h }   // the scissor rides up with the type
     gl.setRenderTarget(null)
     if (b) { gl.setScissorTest(true); gl.setScissor(b.x, this.h - b.y - b.h, b.w, b.h) }
     gl.render(this.scene, this.cam)

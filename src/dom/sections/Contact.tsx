@@ -130,7 +130,20 @@ export function Contact() {
             <h2 className="contact__title" id="contact-title"><span className="contact__line" ref={l1}>Let’s make</span><span className="contact__line" ref={l2}>it ripple.</span></h2>
             <div className="contact__row">
               <div className="contact__cta">
-                <a className="big-btn" ref={btnRef} href={SITE.email ? `mailto:${SITE.email}` : SITE.x} target={SITE.email ? undefined : '_blank'} rel="noreferrer" aria-label={SITE.email ? 'Write to me' : 'Say hi on X'} data-cursor onPointerEnter={(e) => { if (e.pointerType === 'mouse') audio.tick() }}>
+                <a className="big-btn" ref={btnRef} href={SITE.email ? `mailto:${SITE.email}` : SITE.x} target={SITE.email ? undefined : '_blank'} rel="noreferrer" aria-label={SITE.email ? 'Write to me' : 'Say hi on X'} data-cursor onPointerEnter={(e) => { if (e.pointerType === 'mouse') audio.tick() }}
+                  onFocus={() => {
+                    // W28 (scorer-r657 #2 / r664 #2, W27's parked fix, same as Systems.tsx): a keyboard stop on the CTA brings the pill on
+                    // screen first; the section is pinned and the pill only sits in place at the end of its pin, so the browser's own focus
+                    // scroll left it below the fold
+                    // (W28: the browser's own focus scroll lands AFTER this handler and the virtual engine adopts it as a glide, so the
+                    // jump is re-applied on the next two frames, after the engine has read that scroll)
+                    const sec = ref.current, b = btnRef.current; if (!sec || !b) return
+                    const go = () => {
+                      const r = b.getBoundingClientRect()
+                      if (r.top < 0 || r.bottom > window.innerHeight) scroll.scrollTo(sec, { offset: Math.max(0, sec.offsetHeight - window.innerHeight), immediate: true })
+                    }
+                    go(); requestAnimationFrame(() => { go(); requestAnimationFrame(go) })
+                  }}>
                   {/* BUTTON v2 (mockup): the label and the arrow each carry two copies for the masked roll; .ink is the
                       inverse-coloured copy the flood reveals (services/inkButton.ts) */}
                   <span className="big-btn__label ink-par"><span className="ir"><span className="ir-a">{SITE.email ? 'Write to me' : 'Say hi on X'}</span><span className="ir-b" aria-hidden="true">{SITE.email ? 'Write to me' : 'Say hi on X'}</span></span></span> <i className="ink-par"><span className="ia-a"><ArrowUpRight size={20} weight="bold" /></span><span className="ia-b" aria-hidden="true"><ArrowUpRight size={20} weight="bold" /></span></i>
@@ -169,7 +182,18 @@ export function Footer() {
     return () => { footRolls.splice(0).forEach((r) => r.destroy()); footP = -1 }
   }, [])
   return createPortal(
-    <footer className={FOOT_MODE ? `site-footer site-footer--world site-footer--w${FOOT_MODE}` : 'site-footer'} aria-label="Footer">
+    <footer className={FOOT_MODE ? `site-footer site-footer--world site-footer--w${FOOT_MODE}` : 'site-footer'} aria-label="Footer"
+      onFocus={() => {
+        // W28 (scorer-r664 #1): a keyboard stop inside the footer while the curtain still covers it (GitHub, X, Back to the
+        // surface took focus behind the clip, no ring on screen) jumps to where the footer is fully uncovered and the bar is
+        // still empty (k0 = fh + 2, f = 0: no wrap), the same jump-cut Systems.tsx uses for its drum controls
+        if (!settings.USE_GL || !FOOT_MODE) return
+        const sec = document.getElementById('contact'), vh = props.height || window.innerHeight
+        const fh = footerH(vh)
+        if (!sec || (journey.lift || 0) >= fh) return
+        const y = window.scrollY + sec.getBoundingClientRect().bottom - vh + fh + 2
+        scroll.scrollTo(y, { immediate: true })
+      }}>
       <div className="site-footer__top">
         <p className="site-footer__name" data-roll="marked"><span data-roll-line=""><span className="site-footer__lockup" role="img" aria-label={SITE.name}><span className="site-footer__mark" aria-hidden="true"><Logo size="100%" /></span><span aria-hidden="true">Shifat</span></span></span><span data-roll-line=""><span>{SITE.role}.</span></span></p>
         <nav className="site-footer__links" aria-label="Elsewhere" data-roll="marked">
