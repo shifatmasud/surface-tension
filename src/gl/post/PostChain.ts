@@ -202,6 +202,8 @@ void main(){
     ;(this.hdrMat.uniforms.u_b.value as THREE.Vector4).fromArray(toUv(document.querySelector('.header .pills'), [W - 90, 16, W - 20, 58]))
   }
   private hdrBg = ''
+  private hdrGen = 0
+  private hdrY = 0
   private hdrEma = [-1, -1]
   private hdrProbe() {
     const now = performance.now()
@@ -209,7 +211,7 @@ void main(){
     // takes it at once and the measurement starts fresh; the readback then only corrects it where the frame disagrees
     const bg = document.documentElement.dataset.bg === 'dark' ? 'dark' : 'light'
     if (bg !== this.hdrBg) {
-      this.hdrBg = bg; this.hdrTone = bg; this.hdrVotes = 0; this.hdrEma = [-1, -1]
+      this.hdrBg = bg; this.hdrTone = bg; this.hdrVotes = 0; this.hdrEma = [-1, -1]; this.hdrGen++
       if (document.documentElement.dataset.hdr !== bg) document.documentElement.dataset.hdr = bg
     }
     if (this.hdrBusy || now - this.hdrT < 250) return
@@ -220,8 +222,17 @@ void main(){
     this.hdrMat.uniforms.tMap.value = this.composer.inputBuffer.texture
     const prev = gl.getRenderTarget()
     gl.setRenderTarget(this.hdrRT); gl.render(this.hdrScene, this.blitCam); gl.setRenderTarget(prev)
+    // R6.40 (scorer-r639: a direct jump within one tone took >7 s to settle): a jump of more than a viewport since the last
+    // reading re-seeds the measurement (the tone stays until the new scene's readings decide)
+    const sy = ((window as any).__scroll?.scroll as number | undefined) ?? scrollY
+    if (Math.abs(sy - this.hdrY) > innerHeight) { this.hdrEma = [-1, -1]; this.hdrVotes = 0; this.hdrGen++ }
+    this.hdrY = sy
+    const gen = this.hdrGen
     gl.readRenderTargetPixelsAsync(this.hdrRT, 0, 0, 16, 4, this.hdrBuf).then(() => {
       this.hdrBusy = false
+      // R6.40 (scorer-r639: 390 deep→dive kept white on the pale dive): a reading taken before the scene's last tone flip is
+      // stale (it measured the old scene) and is dropped, so it can never vote the header off the new scene's tone
+      if (gen !== this.hdrGen) return
       const lin = (c: number) => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4) }
       let worstInk = 99, worstWhite = 99
       for (let half = 0; half < 2; half++) {
@@ -247,9 +258,10 @@ void main(){
       let other = ''
       if (cur === bg) { if (ct[bg] < 3.0 && ct[alt] > ct[bg] * 1.25) other = alt }
       else if (ct[bg] >= 3.3 || ct[alt] < ct[bg] * 1.1) other = bg
-      const urgent = other !== '' && ct[cur] < 2.0 && ct[other] > ct[cur] * 1.25
+      const urgent = other !== '' && ct[cur] < 2.0 && ct[other] > ct[cur] * 1.25 && this.hdrVotes >= 1   // two readings in a row
       this.hdrVotes = other ? this.hdrVotes + 1 : 0
-      const want = other && (urgent || this.hdrVotes >= 3) ? other : cur
+      const back = other === bg && ct[bg] >= 3.3   // one clear reading for the scene tone cancels an override
+      const want = other && (urgent || back || this.hdrVotes >= 3) ? other : cur
       if (want !== cur) this.hdrVotes = 0
       this.hdrTone = want
       if (document.documentElement.dataset.hdr !== want) document.documentElement.dataset.hdr = want

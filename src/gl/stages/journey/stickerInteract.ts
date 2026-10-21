@@ -239,6 +239,7 @@ export function createStickerInteraction(c: Ctx): StickerInteraction {
   }
   const begin = (i: number, id: number, cx: number, cy: number, touch: boolean) => {
     if (!toWall(cx, cy, w2)) return
+    document.documentElement.dataset.stkDrag = ''   // W24: no text selection anywhere while a sticker is held (scorer-r638 minor: the CTA pill text got selected)
     raise(i)
     const q = local(i, w2.x, w2.y, new THREE.Vector2())
     const ang = peelAngle(i, q)
@@ -273,6 +274,7 @@ export function createStickerInteraction(c: Ctx): StickerInteraction {
     }
   }
   const end = (cancel = false) => {
+    delete document.documentElement.dataset.stkDrag
     if (!g) return
     note(`end ${g.i} ${cancel ? 'cancel' : 'drop'}`)
     const st = S[g.i], i = g.i

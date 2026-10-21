@@ -35,6 +35,7 @@ html.no-gl .is-ufx, html.no-gl .is-ufx *, html.gl-lost .is-ufx, html.gl-lost .is
 /* ── header ─────────────────────────────────────────── */
 .header { position: fixed; top: 0; left: 0; right: 0; z-index: 50; display: flex; justify-content: space-between; align-items: center; padding: var(--pad-y) var(--pad-x); pointer-events: none; mix-blend-mode: normal; }
 .header > * { pointer-events: auto; }
+html[data-stk-drag], html[data-stk-drag] * { user-select: none; -webkit-user-select: none; }
 /* W24: the header's ink follows the frame measured behind it (PostChain hdrProbe; AA) — same logotype, same two colours */
 html[data-hdr='light'] .header, html[data-hdr='light'] .header .pill { color: var(--c-ink); }
 html[data-hdr='dark'] .header, html[data-hdr='dark'] .header .pill { color: var(--c-white); }
