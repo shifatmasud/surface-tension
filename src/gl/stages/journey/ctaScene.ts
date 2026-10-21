@@ -416,7 +416,9 @@ export function buildCta(portrait: boolean) {
     ix?.update(time, a, on)   // STICKERS HOOK
     const showType = built
     type.visible = showType
-    typeShadow.visible = showType && !portrait   // W19 (Shifat 20:50Z, phone): the soft cast shadow read as a doubled, ghosted headline at 390
+    // W21 (scorer-r614: the same ghost at 1440 — the cast shadow trails the odometer, so it can show the previous word
+    // behind the new one): off on every screen, as Shifat had it removed on phones
+    typeShadow.visible = false
     if (showType) {
       tU.u_time.value = time; tU.u_em.value = lay.em
       // TEXTROLL: in with the wall's arrival (a = journey.cta), out with the curtain (journey.ctaOut); reduced motion: in place

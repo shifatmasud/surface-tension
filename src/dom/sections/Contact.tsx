@@ -57,7 +57,8 @@ export function Contact() {
       vignette: 0.0, bloom: 0.18, bloomThreshold: 0.97, contrast: 1.0, saturation: 1.04, exposure: 1.0, paintOffsetRatio: 0.6,
     })
     const canvasEl = document.getElementById('canvas')
-    let lastK = -1, fired = false
+    let lastK = -1, fired = false, lastExtra = -1
+    const ctaEl = ref.current?.querySelector<HTMLElement>('.contact__cta') ?? null
     // TEXTROLL: the CTA label rolls up into its pill after the headline (scroll-driven, reversible)
     const btnEl = ref.current?.querySelector<HTMLElement>('.big-btn__label')
     let btnRoll: LineRoll | null = null
@@ -87,6 +88,11 @@ export function Contact() {
         // (W21 tried a soft mask on the curtain's lower edge: it read as a grey gradient band, against the no-gradient rule; the edge stays hard)
         if (k !== lastK && canvasEl) { lastK = k; canvasEl.style.transform = k > 0 ? `translate3d(0, ${-k}px, 0)` : '' }
         journey.lift = k   // W21: how far the curtain has lifted (css px); read by nothing that moves the picture (see Scene.tsx)
+        // W21 (scorer-r614: 'Say hi on X' crossed the crewmate's visor in the runway): the canvas stops lifting at the
+        // footer's height, but the section's DOM kept scrolling, so the pill slid up over the held picture. It now holds
+        // with the curtain: same place under the crewmate's feet as at the CTA hold, riding the curtain's edge
+        const extra = Math.max(0, Math.round(k0 - k))
+        if (ctaEl && extra !== lastExtra) { lastExtra = extra; ctaEl.style.transform = extra > 0 ? `translateX(-50%) translate3d(0, ${extra}px, 0)` : '' }
         // once the footer is fully uncovered, keep scrolling: the flat bar fills and floats you back to the surface
         // W19: the bar fills over the second half of the footer's reveal and wraps as it lands (no empty band above a half-height footer)
         // TEXTROLL: the CTA lines (GL, ctaScene) leave rolling up as the curtain lifts; the footer's lines
