@@ -136,10 +136,16 @@ export function createWaterMaterial() {
       // pebble sits inside its own 0.42 m cell (centre jitter 0.3–0.7, radius ≤ 0.26), so no neighbour search.
       // w = footprint on the bed (m), for edge softening.
       vec3 bedAlbedo(vec2 p, float w, float pf){
-        vec2 q = p + 0.4 * vec2(gnoise(p * 0.45).x, gnoise(p * 0.45 + 7.3).x);
-        float rip = sin(dot(q, vec2(0.55, -0.83)) * 10.0 + 1.6 * gnoise(q * 0.9).x);
-        float s = 0.91 + 0.05 * rip * (1.0 - smoothstep(0.1, 0.3, w * 1.6)) + 0.05 * gnoise(p * 2.7).x
-                + 0.03 * gnoise(p * 9.0).x * (1.0 - smoothstep(0.03, 0.1, w));
+        // PERF (water-perf): an octave whose weight is exactly 0 at this footprint is not evaluated (x * 0 adds nothing,
+        // so the pixel is bit-identical); far bed pixels skip 3–4 of the 5 noise calls
+        float kRip = 1.0 - smoothstep(0.1, 0.3, w * 1.6), kGrain = 1.0 - smoothstep(0.03, 0.1, w);
+        float rip = 0.0;
+        if (kRip > 0.0) {
+          vec2 q = p + 0.4 * vec2(gnoise(p * 0.45).x, gnoise(p * 0.45 + 7.3).x);
+          rip = sin(dot(q, vec2(0.55, -0.83)) * 10.0 + 1.6 * gnoise(q * 0.9).x);
+        }
+        float s = 0.91 + 0.05 * rip * kRip + 0.05 * gnoise(p * 2.7).x
+                + (kGrain > 0.0 ? 0.03 * gnoise(p * 9.0).x * kGrain : 0.0);
         vec3 c = u_bedColor * s;
         if (pf <= 0.0) return c;
         // stones, not droplets (review P1): darker than or equal to the sand, matte (a faint top light only), a soft
@@ -195,6 +201,15 @@ export function createWaterMaterial() {
         // its wavelength approaches two pixels (no shimmer at grazing angles), and the sim's ripples fade once a pixel
         // spans its texels. The old fixed distance fade stays only as a far backstop.
         float fp = max(length(fwidth(v_world.xz)), 1e-4);
+        // PERF (water-perf, Shifat "heavy & wide for phone"): past u_fogFar the aerial-perspective fog is exactly 1, so the
+        // lake's final colour there is exactly u_skyHorizon whatever the optics computed. Most of the 500 m plane's
+        // triangles sit out there as thin slivers under the horizon; they now cost one colour instead of the full shader
+        if (gl_FrontFacing && dist >= u_fogFar) {
+          gl_FragColor = vec4(u_skyHorizon, 1.0);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+          return;
+        }
         vec2 g = swellGrad(v_world.xz);
         vec2 rg = vec2(0.0); float rlap = 0.0;
         float cellM = 2.0 * u_poolSize * u_rippleTexel.x;                  // central-difference span of the sim (m)
@@ -210,6 +225,9 @@ export function createWaterMaterial() {
         vec2 wind = vec2(0.32, 0.11) * u_time;
         // cat's paws: wind gusts drift across the lake, so the fine chop comes and goes in soft patches (calm glassy
         // lanes beside rougher ones) instead of one uniform texture: the cue that sells real water at a glance
+        // PERF (water-perf): the chop's weight (detailFade × octAA, and the finer octaves fade before the coarse one) is
+        // exactly 0 where a pixel spans its wavelength: skip the noise there (adding x * 0 changes nothing)
+        if (detailFade * octAA(fp, 2.1) > 0.0) {
         float gust = 0.5 + 0.5 * gnoise(v_world.xz * 0.16 + vec2(u_time * 0.05, -u_time * 0.02)).x;
         float gustK = mix(0.45, 1.5, smoothstep(0.25, 0.8, gust));
         vec3 n1 = gnoise(v_world.xz * 2.1 + wind);
@@ -220,6 +238,7 @@ export function createWaterMaterial() {
           vec3 n3 = gnoise(v_world.xz * 13.0 + wind * 2.6 - 4.0);
           g += n3.yz * 0.005 * detailFade * gustK * octAA(fp, 13.0);
         #endif
+        }
         vec3 N = normalize(vec3(-g.x, 1.0, -g.y));
         vec3 col;
         vec4 gemR = vec4(0.0);
@@ -245,6 +264,7 @@ export function createWaterMaterial() {
             vec4 ruv = v_refl; ruv.xy += N.xz * vec2(0.1, 0.26) * ruv.w;
             // water breaks a near reflection into horizontal bands that slide sideways: a band-limited wobble across
             // (x) that varies along the view depth (z), growing away from the waterline
+            if (octAA(fp, 6.0) > 0.0) {   // PERF (water-perf): the band wobble's weight is exactly 0 past ~2 px bands: skip its 2 noises + 1 tap
             float band = gnoise(vec2(v_world.x * 2.0, v_world.z * 22.0 - u_time * 1.1)).x + 0.5 * gnoise(vec2(v_world.x * 4.0 + 7.0, v_world.z * 41.0 + u_time * 1.6)).x;
             float away = clamp(length(v_world.xz - u_gem.xz) * 1.6, 0.25, 1.0);
             // W25 R6.48 (scorer-r642 #3: a spike at each tip of the dive's mirror lobe): the band wobble shifts whole rows sideways,
@@ -252,6 +272,7 @@ export function createWaterMaterial() {
             // now follows the mirror's own (unwobbled) coverage: full inside the reflected stone, a quarter at and outside its edge
             float rcov = texture2DProj(u_reflTex, ruv).a;
             ruv.x += band * 0.0035 * away * ruv.w * octAA(fp, 6.0) * mix(0.25, 1.0, smoothstep(0.2, 0.8, rcov));   // WATER LANE: gentler bands (0.0075 read as a jagged mosaic)
+            }
             vec2 sv = vec2(0.0, 0.0008) * (1.0 + 4.0 * length(rg));   // WATER LANE: half the smear (it read as a blur blob)
             vec4 pr = texture2DProj(u_reflTex, ruv) * 0.28;
             pr += (texture2DProj(u_reflTex, ruv + vec4(sv, 0.0, 0.0) * ruv.w) + texture2DProj(u_reflTex, ruv - vec4(sv, 0.0, 0.0) * ruv.w)) * 0.22;
@@ -273,7 +294,11 @@ export function createWaterMaterial() {
           vec3 Ls = refract(-u_sunDir, vec3(0, 1, 0), 1.0 / 1.333);       // sunlight inside the water
           float ls = depthHere / max(-Ls.y, 0.1);
           vec2 cp = bed.xz + N.xz * depthHere * 0.35;                      // the local normal shears the network
-          float cau = caustic(cp * 2.0, u_time * 0.7);
+          // PERF (water-perf): the caustic network's only visible use is cauFade × (cau − 0.32); past 8 m cauFade is exactly 0,
+          // so the 9-cell search + domain warp is skipped there (the pixel is bit-identical)
+          float cauFade = (1.0 - smoothstep(2.0, 8.0, dist)) * u_cau;    // shallow-bed caustics through clear water
+          float cau = 0.32;
+          if (cauFade > 0.0) cau = caustic(cp * 2.0, u_time * 0.7);
           float focus = 1.0; vec3 focusC = vec3(1.0);
           {
             // where the sun ray that lands here crossed the surface, the sim's curvature acts as a lens: a crest
@@ -292,15 +317,12 @@ export function createWaterMaterial() {
             }
           }
           vec3 alb = bedAlbedo(bed.xz, fp * (1.0 + tb / max(dist, 0.1)), 1.0 - smoothstep(3.0, 10.0, dist));
-          float cauFade = (1.0 - smoothstep(2.0, 8.0, dist)) * u_cau;    // shallow-bed caustics through clear water
           float cauL = 0.9 + cauFade * (cau - 0.32) * 0.32;              // a soft network, not a pool-tile cliché
           vec3 sunOnBed = u_sunColor * max(-Ls.y, 0.0) * cauL * focus * focusC * exp(-u_absorb * ls);
           vec3 amb = mix(u_skyMid, u_skyHorizon, 0.4) * 0.42 * exp(-u_absorb * depthHere);
           vec3 bedCol = alb * (sunOnBed * 1.15 + amb);
           // the diamond focuses blue light into a soft, rippling caustic under itself
-          vec2 gd = bed.xz - (u_gem.xz + Ls.xz * (u_gem.y + u_bedDepth) / max(-Ls.y, 0.1));
-          float gemSpot = exp(-dot(gd, gd) * 5.0) * (0.6 + 0.8 * cau);
-          bedCol += u_gemTint * gemSpot * u_gem.w * 0.0;
+          // (its weight is 0.0: switched off; PERF water-perf removed the dead exp() it still cost per pixel)
           float L = tb;                                                    // path length through water
           vec3 Tr = exp(-u_absorb * L);
           vec3 sigT = u_absorb + u_sigS;
@@ -358,7 +380,7 @@ export function createWaterMaterial() {
           // sparkle texture). One random cell per 6 cm, each with its own phase; only cells whose facet points near
           // the half vector light up, so they gather along the glitter path and get sparser away from it
           #if HI
-          {
+          if (dist < 14.0) {   // PERF (water-perf): (1 − smoothstep(4, 14, dist)) is exactly 0 beyond 14 m
             vec2 gc = floor(v_world.xz * 16.0);
             float hr = fract(sin(dot(gc, vec2(127.1, 311.7))) * 43758.5453);
             float hp = fract(sin(dot(gc, vec2(269.5, 183.3))) * 43758.5453);

@@ -392,6 +392,11 @@ export function HeroStage() {
     // must draw after the dive backdrop there as well (the lake is cut at the line, so it never hides the pavilion)
     const crossing = dive.split > -0.5
     m.renderOrder = camUnder || crossing ? 11 : 0; sheenMesh.current.renderOrder = camUnder || crossing ? 15 : 2
+    // PERF (water-perf, Shifat "heavy & wide for phone"): above the surface the opaque lake draws just BEFORE the sky dome
+    // (-11 vs the dome's -10). The dome writes no depth and sits at the far plane, so where the lake already covers the
+    // screen the depth test rejects the dome's sky shader early (it used to shade the whole screen and then be painted over).
+    // Same pixels, same order for everything else; under water (the graded surround at -10 writes no depth) it keeps 0.
+    waterMesh.current.renderOrder = camUnder ? 0 : -11
     // W23: the silhouette coverage needs blending, so the stone draws in the transparent list in the lake (after the
     // water, sky and studio it sits on); under water and while the lens crosses it keeps its opaque place (renderOrder 11)
     { const W = window as any; gemSil.value = W.__gemSil ?? 1; const gm = m.material as THREE.Material; const tr = !(camUnder || crossing) && gemSil.value > 0; if (gm.transparent !== tr) gm.transparent = tr
