@@ -35,6 +35,11 @@ import { skyMaterial, starMaterial, glintStarMaterial } from './shaders'
 /** the display rectangle on the glass (screen-plane local units; the plane is 1.5 × 1.0, the display inset inside it) */
 export const WIN_HW = 0.69, WIN_HH = 0.44
 const PLANE_W = 1.5, PLANE_H = 1.0
+/** iPad Pro 13" (Shifat 12:10Z, Oct 21): the cover glass outline inside that UV frame — a uniform 0.045 bezel around the
+ *  display (8.7 mm on 281.6 mm, to scale) with corners concentric to the display's (0.03 + 0.045) — and the slab's depth
+ *  (5.1 mm on the same scale). The display rectangle above is unchanged. */
+export const IPAD_GLASS = { hw: WIN_HW + 0.045, hh: WIN_HH + 0.045, r: 0.075 }
+export const IPAD_T = 0.0266
 const ROCKS = 7
 /** The journey's visible lens at p = 0, as its screen covers the viewport (JourneyStage: sw × sh screen, OVERSCAN, the
  *  ultrawide widening): the vertical tan of what the viewer actually sees. SCENE may change the crop (journey glass
@@ -138,12 +143,12 @@ void main(){
   // CINEMATIC three-point (Shifat 18:50Z), no new lights: the key is the surface softbox in the glass above; the RIM is the
   // glass's bevelled edge catching the surface light from behind/above (strongest along the top, so the black slab
   // separates from the dark water); the FILL is a faint teal lift of the black bezel from the lens side
-  vec2 hp = vec2(${(PLANE_W / 2).toFixed(3)}, ${(PLANE_H / 2).toFixed(3)});
-  float dOut = sdBox(lp, hp - 0.004, 0.05);
+  vec2 hp = vec2(${IPAD_GLASS.hw.toFixed(3)}, ${IPAD_GLASS.hh.toFixed(3)});
+  float dOut = sdBox(lp, hp - 0.004, ${(IPAD_GLASS.r - 0.004).toFixed(3)});
   float bevel = exp(-pow((dOut + 0.007) / 0.006, 2.0));
   float topk = 0.35 + 0.65 * smoothstep(-0.4, 0.9, lp.y / hp.y);
   c += vec3(0.55, 0.86, 0.95) * bevel * topk * (0.3 + 0.7 * (1.0 - ndv)) * 0.5 * glass;
-  c += vec3(0.010, 0.030, 0.034) * (1.0 - inS) * (0.5 + 0.5 * pow(1.0 - ndv, 2.0)) * glass;
+  c += vec3(0.010, 0.030, 0.034) * 0.35 * (1.0 - inS) * (0.5 + 0.5 * pow(1.0 - ndv, 2.0)) * glass; // iPad: the bezel stays near-black (a faint fill only)
   gl_FragColor = vec4(c, 1.0);
 }`
 

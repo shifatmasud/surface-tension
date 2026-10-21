@@ -9,7 +9,7 @@ import { SYSUI_LAYER } from '../hero/HeroStage'
 import { dive, SYS_C, TAB_F } from './diveState'
 import { sys, type ControlId } from '../systems/state' // W20: the Shade DS keyboard proxies (dom/sections/Systems.tsx)
 import { AtomField } from './Atom'
-import { TabletWindow } from '../journey/tabletWindow'; import { tabletPose } from '../../world/handoff' // TABLET HOOK: the live 3D window (journey/tabletWindow.ts) + the tablet's pose (world/handoff.ts)
+import { TabletWindow, IPAD_GLASS, IPAD_T, WIN_HW, WIN_HH } from '../journey/tabletWindow'; import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'; import { tabletPose } from '../../world/handoff' // TABLET HOOK: the live 3D window (journey/tabletWindow.ts) + the tablet's pose (world/handoff.ts)
 /** QA: ?atom holds the sequence at the atom, ?drum at the drum; window.__morph (0..1) pins it */
 const KEEP_EYE = new THREE.Vector3(0, 0, -1e3), KEEP_F = new THREE.Vector3(0, 0, 1), KEEP_V = new THREE.Vector3() // POLISH-2: the main lens, for the ring's keep-out
 const STONE_D = new THREE.Vector3() // W20: the eye→stone direction (phones' stone keep-out)
@@ -307,11 +307,51 @@ function makeTablet(M: Mats) {
     vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
     fragmentShader: TAB_FRAG, toneMapped: false,
   })
-  // Shifat 13:24Z: a real floating tablet rises out of the deep — a flat gloss-black slab, its screen glowing with stars
+  // Shifat 12:10Z (Oct 21): "Tablet design can be replaced with lated ipad 3d model" — the latest iPad Pro (13", Space
+  // Black), procedural: an ultra-thin anodised slab (5.1 mm on 281.6 mm, to scale) with flat sides and softly rounded,
+  // concentric corners; edge-to-edge cover glass with a uniform thin black bezel; the landscape front camera on the long
+  // bezel; machined volume/top-button bumps; speaker slots on the short sides; the camera bump on the back. The DISPLAY
+  // rectangle (WIN_HW × WIN_HH on the 1.5 × 1.0 glass UV frame) is untouched, so the portal and the push land exactly.
+  const { hw: GW, hh: GH, r: GR } = IPAD_GLASS
   const g = new THREE.Group()
-  const body = new THREE.Mesh(flat(1.62, 1.12, 0.07, 0.06), M.black.clone())   // its own: the drum's fade must not touch it
-  const screen = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.0), mat); screen.position.z = 0.032
-  g.add(body, screen)
+  const T = IPAD_T, bt = 0.0022, bs = 0.0022                                   // depth to scale; a soft machined edge radius
+  const front = 0.0318                                                        // the body's front face, a hair under the glass (z 0.032)
+  const parts: THREE.BufferGeometry[] = []
+  const slab = new THREE.ExtrudeGeometry(rrShape(GW * 2 - 2 * bs, GH * 2 - 2 * bs, GR - bs), { depth: T - 2 * bt, bevelEnabled: true, bevelThickness: bt, bevelSize: bs, bevelSegments: 3, curveSegments: 10 })
+  slab.translate(0, 0, front - T + bt); parts.push(slab)
+  // side buttons (landscape, camera on top): two volume keys on the top edge toward the left, the top button on the left edge
+  const key = (len: number, x: number, y: number, rotZ: number) => {
+    const k = new THREE.ExtrudeGeometry(rrShape(len, 0.0105, 0.0052), { depth: 0.0016, bevelEnabled: true, bevelThickness: 0.0006, bevelSize: 0.0006, bevelSegments: 1, curveSegments: 4 })
+    k.rotateX(-Math.PI / 2); k.rotateZ(rotZ); k.translate(x, y, front - T / 2 + 0.00525); return k
+  }
+  parts.push(key(0.072, -0.50, GH - 0.0004, 0), key(0.072, -0.415, GH - 0.0004, 0), key(0.082, -GW + 0.0004, 0.36, Math.PI / 2))
+  // the back camera bump (upper left seen from behind = upper right in front-local x): a raised rounded square
+  const bump = new THREE.ExtrudeGeometry(rrShape(0.118, 0.118, 0.03), { depth: 0.0018, bevelEnabled: true, bevelThickness: 0.0008, bevelSize: 0.0008, bevelSegments: 2, curveSegments: 6 })
+  bump.rotateY(Math.PI); bump.translate(GW - 0.105, GH - 0.105, front - T + 0.0001); parts.push(bump)
+  const metal = M.silver.clone()                                              // its own: the drum's fade must not touch it
+  metal.color.set('#2e2f33'); metal.roughness = 0.34; metal.metalness = 1; metal.iridescence = 0; metal.envMapIntensity = 1.9
+  metal.onBeforeCompile = M.silver.onBeforeCompile; metal.customProgramCacheKey = M.silver.customProgramCacheKey
+  const body = new THREE.Mesh(mergeGeometries(parts.map((p) => (p.index ? p.toNonIndexed() : p))), metal)
+  // the cover glass: the same 1.5 × 1.0 UV frame (so the display, the portal rect and the shader are pixel-identical), its
+  // outline cut to the slab's rounded corners and its thin uniform bezel
+  const sg = new THREE.ShapeGeometry(rrShape(GW * 2, GH * 2, GR), 16)
+  const sp = sg.attributes.position as THREE.BufferAttribute, suv = sg.attributes.uv as THREE.BufferAttribute
+  for (let i = 0; i < sp.count; i++) suv.setXY(i, sp.getX(i) / 1.5 + 0.5, sp.getY(i) / 1.0 + 0.5)
+  const screen = new THREE.Mesh(sg, mat); screen.position.z = 0.032
+  // the small dark details (one draw): front camera dot on the long bezel, speaker slots on the short sides, back lenses
+  const dk: THREE.BufferGeometry[] = []
+  const dot = (r: number, x: number, y: number, z: number, back = false) => { const c = new THREE.CircleGeometry(r, 20); if (back) c.rotateY(Math.PI); c.translate(x, y, z); dk.push(c) }
+  dot(0.0042, 0, GH - (GH - WIN_HH) / 2, 0.0326)                              // the landscape front camera
+  dot(0.0021, 0.034, GH - (GH - WIN_HH) / 2, 0.0326)                          // the ambient/TrueDepth sensor, barely there
+  for (const sx of [-1, 1]) for (const sy of [-1, 1]) {                       // four speaker slots: short sides, near each corner
+    const sl = new THREE.PlaneGeometry(0.011, 0.07); sl.rotateY(sx * Math.PI / 2); sl.translate(sx * (GW + 0.0003), sy * 0.33, front - T / 2); dk.push(sl)
+  }
+  const bz = front - T - 0.0026
+  dot(0.022, GW - 0.135, GH - 0.075, bz, true); dot(0.022, GW - 0.075, GH - 0.135, bz, true); dot(0.009, GW - 0.075, GH - 0.075, bz, true) // wide + ultra-wide-sized lenses, the LiDAR
+  const dmat = new THREE.MeshPhysicalMaterial({ color: '#06070a', roughness: 0.12, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 1.4, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
+  dmat.envMap = M.silver.envMap; dmat.onBeforeCompile = M.silver.onBeforeCompile; dmat.customProgramCacheKey = M.silver.customProgramCacheKey
+  const details = new THREE.Mesh(mergeGeometries(dk.map((p) => (p.index ? p.toNonIndexed() : p))), dmat)
+  g.add(body, screen, details)                                                // children[1] stays the glass (TabletWindow's hook)
   g.traverse((o) => { o.layers.set(SYSUI_LAYER); o.renderOrder = 11 })
   g.userData.mat = mat
   return g
@@ -361,7 +401,7 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
   }, [u, gl])
   useEffect(() => {
     camera.layers.enable(SYSUI_LAYER)
-    return () => { Object.values(built.M).forEach((m) => m.dispose()); built.envRT.dispose(); (built.tablet.userData.mat as THREE.Material).dispose(); ((built.tablet.children[0] as THREE.Mesh).material as THREE.Material).dispose(); built.atom.dispose() }
+    return () => { Object.values(built.M).forEach((m) => m.dispose()); built.envRT.dispose(); (built.tablet.userData.mat as THREE.Material).dispose(); built.tablet.children.forEach((c, i) => { if (i !== 1) ((c as THREE.Mesh).material as THREE.Material).dispose() }); built.atom.dispose() }
   }, [camera, built])
 
   // W17: the parts answer the pointer — hover lifts a part out of the ring toward you, a tap plays it (toggle flips,
