@@ -37,9 +37,13 @@ const tier = settings.TIER
  *  (-1, -2, …), reached only on measured headroom; level 0 keeps today's meaning for every reader of `level`
  *  (render-target scales, tap counts, the neighbour pass, the stage window). Phones floor at 1.0. */
 const LADDER: Record<string, number[]> = {
-  high: [1.5, 1.3, 1.15, 1.0, 0.85],
-  mid: [1.5, 1.3, 1.15, 1.0, 0.85],
-  low: [1.3, 1.15, 1.0],
+  // W27 R6.65 (Shifat 16:03Z "For dpr can be adaptive for better performance", 16:07Z "Min of phone & desktop should
+  // be same & lower"): one shared floor of 0.6 for every tier (= the capDpr hard floor in settings.ts), reached through
+  // 0.85 / 0.72, so a slow device can hold 60 instead of settling at ~30 on the old floor. Level 0 and every rung that
+  // existed before are unchanged; only the ladder's tail grew.
+  high: [1.5, 1.3, 1.15, 1.0, 0.85, 0.72, 0.6],
+  mid: [1.5, 1.3, 1.15, 1.0, 0.85, 0.72, 0.6],
+  low: [1.3, 1.15, 1.0, 0.85, 0.72, 0.6],
   none: [1],
 }
 const BOOST: Record<string, number[]> = {          // nearest first: BOOST[0] is level -1
@@ -49,8 +53,8 @@ const BOOST: Record<string, number[]> = {          // nearest first: BOOST[0] is
   none: [],
 }
 /** render-target scale per level (multiplies a stage's own base scale) and loop-count scale */
-const RT = [1, 0.9, 0.8, 0.7, 0.6]
-const TAPS = [1, 0.85, 0.75, 0.62, 0.5]
+const RT = [1, 0.9, 0.8, 0.7, 0.6, 0.55, 0.5]      // W27 R6.65: 7 rungs, one per ladder level (high/mid)
+const TAPS = [1, 0.85, 0.75, 0.62, 0.5, 0.45, 0.4]
 
 const BUDGET_MS = 1000 / 60          // the target is 60; a low-end phone that cannot hold it settles at the floor (≈30 fps, steady)
 const WINDOW = 50                    // frames per decision (~0.8 s at 60)
@@ -78,6 +82,8 @@ const CANVAS_PIXELS = 9.0e6
  *  with the lake, the stone and the trail still animating). At the phone's viewing size 1.5x + SMAA reads the same;
  *  text stays at 2x, the sharpest thing on screen. */
 const PHONE_SCENE_DPR = 1.5
+/** W27 R6.65: phone text density drops from 2x to 1.5x at this governor level and holds there (see textDprFor) */
+const TEXT_DROP_LEVEL = 1
 const PHONE_CANVAS_DPR = 2
 
 class Quality {
@@ -141,7 +147,10 @@ class Quality {
     const n = this.nativeFor(w, h)
     if (tier !== 'low') return n
     if (this.rest && !noRest) return this.textCeil(w, h)
-    return Math.min(n, this.level >= this.maxLevel - 1 ? 1.5 : 2)
+    // W27 R6.65: the text rung drops to 1.5x from level 1 on (the same absolute level as before the ladder grew: it was
+    // "the last two of three"), and NEVER lower — the new 0.85 / 0.72 / 0.6 scene steps keep the text at 1.5x, so
+    // text stays the sharpest thing on screen at the floor too.
+    return Math.min(n, this.level >= TEXT_DROP_LEVEL ? 1.5 : 2)
   }
   /** SHARP REST REFINEMENT (Shifat 15:39Z + the sharp lane): after ~300 ms with no scroll or pointer the canvas renders
    *  at native density with SMAA (razor stills); motion drops it back. Every tier, phones included. A rest frame that

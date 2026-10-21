@@ -17,8 +17,7 @@ export function Cursor() {
       if (first) { sx.reset(input.mousePixelXY.x); sy.reset(input.mousePixelXY.y); first = false }
       const x = sx.update(input.mousePixelXY.x, dt), y = sy.update(input.mousePixelXY.y, dt)
       el.style.transform = `translate3d(${x}px, ${y}px, 0)`
-      const dot = el.querySelector<HTMLElement>('.cursor__dot')!
-      dot.style.transform = `translate3d(${input.mousePixelXY.x - x}px, ${input.mousePixelXY.y - y}px, 0)`
+      // W27 R6.65 (Shifat 16:12Z "Remove the cursor dot"): no dot any more — the ring (and its label) is the cursor
     }
     gsap.ticker.add(tick)
     // POLISH: touch never shows the cursor or its label ("DRAG" over a sticker). The last REAL pointer decides: the
@@ -55,7 +54,6 @@ export function Cursor() {
   return (
     <div className="cursor" ref={ref} aria-hidden>
       <div className="cursor__ring" />
-      <div className="cursor__dot" />
       {label && <div className="cursor__label" data-k={label.toLowerCase()}>{label}</div>}
     </div>
   )

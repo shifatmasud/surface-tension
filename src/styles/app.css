@@ -75,7 +75,7 @@ html[data-bg='dark'] .pill { background: rgba(30, 31, 34, .55);  color: #fff; }
 /* cursor */
 .cursor { position: fixed; left: 0; top: 0; z-index: 60; pointer-events: none; width: 0; height: 0; }
 .cursor__ring { position: absolute; left: -16px; top: -16px; width: 32px; height: 32px; border-radius: 50%; background: currentColor; opacity: 0; transition: width var(--dur-ui) var(--ease), height var(--dur-ui) var(--ease), left var(--dur-ui) var(--ease), top var(--dur-ui) var(--ease), opacity var(--dur-fade) var(--ease-in-out), background var(--dur-fade) var(--ease-in-out); }
-.cursor__dot { position: absolute; left: -2.5px; top: -2.5px; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+/* W27 R6.65 (Shifat 16:12Z): the cursor dot is gone; the ring + label remain */
 .cursor.is-hover .cursor__ring { width: 56px; height: 56px; left: -28px; top: -28px; opacity: .12; }
 .cursor { opacity: 0; transition: opacity var(--dur-ui) var(--ease); }
 .cursor.is-live { opacity: 1; }
