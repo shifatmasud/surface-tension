@@ -17,6 +17,7 @@ import { engine } from '../../engine'
 import { dive, DIVE_LAYER } from '../dive/diveState'
 import { quality } from '../../quality' // PERF HOOK
 import { waterInput } from '../../water/waterInput' // WATER HOOK
+import { gemMask } from '../../systems/stickerMask'
 
 export const GEM_LAYER = 2
 export const gem = { pos: new THREE.Vector3(0, 0.45, 0), radius: 0.5, touch: 0 }
@@ -394,6 +395,17 @@ export function HeroStage() {
       studio.position.copy(gem.pos); uStudio.g.position.copy(gem.pos)
       env.cam.update(gl, scene)
       m.visible = true; sheenMesh.current.visible = true
+    }
+    {
+      // W23: where the stone sits on screen (viewport px), so the trail's smear leaves its edge alone (post/effects.ts)
+      if (lakeOn && m.visible) {
+        const R = gem.radius * (dive.gemMix > 0 ? dive.gemScale : 1) * 1.1
+        const v = st.look.copy(gem.pos).applyMatrix4(c.matrixWorldInverse)
+        const dz = Math.max(0.05, -v.z), f = 1 / Math.tan((c.fov * Math.PI) / 360)
+        gemMask.r = (R / dz) * f * innerHeight * 0.5
+        v.applyMatrix4(c.projectionMatrix)
+        gemMask.x = (v.x * 0.5 + 0.5) * innerWidth; gemMask.y = (0.5 - v.y * 0.5) * innerHeight; gemMask.on = 1
+      } else gemMask.on = 0
     }
     env.frame++
     scene.background = bg

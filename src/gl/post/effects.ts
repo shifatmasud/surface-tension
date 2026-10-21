@@ -19,7 +19,7 @@ export class ScreenPaintDistortionEffect extends Effect {
       uniform sampler2D u_screenPaintTexture;
       uniform vec2 u_screenPaintTexelSize;
       uniform float u_amount, u_rgbShift, u_multiplier, u_colorMultiplier, u_shade, u_iridescence, u_debug, u_dark;
-      uniform vec4 u_stk[4]; uniform float u_stkOn; uniform vec2 u_view;   // W23: the CTA stickers on screen (viewport px)
+      uniform vec4 u_stk[4]; uniform float u_stkOn; uniform vec2 u_view; uniform vec4 u_gem;   // W23: the CTA stickers on screen (viewport px)
       ${BLUE_NOISE}
       vec3 spd_encode(vec3 c){ c = max(c, 0.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
       vec3 spd_decode(vec3 c){ c = max(c, 0.0); return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
@@ -34,6 +34,8 @@ export class ScreenPaintDistortionEffect extends Effect {
           vec2 px = vec2(uv.x, 1.0 - uv.y) * u_view;
           for (int i = 0; i < 4; i++) if (u_stk[i].w > 0.5) stkM = min(stkM, smoothstep(u_stk[i].z * 1.05, u_stk[i].z * 1.05 + 80.0, distance(px, u_stk[i].xy)));
         }
+        // W23: nor across the hero stone's edge (it dragged a grey hook off its silhouette onto the water)
+        if (u_gem.w > 0.5) stkM = min(stkM, smoothstep(u_gem.z, u_gem.z + 36.0, distance(vec2(uv.x, 1.0 - uv.y) * u_view, u_gem.xy)));
         vec2 stepUv = vel * u_amount / 4.0 * u_screenPaintTexelSize * u_multiplier * (1.0 - 0.6 * u_dark) * stkM;   // W23: on the dark wall a shorter smear (it dragged the matte texture into dirty streaks)
         vec2 p = uv + bn.xy * stepUv;                                 // jittered first tap kills banding
         vec4 acc = vec4(0.0);
@@ -88,6 +90,7 @@ export class ScreenPaintDistortionEffect extends Effect {
         ['u_stk', new THREE.Uniform([new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()])],
         ['u_stkOn', new THREE.Uniform(0)],
         ['u_view', new THREE.Uniform(new THREE.Vector2(1, 1))],
+        ['u_gem', new THREE.Uniform(new THREE.Vector4())],
         ['u_blueNoise', shared.u_blueNoise as any],
         ['u_blueNoiseOffset', shared.u_blueNoiseOffset as any],
         ['u_blueNoiseSize', shared.u_blueNoiseSize as any],

@@ -13,7 +13,7 @@ import { InlineSharpenEffect } from './perfEffects' // PERF HOOK
 import type { Look } from '../../state/props'
 import { ufx } from '../ufx/ufx'
 import { SharpText } from './SharpText'
-import { stickerMask } from '../systems/stickerMask'
+import { stickerMask, gemMask } from '../systems/stickerMask'
 import { makeSelective, syncSelective } from '../fx/hotBloom' // CINEMATIC: selective bloom (hot spots only)
 import { gpuTimer } from '../systems/perfGovernor' // SHARP: the governor's GPU frame timer ends after the last draw
 
@@ -236,6 +236,8 @@ void main(){
     // W23: the stickers keep out of the trail's smear (stickerInteract.ts writes where they sit)
     d('u_stkOn').value = stickerMask.on && !(window as any).__stkSmear ? 1 : 0
     if (stickerMask.on) { const v = d('u_stk').value as THREE.Vector4[]; for (let i = 0; i < 4; i++) v[i].fromArray(stickerMask.c, i * 4); (d('u_view').value as THREE.Vector2).set(innerWidth, innerHeight) }
+    // W23: and so does the hero stone (HeroStage.tsx writes where it sits)
+    { const W = window as any; const on = gemMask.on && !W.__gemSmear ? 1 : 0; (d('u_gem').value as THREE.Vector4).set(gemMask.x, gemMask.y, gemMask.r, on); if (on) (d('u_view').value as THREE.Vector2).set(innerWidth, innerHeight) }
   }
   render(dt: number) {
     this.sync()
