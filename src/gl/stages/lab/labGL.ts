@@ -92,6 +92,14 @@ void main(){
     float m = h.a * smoothstep(0.9, 0.99, lum) * (1.0 - smoothstep(0.14, 0.2, v_uv.y));
     col = mix(col, vec3(1.0), m);
   }
+  // W24: the reels are mastered low-contrast (near-black ~17/255 and mid-grey type) and read muddy under the water:
+  // a gentle levels + S-curve in perceptual space, the same curve on every channel (hues and saturation kept)
+  if (u_vid > 0.5 || u_ready > 0.5) {
+    vec3 sq = sqrt(max(col, vec3(0.0)));
+    sq = clamp((sq - 0.075) / 0.94, 0.0, 1.0);
+    sq = mix(sq, sq * sq * (3.0 - 2.0 * sq), 0.45);
+    col = sq * sq;
+  }
   // the water's light: a little brighter toward the surface, and a faint caustic shimmer drifting over the panel —
   // brightness only, the reel's colours stay true
   float shim = vnoise(p / u_size.x * 7.0 + vec2(u_time * 0.21, -u_time * 0.17)) + vnoise(p / u_size.x * 13.0 - vec2(u_time * 0.13, u_time * 0.25));
@@ -104,7 +112,8 @@ void main(){
   // and saturation kept, never tinted teal or greyed
   float fogK = u_amb * deepFog(7.0 + 9.0 * u_off);
   vec3 deepV = vec3(dot(deepWater(normalize(v_dir)), vec3(0.2126, 0.7152, 0.0722)));
-  col = mix(col, col * 0.42 + deepV, fogK);
+  // (W24: the lift toward the water's value is 0.6× — the full lift greyed the side slides' blacks into a veil)
+  col = mix(col, col * 0.42 + deepV * 0.6, fogK);
   // while the shelf is still coming up out of the deep (before it pins) the water below is thicker: the slides rise out
   // of the deep's own fog colour as the world moves (scroll-mapped, never timed; the panel stays solid), so they never
   // sit bright under the dive's last lines of copy
