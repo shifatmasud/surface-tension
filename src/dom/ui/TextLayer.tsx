@@ -31,9 +31,10 @@ gsap.registerPlugin(SplitText)
  * The CTA's huge white type is not here on purpose: it is part of the CTA scene (drawn on the black wall BEHIND the
  * crewmate, STRUCTURE v3 CTA), not copy laid over it.
  */
-type Beat = { id: string; eyebrow: string; title: string[]; body: string }
+type Beat = { id: string; eyebrow: string; title: string[]; body: string | string[] }
+const bodyText = (b: Beat) => (Array.isArray(b.body) ? b.body.join(' ') : b.body)
 const BEATS: Beat[] = [
-  { id: 'hero', eyebrow: 'Portfolio — 2026', title: ['Shifat', 'Masud'], body: 'Design engineer & creative technologist' },
+  { id: 'hero', eyebrow: 'Portfolio — 2026', title: ['Shifat', 'Masud'], body: ['Design engineer &', 'creative technologist'] },   // W23 (Shifat 02:28Z m:b33ea208): the subtitle is always 2 lines, at every width
   // TEXT GAP (Shifat 18:52Z m:ef4a3572): "After Shifat Masud, no other text untill project sections texts." The
   // principle line and "Under the surface" are gone: the descent plays wordless until the first work beat.
   ...PROJECTS.map((p) => ({ id: 'lab-' + p.id, eyebrow: `Work · ${p.no} / 0${PROJECTS.length}`, title: [p.title], body: `${p.blurb} ${p.tags.join(' · ')}` })),
@@ -206,7 +207,7 @@ export function TextLayer() {
       beatsEl.forEach((b, k) => b.classList.toggle('is-active', k === i))
       active = i
       slotBox.top = i >= 0 ? beatsEl[i].getBoundingClientRect().top : 1e5
-      if (live.current) live.current.textContent = i >= 0 ? `${BEATS[i].title.join(' ')}. ${BEATS[i].body}` : ''
+      if (live.current) live.current.textContent = i >= 0 ? `${BEATS[i].title.join(' ')}. ${bodyText(BEATS[i])}` : ''
     }
     const tick = () => {
       if (!built) return
@@ -278,7 +279,7 @@ export function TextLayer() {
           <div key={b.id} className="slot__beat" data-beat={b.id}>
             <p className="slot__eyebrow" data-role="eyebrow">{b.eyebrow}</p>
             <p className="slot__title" data-role="title">{noOrphanLines(b.title).map((t, i, a) => <span key={i}>{t}{i < a.length - 1 && <br />}</span>)}</p>
-            <p className="slot__body" data-role="body">{noOrphan(b.body)}</p>
+            <p className="slot__body" data-role="body">{Array.isArray(b.body) ? b.body.map((t, i, a) => <span key={i}>{t}{i < a.length - 1 && <br />}</span>) : noOrphan(b.body)}</p>
           </div>
         ))}
       </div>
