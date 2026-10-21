@@ -19,4 +19,5 @@ export const journey = {
   ctaTime: 0,
   /** TEXTROLL: 0 → 1 as the curtain lifts off the footer (written by the Contact section); the CTA lines roll up and out */
   ctaOut: 0,
+  lift: 0,         // W21: css px the CTA curtain has lifted over the footer (Contact.tsx); the scene re-frames by part of it
 }

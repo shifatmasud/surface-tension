@@ -5,7 +5,7 @@
  * The frame the visitor is looking at when the loop fires (the CTA curtain lifted over the footer) is frozen: the GL
  * canvas is copied right after it was drawn (Scene calls grab() after the chain renders, while the drawing buffer is
  * still intact), and the footer's DOM is cloned beside it. That still sits over the page while the page jumps to the
- * hero underneath, then dissolves away (0.5 s). Nothing is hidden behind a flat colour: the hero, its stone and its
+ * hero underneath, then dissolves away (0.5 s; the dark curtain part clears first, see grab()). Nothing is hidden behind a flat colour: the hero, its stone and its
  * name come up THROUGH the outgoing frame. If no frame can be grabbed (no GL, a skipped frame), the wrap jumps as
  * before. QA: ?wrapfade=<ms> slows the dissolve.
  */
@@ -51,9 +51,17 @@ export const wrapFade = {
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
     const ms = QA_MS || (reduced ? 220 : 520)
     const el = ov
+    // the frozen frame is dark above (the curtain) and paper below (the footer), the hero is light: one shared fade
+    // passes the top through grey while the bottom stays light, a seam across the stone for a moment. So the dark part
+    // clears first (40 % of the time) and the paper part, already close to the hero's own tone, fades over the whole
+    // time: no frame shows a dark half against a light one.
+    const parts = Array.from(el.children) as HTMLElement[]
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      el.style.transition = `opacity ${ms}ms cubic-bezier(0.4, 0, 0.2, 1)`
-      el.style.opacity = '0'
+      for (const p of parts) {
+        const dark = p.tagName === 'CANVAS', t = dark ? Math.round(ms * 0.4) : ms
+        p.style.transition = `opacity ${t}ms cubic-bezier(${dark ? '0.2, 0.7, 0.3, 1' : '0.4, 0, 0.2, 1'})`
+        p.style.opacity = '0'
+      }
       window.setTimeout(() => el.remove(), ms + 120)
     }))
   },

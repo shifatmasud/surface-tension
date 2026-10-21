@@ -75,7 +75,9 @@ export function Contact() {
         // 0 when the wall's edge enters at the bottom → 1 when it reaches the top (then the CTA holds, pinned)
         journey.cta = clamp((vh - top) / vh)
         st.weight = journey.cta > 0 ? 0.2 + 1.2 * journey.cta : 0
-        if (journey.cta > 0 && range.isActive) journey.active = true
+        // W21 (scorer-r614 #1): through the footer's reveal and runway (lastK > 0) the CTA scene keeps drawing; past the
+        // section's own range it had stopped, leaving the lifted curtain as an empty black slab until the wrap
+        if (journey.cta > 0 && (range.isActive || lastK > 0)) journey.active = true
         props.resurface = clamp(range.progress)
         // sticky footer: once the section's bottom passes the bottom of the screen, the whole scene (canvas + DOM)
         // travels up with the scroll and uncovers the fixed footer beneath
@@ -84,6 +86,7 @@ export function Contact() {
         const k0 = Math.max(0, vh - (top + range.height)), k = Math.round(Math.min(k0, fh + 2))
         // (W21 tried a soft mask on the curtain's lower edge: it read as a grey gradient band, against the no-gradient rule; the edge stays hard)
         if (k !== lastK && canvasEl) { lastK = k; canvasEl.style.transform = k > 0 ? `translate3d(0, ${-k}px, 0)` : '' }
+        journey.lift = k   // W21: the scene inside the lifting curtain re-frames by part of it (Scene.tsx), so the crewmate stays in the visible slab
         // once the footer is fully uncovered, keep scrolling: the flat bar fills and floats you back to the surface
         // W19: the bar fills over the second half of the footer's reveal and wraps as it lands (no empty band above a half-height footer)
         // TEXTROLL: the CTA lines (GL, ctaScene) leave rolling up as the curtain lifts; the footer's lines
