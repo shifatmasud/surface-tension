@@ -18,6 +18,9 @@ export function runToEnd<T>(g: Generator<unknown, T, unknown>): T { for (;;) { c
 
 /** yielded by a step that must wait for the next frame (a link still running on the driver) */
 export const NEXT_FRAME = Symbol('next-frame')
+/** R6.77: yielded after a heavy GPU pass (core/pmremSteps.ts): wait for the next frame like NEXT_FRAME, unless the job is
+ *  rushed (a stage the visitor is in or about to reach), which runs on in the same task: a hitch, never a void */
+export const GPU_FRAME = Symbol('gpu-frame')
 /** prewarm work per task (ms). The steps run as short tasks back to back between frames (a message-channel loop,
  *  not inside the frame), so the throughput is the main thread's spare time while every task stays far under the
  *  ~50 ms a slow phone can absorb without a visible stall; the odometer's frames run between them */
@@ -55,7 +58,7 @@ function run() {
     let r: IteratorResult<unknown, unknown>
     try { r = best.g.next() } catch (e) { jobs.splice(jobs.indexOf(best), 1); best.fail(e); continue }
     if (r.done) { jobs.splice(jobs.indexOf(best), 1); best.done(r.value) }
-    else if (r.value === NEXT_FRAME) { const j = best; j.waiting = true; requestAnimationFrame(() => { j.waiting = false; post() }) }
+    else if (r.value === NEXT_FRAME || (r.value === GPU_FRAME && !best.rush?.())) { const j = best; j.waiting = true; requestAnimationFrame(() => { j.waiting = false; post() }) }
     // R6.71b: a rushed job (a stage the visitor is in or within about a viewport of) runs to its end in this task: a short
     // hitch on the way in instead of an empty scene; everything else keeps its SLICE_MS share
     else if (best.rush?.()) continue

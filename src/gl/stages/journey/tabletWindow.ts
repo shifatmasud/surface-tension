@@ -7,9 +7,9 @@ import { nb } from '../../systems/neighbour'
 import { FIXED_LENS } from '../../world/handoff'
 import { inner, type Inner } from './timeline'
 import { Crewmate, crewMaterials, CREW_CENTER_Y } from './crewmate'
-import { makeEnvs } from './env'
+import { makeEnvs, makeEnvsSteps } from './env'
 import { skyMaterial, starMaterial, glintStarMaterial } from './shaders'
-import { warmSteps as prewarmSteps, prewarm } from '../../prewarm' // PERFGOV
+import { warmSteps as prewarmSteps, prewarm, runToEnd } from '../../prewarm' // PERFGOV
 
 /**
  * TABLET WINDOW (Shifat 16:19Z: "Tablet must not show 2d thumbnail but actual 3d").
@@ -383,9 +383,13 @@ export class TabletWindow {
     this.sky.position.copy(eye); this.stars.position.copy(eye)
   }
 
-  private ensureEnvs() {
+  private ensureEnvs() { runToEnd(this.ensureEnvsSteps()) }
+  /** R6.77: the environments' PMREMs one GPU pass per step (env.ts makeEnvsSteps); run to the end it is ensureEnvs() */
+  private *ensureEnvsSteps(): Generator<unknown, void, unknown> {
     if (this.envs) return
-    this.envs = makeEnvs(this.gl)
+    const envs = yield* makeEnvsSteps(this.gl)
+    if (this.envs || this.disposed) { envs.space.dispose(); envs.forest.dispose(); envs.page.dispose(); return }
+    this.envs = envs
     this.crewMats.body.envMap = this.envs.space; this.crewMats.body.envMapIntensity = 1.0
     this.crewMats.visor.envMap = this.envs.page; this.crewMats.visor.envMapIntensity = 3.0
     this.crewMats.body.needsUpdate = true; this.crewMats.visor.needsUpdate = true
@@ -396,7 +400,7 @@ export class TabletWindow {
   *warmSteps(): Generator<unknown, void, unknown> {
     if (this.compiled || this.disposed) return
     this.compiled = true
-    this.ensureEnvs()
+    yield* this.ensureEnvsSteps()
     yield
     this.layout(props.height > props.width * 1.05, 1.0)
     yield* prewarmSteps(this.gl, [{ roots: [this.scene], scene: this.scene, camera: this.cam, target: this.rt }], [this.rt])

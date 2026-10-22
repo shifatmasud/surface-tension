@@ -10,7 +10,7 @@ import { settings } from '../../../services/settings'
 import { mix, smoothstep as ss } from '../../../core/math'
 import { journey } from './journeyState'
 import { Crewmate, crewGeometrySteps, CREW_HEIGHT, CREW_CENTER_Y, crewMaterials } from './crewmate'
-import { makeEnvs } from './env'
+import { makeEnvsSteps } from './env'
 import { buildForestSteps, buildShadows, longShadowGeometry, longShadowMaterial } from './forest'
 import { buildSunFan, buildMist, buildMotes } from './forestFx'
 import { buildFoliageSteps } from './foliage' // FOLIAGE HOOK (foliage helper): fluffy grass + trees
@@ -447,7 +447,7 @@ export function* buildSteps(gl: THREE.WebGLRenderer, portrait: boolean, low: boo
   const rt = new THREE.WebGLRenderTarget(portrait ? Math.round(long * sw / sh) : long, portrait ? long : Math.round(long * sh / sw), {
     type: THREE.HalfFloatType, samples: 0 /* PERF HOOK: no MSAA anywhere (SMAA on the final frame covers the tablet) */, depthBuffer: true, generateMipmaps: false,
   })
-  const envs = makeEnvs(gl)
+  const envs = yield* makeEnvsSteps(gl) // R6.77: each environment's PMREM one GPU pass per step
   yield // PERFGOV
 
   // ===== inner world

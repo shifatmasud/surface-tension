@@ -10,6 +10,7 @@ import { dive, SYS_C, TAB_F } from './diveState'
 import { sys, type ControlId } from '../systems/state' // W20: the Shade DS keyboard proxies (dom/sections/Systems.tsx)
 import { AtomField } from './Atom'
 import { prewarm, runToEnd } from '../../prewarm' // PERFGOV
+import { pmremFromSceneSteps } from '../../core/pmremSteps' // R6.77
 import { crewGeometrySteps } from '../journey/crewmate' // PERFGOV
 import { TabletWindow, IPAD_GLASS, IPAD_T, WIN_HW, WIN_HH } from '../journey/tabletWindow'; import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'; import { tabletPose } from '../../world/handoff' // TABLET HOOK: the live 3D window (journey/tabletWindow.ts) + the tablet's pose (world/handoff.ts)
 /** QA: ?atom holds the sequence at the atom, ?drum at the drum; window.__morph (0..1) pins it */
@@ -76,7 +77,7 @@ type Mats = ReturnType<typeof makeMats>
  * three tall soft light strips and a ring. Black plastic then reads black with long crisp highlights and the metal
  * reads as metal (the site's grey studio env made every material the same flat grey down here).
  */
-function deepEnv(gl: THREE.WebGLRenderer) {
+function* deepEnv(gl: THREE.WebGLRenderer) {
   const s = new THREE.Scene()
   s.add(new THREE.Mesh(new THREE.SphereGeometry(20, 48, 24), new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false,
@@ -102,11 +103,12 @@ function deepEnv(gl: THREE.WebGLRenderer) {
   const box = new THREE.Mesh(new THREE.PlaneGeometry(9, 3.2), soft)
   box.position.set(0, 7, 10); box.lookAt(0, 0, 0); s.add(box)
   const pm = new THREE.PMREMGenerator(gl)
-  const rt = pm.fromScene(s, 0.02)
+  const rt = yield* pmremFromSceneSteps(gl, pm, s, 0.02) // R6.77: = pm.fromScene(s, 0.02), one GPU pass per step
   pm.dispose()
   s.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.geometry.dispose(); (m.material as THREE.Material).dispose() } })
   return rt
 }
+
 
 function makeMats(u: Record<string, THREE.IUniform>, env: THREE.Texture) {
   const film = { iridescenceIOR: 1.4, iridescenceThicknessRange: [160, 760] as [number, number] }
@@ -370,7 +372,7 @@ const ROWS: { y: number; phase: number; kinds: Kind[] }[] = [
 /** PERFGOV: the cylinder's build as steps (one part per step: its labels are canvas text), spread over short tasks behind
  *  the preloader by prebuildCylinder; a later re-mount runs it in one go as before */
 function* buildCylSteps(gl: THREE.WebGLRenderer, u: Record<string, THREE.IUniform>) {
-  const envRT = deepEnv(gl)
+  const envRT = yield* deepEnv(gl)
   yield // PERFGOV
   const M = makeMats(u, envRT.texture)
   const items: { g: THREE.Group; a: number; y: number; ph: number }[] = []

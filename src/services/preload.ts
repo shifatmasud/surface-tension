@@ -123,7 +123,14 @@ export const warmGate = {
   active: false,
   seen: 0,
   built: 0,
-  budget: 3,
+  budget: 1, // R6.77: was 3 (the first gated frame); it doubles on a fast GPU from the second frame
+  /** R6.77: new programs a gated frame may create */
+  mkBudget: 1,
+  _mk: 0,
+  /** R6.77: render targets a gated frame may bring up (allocate) for the first time */
+  rtBudget: 4,
+  _rt: 0,
+  _block: false,
   /** 0..1 while open; 1 once closed (or never needed) */
   get progress() { return this.active ? (this.seen ? this.built / this.seen : 0) : (this.closedAt ? 1 : 0) },
   closedAt: 0,
@@ -156,8 +163,42 @@ export const warmGate = {
       const f = o[n] as (...a: unknown[]) => void
       k[n] = function (...a: unknown[]) { if (pass()) return f.apply(c, a) }
     }
-    this._restore = () => { for (const n of Object.keys(o)) delete k[n]; renderer.resetState() }
-    this.active = true; this.openedAt = this._last = performance.now(); this._allow = this.budget
+    // R6.77 BOOT FREEZES (M02 rig, 6x: the first gated frame was one 1.0 s task): three builds a program (strings,
+    // compile, link) for every material the frame touches whether or not its draw is let through, so the first gated
+    // frame created ~20 programs at once. Now each frame may also CREATE only `mkBudget` new programs; an object whose
+    // material has never had a program, past that budget, is skipped whole this frame (counted as skipped, so the gate
+    // stays open until a frame builds and draws everything). Same programs, same keys, spread over more short frames.
+    const r3 = renderer as any
+    const rbd = r3.renderBufferDirect as (...a: unknown[]) => unknown
+    const progs = (renderer.info.programs ?? null) as unknown[] | null
+    const mats = r3.properties as { get(m: object): { currentProgram?: unknown } } | undefined
+    // and render targets: a target never bound before is allocated on its first bind (framebuffer, textures, depth),
+    // so each frame may also bring up only `rtBudget` new ones; past that the switch is not made and every draw until the
+    // next switch is skipped (nothing of a gated frame is seen; the gate closes only after a frame that skipped nothing)
+    const srt = r3.setRenderTarget as (t: unknown, f?: number, m?: number) => unknown
+    const tgts = r3.properties as { get(t: object): { __webglFramebuffer?: unknown } } | undefined
+    if (tgts && typeof srt === 'function') {
+      r3.setRenderTarget = function (t: object | null, f?: number, m?: number) {
+        const fresh = !!t && !tgts.get(t).__webglFramebuffer
+        if (fresh && g._rt >= g.rtBudget) { g._skipped++; g._block = true; return }
+        g._block = false
+        const r = srt.call(this, t, f, m)
+        if (fresh) g._rt++
+        return r
+      }
+    }
+    if (progs && mats && typeof rbd === 'function') {
+      r3.renderBufferDirect = function (camera: unknown, scene: unknown, geometry: unknown, material: object, object: unknown, group: unknown) {
+        if (g._block) { g._skipped++; return }
+        if (g._mk >= g.mkBudget && !mats.get(material).currentProgram) { g._skipped++; return }
+        const n0 = progs.length
+        const r = rbd.call(this, camera, scene, geometry, material, object, group)
+        if (progs.length > n0) g._mk += progs.length - n0
+        return r
+      }
+    }
+    this._restore = () => { for (const n of Object.keys(o)) delete k[n]; if (r3.renderBufferDirect !== rbd) r3.renderBufferDirect = rbd; if (r3.setRenderTarget !== srt) r3.setRenderTarget = srt; g._block = false; renderer.resetState() }
+    this.active = true; this.openedAt = this._last = performance.now(); this._allow = this.budget; this._mk = 0; this._rt = 0; this._block = false
   },
   /** after the frame's last draw: true when the gate just closed (the next frame is the full-size warm frame) */
   endFrame(): boolean {
@@ -170,7 +211,10 @@ export const warmGate = {
     // shrank past 420 ms, so the odometer could sit still for 0.2–0.4 s per frame on a phone. Now it aims at ~50 ms frames
     // (halve above 60 ms, grow only below 30 ms): the same programs are built, spread over more, shorter frames.
     if (this.frames > 1) this.budget = dt < 30 ? Math.min(this.budget * 2, 32) : dt < 45 ? this.budget + 1 : dt > 60 ? Math.max(1, this.budget >> 1) : this.budget
-    this._skipped = 0; this._allow = this.budget
+    // R6.77: program creations per frame follow the same rule (a cheap frame takes more, a slow one drops back to 1)
+    if (this.frames > 1) this.mkBudget = dt < 30 ? Math.min(this.mkBudget * 2, 16) : dt < 45 ? this.mkBudget + 1 : dt > 60 ? Math.max(1, this.mkBudget >> 1) : this.mkBudget
+    if (this.frames > 1) this.rtBudget = dt < 30 ? Math.min(this.rtBudget * 2, 64) : dt < 45 ? this.rtBudget + 1 : dt > 60 ? Math.max(2, this.rtBudget >> 1) : this.rtBudget
+    this._skipped = 0; this._allow = this.budget; this._mk = 0; this._rt = 0; this._block = false
     return false
   },
   close() { if (!this.active) return; this.active = false; this.closedAt = performance.now(); this._restore?.(); this._restore = null },
