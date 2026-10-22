@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { settings } from '../../../services/settings'
 import { quality } from '../../quality' // PERF HOOK
+import { portrait } from '../../../core/frame'
 
 /**
  * Dive — shared state and the camera path. The stage (GL) and the section (DOM) both read this.
@@ -92,6 +93,10 @@ export const U_MAX = 1.5
  *  the water and reaches the top as the lens meets it (so the air half is always rendered from above the surface) */
 export const PORT = 0.6
 export const SYS_C = new THREE.Vector3(0, -40, 50)
+/** R6.82 (Shifat 6:46 AM PT Oct 22, "the stone is the nucleus"): wide screens lift the systems centre by 1 m so the
+ *  drum's lower row clears the type slot (W19). The ROOT (atom + drum) and the STONE share this one lift, so the stone
+ *  sits in the atom's centre on every screen. Phones (portrait = 1) get 0: unchanged. */
+export function sysLift() { return 1.0 * (1 - portrait()) }
 /** W17 Scene 3 (13:24Z): where the floating tablet settles, relative to SYS_C (in front of the stone's old place) */
 export const TAB_F = new THREE.Vector3(0, 0.05, -0.7)
 const curP = new THREE.CatmullRomCurve3(KEYS.map((k) => new THREE.Vector3(...k.p)), false, 'centripetal')
@@ -177,7 +182,7 @@ export function gemPath(u: number, pos: THREE.Vector3, target: THREE.Vector3, vf
   // v3: past the work the stone sinks ahead of us and settles at the axis of the UI cylinder
   const t2 = Math.min(1, Math.max(0, (u - 1.0) / 0.2)), w2 = t2 * t2 * (3 - 2 * t2)
   if (w2 > 0) {
-    _b.copy(SYS_C); _b.y += Math.sin(time * 0.55) * 0.06; _b.x += Math.sin(time * 0.37) * 0.03
+    _b.copy(SYS_C); _b.y += sysLift() + Math.sin(time * 0.55) * 0.06; _b.x += Math.sin(time * 0.37) * 0.03
     out.lerp(_b, w2)
   }
   // Scene 3 hand-off (13:24Z): the stone drifts aside and down, back into the fog, as the tablet takes the focus
