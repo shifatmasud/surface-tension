@@ -16,7 +16,7 @@ import { labGL } from '../gl/stages/lab/labGL'
  * The GL work slides get the same press through labGL.press (a vertex-shader scale on a spring; no new pass).
  */
 // BUTTON v2: the CTA pill and the sound pill have their own press (services/inkButton.ts)
-const SEL = '.pill:not(.pill--sound), .wordmark, .skip-link, .overlay__link, .site-footer__links a, .site-footer__top-link, .lab .card'
+const SEL = '.pill:not(.pill--sound), .wordmark, .skip-link, .overlay__link, .site-footer__links a, .lab .card'
 const SMALL = '.pill'
 const MIN_HOLD = 110, TOUCH_DELAY = 70, SLOP = 10
 const PRESS_IN = 160, RELEASE = HOUSE.DUR_UI * 1000
