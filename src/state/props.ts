@@ -44,6 +44,8 @@ export const props = {
   waterPointer: new THREE.Vector2(0.5, 0.5), waterPointerActive: false,
   drops: [] as { x: number; y: number; r: number; s: number }[],
   overlayOpen: false,
+  /** R6.83 GIFT: the gift dialog holds the main scene's frame loop (its frozen, blurred frame covers the page) */
+  sceneHold: false,
 }
 ;(window as any).__props = props
 
