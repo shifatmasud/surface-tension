@@ -549,3 +549,15 @@ a, button, [role='button'], .stk-hit { -webkit-tap-highlight-color: transparent;
 /* the magnet replaces the sound pill's 1 px hover lift */
 @media (hover: hover) { .pill--sound:hover { transform: none; } }
 .pill--sound.is-press { background-color: transparent; }
+
+/* R6.83 GIFT (Shifat Oct 22 07:03-07:16): the logo opens a gift box over the page. The page's own frame, frozen and
+   blurred once, cross-fades in over it (opacity only: compositor work, nothing per frame); the box rises in from below. */
+.gift { position: fixed; inset: 0; z-index: 58; overscroll-behavior: contain; touch-action: none; }
+.gift__bg { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; transform: scale(1.0); transition: opacity .9s var(--ease-sine), transform 1.8s var(--ease); }
+.gift__tint { position: absolute; inset: 0; background: rgba(8, 10, 14, .3); opacity: 0; transition: opacity .9s var(--ease-sine); }
+.gift.is-in .gift__bg { opacity: 1; transform: scale(1.04); }
+.gift.is-in .gift__tint { opacity: 1; }
+.gift.is-out .gift__bg, .gift.is-out .gift__tint { opacity: 0; transition-duration: .75s; transition-delay: .08s; }
+.gift--live .gift__bg { display: none; }
+.gift--live .gift__tint { -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); }
+@media (prefers-reduced-motion: reduce) { .gift__bg, .gift__tint { transition-duration: .15s !important; transform: none !important; } }
