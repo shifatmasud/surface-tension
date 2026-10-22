@@ -6,7 +6,7 @@ import { portrait } from '../../../core/frame'
 import { nb, useStageFrame } from '../../systems/neighbour' // NEIGHBOUR HOOK
 import { input } from '../../../services/input'
 import { SYSUI_LAYER } from '../hero/HeroStage'
-import { dive, SYS_C, TAB_F } from './diveState'
+import { dive, SYS_C, TAB_F, sysLift } from './diveState'
 import { sys, type ControlId } from '../systems/state' // W20: the Shade DS keyboard proxies (dom/sections/Systems.tsx)
 import { AtomField } from './Atom'
 import { prewarm, runToEnd } from '../../prewarm' // PERFGOV
@@ -493,7 +493,7 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
     r.position.copy(SYS_C)
     // W19 (key-frame review 21:0xZ: at 1440 the lower drum parts sat over the "Shade DS" title and lede): wide screens lift
     // the drum so its bottom row clears the text slot (phones have their own framing below)
-    r.position.y += 1.0 * (1 - portrait())
+    r.position.y += sysLift()   // R6.82: the same lift the stone settles at (diveState.sysLift)
     // phones: a tighter ring so no part crops at the screen edge as it turns
     // Scene 3 entry: as the camera pushes into the stone the ring opens outward to let it through
     const pw = dive.push * dive.push * (3 - 2 * dive.push)
@@ -592,7 +592,7 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
       if (kw > 0.001) {
         const ry = s.rotation.y, cr = Math.cos(ry), sr = Math.sin(ry)
         const lx0 = Math.sin(it.a) * rr + sideX, lz0 = Math.cos(it.a) * rr + sideZ, ly0 = iy + dodge + s.position.y
-        STONE_D.set(SYS_C.x - KEEP_EYE.x, SYS_C.y - KEEP_EYE.y, SYS_C.z - KEEP_EYE.z).normalize()
+        STONE_D.set(SYS_C.x - KEEP_EYE.x, SYS_C.y + sysLift() - KEEP_EYE.y, SYS_C.z - KEEP_EYE.z).normalize()
         KEEP_V.set(r.position.x + lx0 * cr + lz0 * sr - KEEP_EYE.x, r.position.y + ly0 - KEEP_EYE.y, r.position.z - lx0 * sr + lz0 * cr - KEEP_EYE.z)
         KEEP_V.addScaledVector(STONE_D, -KEEP_V.dot(STONE_D)) // the part's offset from the eye→stone line
         const lat = KEEP_V.length(), rk = 1.35, e = 0.25
