@@ -3,6 +3,8 @@ import { audio } from '../../services/audio'
 import { scroll } from '../../services/scroll'
 import { Logo } from '../../assets/logo/Logo'
 import { bindInk } from '../../services/inkButton'
+const go = (id: string) => { scroll.scrollTo('#' + id, { duration: 2 }); audio.swell(true) } // original logo click (Shifat 9:53: keep og click)
+import { giftTrigger } from '../gift/gift' // R6.83 GIFT: the logo opens the gift box (its look is untouched)
 
 /** BUTTON v2: the ink copy of the wave draws in the opposite of the header ink (the flood is the ink itself) */
 function inv(c: string) {
@@ -89,10 +91,9 @@ export function Header() {
     const iv = window.setInterval(on, 400)   // the virtual scroller moves the page without native scroll events
     return () => { removeEventListener('scroll', on); removeEventListener('resize', on); clearInterval(iv); if (raf) cancelAnimationFrame(raf) }
   }, [])
-  const go = (id: string) => { scroll.scrollTo('#' + id, { duration: 2 }); audio.swell(true) }
   return (
     <header className="header">
-      <a className="wordmark" href="#hero" onClick={(e) => { e.preventDefault(); go('hero') }} aria-label="Shifat Masud — home" data-cursor><span className="wordmark__mark" aria-hidden="true"><Logo size="100%" /></span><span aria-hidden="true">Shifat</span></a>
+      <a className="wordmark" href="#hero" onClick={(e) => { e.preventDefault(); go('hero') }} onDoubleClick={giftTrigger} aria-label="Shifat Masud — home (double-click for a gift)" aria-haspopup="dialog" data-cursor><span className="wordmark__mark" aria-hidden="true"><Logo size="100%" /></span><span aria-hidden="true">Shifat</span></a>
       <nav className="pills" aria-label="Primary">
         <button type="button" ref={sndRef} className="pill pill--quiet pill--sound" onClick={() => audio.toggle()} aria-pressed={sound} aria-label={sound ? 'Sound on' : 'Sound off'} data-cursor onPointerEnter={(e) => { if (e.pointerType === 'mouse') audio.tick() }}>
           {/* BUTTON v2 (mockup): two wave copies roll in a mask; .ink is the flood with the inverse-ink copy */}
