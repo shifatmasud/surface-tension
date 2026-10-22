@@ -3,6 +3,7 @@ import { audio } from '../../services/audio'
 import { scroll } from '../../services/scroll'
 import { Logo } from '../../assets/logo/Logo'
 import { bindInk } from '../../services/inkButton'
+let clickT = 0 // Shifat 1:53 PM: a double-click must not also scroll the page (single click waits 280 ms)
 const go = (id: string) => { scroll.scrollTo('#' + id, { duration: 2 }); audio.swell(true) } // original logo click (Shifat 9:53: keep og click)
 import { giftTrigger } from '../gift/gift' // R6.83 GIFT: the logo opens the gift box (its look is untouched)
 
@@ -93,7 +94,7 @@ export function Header() {
   }, [])
   return (
     <header className="header">
-      <a className="wordmark" href="#hero" onClick={(e) => { e.preventDefault(); go('hero') }} onDoubleClick={giftTrigger} aria-label="Shifat Masud — home (double-click for a gift)" aria-haspopup="dialog" data-cursor><span className="wordmark__mark" aria-hidden="true"><Logo size="100%" /></span><span aria-hidden="true">Shifat</span></a>
+      <a className="wordmark" href="#hero" onClick={(e) => { e.preventDefault(); clearTimeout(clickT); clickT = window.setTimeout(() => go('hero'), 280) }} onDoubleClick={(e) => { clearTimeout(clickT); giftTrigger(e) }} aria-label="Shifat Masud — home (double-click for a gift)" aria-haspopup="dialog" data-cursor><span className="wordmark__mark" aria-hidden="true"><Logo size="100%" /></span><span aria-hidden="true">Shifat</span></a>
       <nav className="pills" aria-label="Primary">
         <button type="button" ref={sndRef} className="pill pill--quiet pill--sound" onClick={() => audio.toggle()} aria-pressed={sound} aria-label={sound ? 'Sound on' : 'Sound off'} data-cursor onPointerEnter={(e) => { if (e.pointerType === 'mouse') audio.tick() }}>
           {/* BUTTON v2 (mockup): two wave copies roll in a mask; .ink is the flood with the inverse-ink copy */}
