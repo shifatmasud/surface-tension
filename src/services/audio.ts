@@ -56,14 +56,23 @@ class AudioService {
   private listeners = new Set<(on: boolean) => void>()
   onChange(f: (on: boolean) => void) { this.listeners.add(f); return () => { this.listeners.delete(f) } }
   private build() {
-    const ctx = new AudioContext()
+    // W29 R6.75: 'playback' asks for a larger output buffer. Offline, the shatter (~140 voices + the 2.6 s room) renders at
+    // only ~4x real time on this box's core; on a low-end Android phone (Shifat's M02s) that is near or past real time, and
+    // with the default interactive (smallest) buffer the device under-runs: crackle that reads as clipping. These are ambient
+    // cues, so a few tens of ms more latency costs nothing
+    let ctx: AudioContext
+    try { ctx = new AudioContext({ latencyHint: 'playback' }) } catch { ctx = new AudioContext() }
     this.ctx = ctx
     this.master = ctx.createGain(); this.master.gain.value = 0
     this.analyser = ctx.createAnalyser(); this.analyser.fftSize = 64
     // W25 R6.55 (sound audit #6): a safety limiter before the speakers. A splash (noise + six plips) over the bed, the drone
     // and the reverb tail could sum past full scale and clip; the limiter only acts on those peaks
     const lim = ctx.createDynamicsCompressor()
-    lim.threshold.value = -6; lim.knee.value = 6; lim.ratio.value = 12; lim.attack.value = 0.003; lim.release.value = 0.25
+    // W29 R6.75 (Shifat "Weird sound distortion … clipping maybe"): measured offline through this chain, no path clipped a
+    // sample, but the old -6 dB / 12:1 / soft-knee setting squashed the shatter's crack by several dB (and its automatic
+    // make-up gain lifted the whole mix ~3 dB into it): audible crunch and pumping. Now a true ceiling that the cues sit
+    // under: -3 dB, hard knee, 20:1, 2 ms attack, 150 ms release
+    lim.threshold.value = -3; lim.knee.value = 0; lim.ratio.value = 20; lim.attack.value = 0.002; lim.release.value = 0.15
     this.master.connect(lim); lim.connect(this.analyser); this.analyser.connect(ctx.destination)
     // W25 sound redesign: a short dark room (1.6 s, the highs dying first) in place of the bright 2.6 s noise impulse
     this.reverb = ctx.createConvolver()
