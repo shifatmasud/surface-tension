@@ -19,6 +19,8 @@ import { noOrphan } from '../a11y/noOrphans'
 import { lineRoll, type LineRoll } from '../ui/maskedRoll'
 import { bindInk } from '../../services/inkButton'
 import { FOOT_MODE } from '../../gl/post/footerWorld'
+import { loopPull } from '../../services/loopPull'
+const RM = window.matchMedia('(prefers-reduced-motion: reduce)')
 let footEl: HTMLElement | null = null
 
 /** W19: the fixed footer's height (50vh / 50svh since 19:06Z), cached by a ResizeObserver so the frame loop reads no layout */
@@ -72,10 +74,11 @@ export function Contact() {
       init() {
         // W18: the CTA type is drawn in GL on the wall (ctaScene.ts, the odometer); the DOM heading stays for AT
         if (settings.USE_GL) document.documentElement.classList.add('cta-gl')
+        loopPull.init(() => props.scroll >= scroll.limit - 2)
         if (btnEl && settings.USE_GL) btnRoll = lineRoll(btnEl, { split: false, pad: 0.25 })
       },
       dispose() { btnRoll?.destroy(); btnRoll = null; journey.ctaOut = 0; footRoll(0) },
-      update() {
+      update(dt = 0.016) {
         const vh = props.height
         const top = range.docTop - props.scroll
         // 0 when the wall's edge enters at the bottom → 1 when it reaches the top (then the CTA holds, pinned)
@@ -114,11 +117,19 @@ export function Contact() {
         btnRoll?.set(clamp((journey.cta - 0.62) / 0.34))
         footRoll(clamp((k0 - 0.08 * fh) / (0.62 * fh)))
         // W19 (Shifat 19:49Z): the footer is fully in view at k0 = fh; it then HOLDS for the runway while the bar fills, and wraps at the end
-        const f = clamp((k0 - fh - 2) / Math.max(1, runwayPx(vh, fh) - 6))
+        // R6.80 (Shifat Oct 22 "scroll hard to loop to top", 04:55 "Rubber band is enough"; services/loopPull.ts): the
+        // footer is the page's end. Scrolling on past it only stretches the bar and it springs back; a hard, sustained
+        // push fills it and loops. Reduced motion (and the no-GL page) keep the runway.
+        let f: number
+        if (RM.matches || !settings.USE_GL) f = clamp((k0 - fh - 2) / Math.max(1, runwayPx(vh, fh) - 6))
+        else {
+          const sy = props.scroll, lim = scroll.limit
+          f = loopPull.step(dt, sy >= lim - 2 && !(scroll as any).tween)
+        }
         props.overscroll = f
         footerBar.el?.style.setProperty('--f', f.toFixed(3))
         if (FOOT_MODE) footerBar.el?.parentElement?.parentElement?.style.setProperty('--f', f.toFixed(3))   // FOOTER MOCKUP: the lime glow reads it
-        if (f > 0.985 && !fired) { fired = true; audio.swell(false); scroll.wrapToTop(); setTimeout(() => (fired = false), 900) }
+        if (f > 0.985 && !fired) { fired = true; audio.swell(false); scroll.wrapToTop(); loopPull.reset(); setTimeout(() => (fired = false), 900) }
       },
     }
   })
