@@ -76,6 +76,10 @@ export function Dive() {
         // and the frame rides lower so the cylinder sits in the upper half, clear of the type slot
         pose.pos.y -= pb * 1.25; pose.target.y -= pb * 1.25
       }
+      // R6.82 (Shifat 6:46 AM PT Oct 22): wide screens ride a little lower too, so the atom (the stone at its centre)
+      // sits just above mid-frame, clear of the Systems type in the lower part. Phones (portrait = 1) get 0: unchanged.
+      const db = (1 - portrait()) * ss(1.0, 1.22, dive.u) * (1 - dive.push)
+      if (db > 0) { pose.pos.y -= db * 0.35; pose.target.y -= db * 0.35 }
       // W17 SCENE 3 ENTRY (STRUCTURE v3): at the end of the systems water the camera pushes INTO the stone, where the
       // tablet glows through its facets; the journey (stars + the crewmate) then takes over from inside it
       if (dive.push > 0) {
