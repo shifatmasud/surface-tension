@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { runToEnd } from '../../prewarm' // PERFGOV
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
 /** Seeded random so the forest is the same composition on every load. */
@@ -59,7 +60,7 @@ function trunk(h: number, r0: number, r1: number) {
 }
 
 /** A soft stylised conifer: five drooping, wavy-edged tiers (lathe skirts), smooth-lit as one mass. */
-function pineGeometry(low: boolean) {
+function* pineGeometry(low: boolean) {
   const seg = low ? 18 : 22, parts: THREE.BufferGeometry[] = [trunk(1.3, 0.17, 0.11)]
   const tiers = low ? 4 : 5
   for (let t = 0; t < tiers; t++) {
@@ -75,21 +76,25 @@ function pineGeometry(low: boolean) {
       p.setXYZ(i, x * wav, p.getY(i) + y + droop, z * wav)
     }
     parts.push(softPart(g, new THREE.Vector3(0, 2.4, 0), 1.9, 0.9, C('#2c6534'), C('#5aa646'), 0.6, 4.6, 0.09, t * 2.3))
+    yield // PERFGOV
   }
   const g = mergeGeometries(parts)!; return g
 }
 /** A soft broadleaf: a cauliflower canopy of noise-displaced blobs sharing one spherical normal field. */
-function roundGeometry(low: boolean) {
+function* roundGeometry(low: boolean) {
   const d = low ? 1 : 2, parts: THREE.BufferGeometry[] = [trunk(1.7, 0.2, 0.12)]
   const cen = new THREE.Vector3(0, 2.55, 0)
   const blobs: [number, number, number, number][] = [
     [0, 2.9, 0, 0.95], [0.75, 2.45, 0.25, 0.75], [-0.7, 2.5, -0.2, 0.78], [0.2, 2.35, 0.75, 0.7], [-0.25, 2.4, -0.75, 0.72],
     [0.45, 3.35, -0.3, 0.62], [-0.45, 3.25, 0.35, 0.6], [0, 1.95, 0, 0.7],
   ]
-  ;(low ? blobs.slice(0, 5) : blobs).forEach(([x, y, z, r], i) => {
+  const list = low ? blobs.slice(0, 5) : blobs
+  for (let i = 0; i < list.length; i++) {
+    const [x, y, z, r] = list[i]
     const g = ni(new THREE.IcosahedronGeometry(r, d).translate(x, y, z))
     parts.push(softPart(g, cen, 0.85, 0.68, C('#2a6a2e'), C('#79c25a'), 1.7, 3.9, 0.16, i * 3.1))
-  })
+    yield // PERFGOV
+  }
   const g = mergeGeometries(parts)!; return g
 }
 
@@ -100,7 +105,12 @@ export function groundHeight(x: number, z: number) {
   return hills * THREE.MathUtils.smoothstep(r, 14, 46) + THREE.MathUtils.smoothstep(r, 60, 160) * 14
 }
 
+/** PERFGOV: built in one go (as before) for any caller outside the warm-up */
 export function buildForest(low: boolean, material: THREE.Material, groundMaterial: THREE.Material = material) {
+  return runToEnd(buildForestSteps(low, material, groundMaterial))
+}
+/** PERFGOV: the same build as short steps (the journey is built behind the preloader in slices); same order, same output */
+export function* buildForestSteps(low: boolean, material: THREE.Material, groundMaterial: THREE.Material = material) {
   const group = new THREE.Group()
   // ground
   const seg = low ? 48 : 80
@@ -115,10 +125,12 @@ export function buildForest(low: boolean, material: THREE.Material, groundMateri
     const rr = Math.hypot(cx, cz)
     tmp.copy(g0).lerp(g1, THREE.MathUtils.smoothstep(rr, 16, 2) * 0.7 + r() * 0.2).lerp(g2, THREE.MathUtils.smoothstep(rr, 30, 120) * 0.6)
     for (let k = 0; k < 3; k++) { col[(i + k) * 3] = tmp.r; col[(i + k) * 3 + 1] = tmp.g; col[(i + k) * 3 + 2] = tmp.b }
+    if (i % 3072 === 3069) yield // PERFGOV
   }
   ground.setAttribute('color', new THREE.BufferAttribute(col, 3))
-  ground.deleteAttribute('uv'); ground.computeVertexNormals()
+  ground.deleteAttribute('uv'); yield; ground.computeVertexNormals()
   group.add(new THREE.Mesh(ground, groundMaterial))
+  yield // PERFGOV
 
   // trees: composed in depth layers, not scattered — clusters framing an open clearing, a backlit sky gap behind
   const rand = rng(42)
@@ -154,8 +166,9 @@ export function buildForest(low: boolean, material: THREE.Material, groundMateri
     m.frustumCulled = false
     return m
   }
-  group.add(make(pineGeometry(low), spots.filter((t) => !t.round)))
-  group.add(make(roundGeometry(low), spots.filter((t) => t.round)))
+  group.add(make(yield* pineGeometry(low), spots.filter((t) => !t.round)))
+  yield // PERFGOV
+  group.add(make(yield* roundGeometry(low), spots.filter((t) => t.round)))
   return { group, spots }
 }
 

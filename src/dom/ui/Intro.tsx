@@ -35,7 +35,7 @@ export function Intro() {
     // PRELOAD: continue from the number the static shell counter already reached (never count backwards); a repeat
     // visit keeps the counter short (its files come from cache; the brand moment stays, the wait does not)
     const s0 = preload.shown()
-    let raf = 0, eased = s0, t0 = performance.now(), last = t0, nearT = 0
+    let raf = 0, eased = s0, t0 = performance.now(), last = t0, nearT = 0, nearV = 0
     const minDur = preload.repeat ? 350 : 1200
     const loop = (now: number) => {
       // real elapsed time (not a per-frame cap): during shader warm-up a frame can take seconds, and a capped dt
@@ -45,7 +45,9 @@ export function Intro() {
       // a stalled loader (slow/software GPU, a lost texture) must never trap the visitor behind the counter:
       // after 12 s, or 3 s parked at >= 97 %, treat the load as done
       let real = boot.progress()
-      if (real >= 0.97) { if (!nearT) nearT = now } else nearT = 0
+      // PERFGOV: "parked" means not moving: the later stages' warm-up (gl/Scene.tsx) keeps the real progress rising
+      // in small steps above 97 %, and that is not a stall
+      if (real >= 0.97) { if (!nearT || real > nearV + 1e-4) { nearT = now; nearV = real } } else nearT = 0
       if (now - t0 > 12000 || (nearT && now - nearT > 3000)) real = 1
       // PRELOAD: the time cap continues from the number the shell handed over (it used to restart at 0, so the counter
       // parked on the shell's number for ~s0 × minDur, measured 430 ms at 1440)

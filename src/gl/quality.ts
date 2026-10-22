@@ -64,15 +64,34 @@ const MAX_BACKOFF_MS = 60000
 // SHARP: measured headroom (GPU ms per frame from the timer query, systems/perfGovernor.ts)
 const GPU_UP = 0.7                   // probe up only if the predicted GPU time at the next DPR is under 70 % of budget
 const GPU_NO = 0.95                  // never probe into a step predicted over 95 %
-const GPU_CALM_MS = 1500             // with a measurement, a shorter calm is enough
+const GPU_CALM_MS = 2500             // with a measurement, a shorter calm is enough (PERFGOV: 1.5 → 2.5 s, slow climb)
 // SHARP: rest refinement (idle → native DPR + SMAA)
 const REST_AFTER_MS = 300
-const REST_BUDGET_MS = 1000 / 30     // a still frame only has to hold 30 to stay refined (ambient motion only)
+// PERFGOV: a rest frame is NOT a still picture (the lake, the stone, the jellies and the trail keep moving), and the
+// hero above the water is where people sit still — a rest frame that was allowed to settle at 30 fps was a visible
+// frame drop there. It now has to hold the same 60 as a moving frame, else it steps down (x0.8) and then suspends.
+// A device that holds 60 at rest keeps the identical refined frame.
+const REST_BUDGET_MS = 1000 / 60
 const REST_WINDOW = 8                // frames per rest verdict (short: a refined frame that is too slow is dropped fast)
 const REST_STEP = 0.8
 const REST_BACKOFF_MS = 30000
 const HOVER_EXIT_MS = 500            // a mouse twitch keeps the rest frame; only a sustained hover (≥ 0.5 s) leaves rest
 const SETTLE_MS = 250                // the frames right after a re-allocation (rest in/out) are not a governor verdict
+// PERFGOV (Shifat 17:23Z Oct 21: "Frame drop happens when gpu in phone gets overwhelmed. Need fix"). The window above
+// needs ≥ 12 frames AND ≥ 1 s (or 50 frames) per verdict and then ignores 1.5 s after every step, so a phone whose GPU
+// chokes mid-scroll dropped frames for ~2.5 s per rung (~12 s from level 0 to the floor). The FAST path below reacts
+// per frame: 3 dropped frames among the last 4 → one rung down within ~4 frames; 3 of them missing two vsyncs (under
+// ~27 fps) → the EMERGENCY rung, two levels at once (render-target scale + taps + DPR together, toward the 0.6 floor;
+// objects and the text layer untouched). The way back up stays slow: a probe only after 2.5 s+ of full-rate frames, a
+// failed probe is caught by the same fast path and doubles the back-off. A device holding 60 never meets a fast verdict,
+// so level 0 is untouched.
+const FAST_OVER_MS = BUDGET_MS * 1.5      // a frame that missed its vsync (≥ 25 ms at 60 Hz)
+const FAST_SEVERE_MS = BUDGET_MS * 2.2    // a frame that missed two (≥ 36.7 ms)
+const FAST_NEED = 3                       // over-budget frames among the last FAST_OF
+const FAST_OF = 4
+const FAST_SETTLE_MS = 200                // after a step the re-allocation frames are not a verdict
+const GPU_OVER = 1.2                      // timer-query GPU time over 120 % of budget counts as a dropped frame
+const CLIMB_HOLD_MS = 2500                // after a fast step down, at least this long at full rate before any probe up
 /** SHARP (eng review #25): ONE density ceiling for everything. The canvas (= the text layer, SharpText + the final
  *  upscale) never exceeds the device's own DPR (cap 3) nor ~9 Mpx of backing store; the scene never exceeds the text. */
 const CANVAS_PIXELS = 9.0e6
@@ -85,6 +104,13 @@ const PHONE_SCENE_DPR = 1.0 // TUNE (Shifat 16:41 PT Oct 21: "On phone low dpr m
 /** W27 R6.65: phone text density drops from 2x to 1.5x at this governor level and holds there (see textDprFor) */
 const TEXT_DROP_LEVEL = 1
 const PHONE_CANVAS_DPR = 2
+
+/** PERFGOV: phone GPUs well under a 2019 mid-range part (Adreno 3xx/4xx/50x, Mali-4xx/T6xx–T8xx/G31/G51/G52,
+ *  PowerVR GE8xxx) — ?lowend forces it (QA) */
+const LOW_END_GPU = /Adreno \(TM\) (3\d\d|4\d\d|50\d)\b|Mali-(4\d\d|T[678]\d\d|G31|G51|G52)|PowerVR Rogue GE/i.test(settings.GPU) || q.has('lowend')
+
+/** PERFGOV: set bits in a small history mask */
+function bits(x: number) { let n = 0; while (x) { n += x & 1; x >>>= 1 } return n }
 
 class Quality {
   readonly tier = tier
@@ -106,16 +132,26 @@ class Quality {
   private stallRun = 0
   private winStart = 0
   private sorted = new Float32Array(WINDOW)
+  /** PERFGOV: the last FAST_OF frames as bit histories (bit 0 = newest): over budget / missing two vsyncs */
+  private fastOver = 0
+  private fastSevere = 0
+  private climbAfter = 0
+  private fastStall = 0
   /** the last window size the DPR was asked for (skips boost steps the device or the pixel cap clip to the same DPR) */
   private w = typeof window !== 'undefined' ? window.innerWidth : 1
   private h = typeof window !== 'undefined' ? window.innerHeight : 1
   /** GPU ms per frame (EMA) from the timer query; -1 = no measurement on this device (iOS, WebGL1, disjoint) */
   gpuMs = -1
   private gpuAt = 0
-  stats = { median: 0, p90: 0, steps: 0, probes: 0, failedProbes: 0, gpuProbes: 0, gpuVetoes: 0, rests: 0, restDowns: 0, restSuspends: 0, restOut: { hard: 0, hover: 0, gate: 0 } }
+  stats = { median: 0, p90: 0, steps: 0, fastSteps: 0, emergency: 0, probes: 0, failedProbes: 0, gpuProbes: 0, gpuVetoes: 0, rests: 0, restDowns: 0, restSuspends: 0, restOut: { hard: 0, hover: 0, gate: 0 } }
 
   constructor() {
     if (this.pinned) this.level = Math.max(this.minLevel, Math.min(this.maxLevel, parseInt(q.get('q') || '0', 10) || 0))
+    // PERFGOV (Shifat 18:31Z, target device Galaxy M02s = Adreno 506): a known low-end phone GPU starts at the bottom of
+    // its ladder (the 0.6 floor, where the governor settles on these parts) instead of at level 0, and climbs only on
+    // measured headroom, so its first seconds are not spent dropping frames on the way down. Same objects, same text,
+    // fewer pixels. Never matches iPhones / recent Androids.
+    else if (this.enabled && tier === 'low' && LOW_END_GPU) this.level = this.maxLevel
     this.aa = this.aaFor(this.level)
   }
   get maxLevel() { return this.ladder.length - 1 }
@@ -170,7 +206,10 @@ class Quality {
   private restN = 0
   private restBuf = new Float32Array(REST_WINDOW)
   restTick(moving: boolean, now: number) {
-    const can = this.enabled && this.judging && this.probing === -99 && now >= this.restBlockedUntil && !q.has('norest')
+    // PERFGOV-3: a known low-end phone GPU settles with rest suspended (the native-DPR + SMAA still costs ~4–5x its
+    // moving frame on an Adreno 50x and is judged straight back down, a few dropped frames every 30–120 s of idle), so it
+    // starts there and never pays those detection frames; its moving frame is unchanged. Normal devices: untouched.
+    const can = this.enabled && this.judging && this.probing === -99 && now >= this.restBlockedUntil && !q.has('norest') && !LOW_END_GPU
     if (!can) { this.still = now; this.movingRun = 0; if (this.rest) { this.stats.restOut.gate++; this.setRest(false, now) } return }
     // eng review #4: a hover (mouse move with no scroll, no press, no overlay) is not "moving" for an existing rest
     // frame — a twitch used to re-allocate every target twice. A sustained hover (the pointer parallax really moving
@@ -266,7 +305,8 @@ class Quality {
   frame(deltaMs: number, now: number) {
     this.lastDelta = Math.min(1000, Math.max(1, deltaMs))
     if (!this.enabled || !this.judging) { this.n = 0; this.restN = 0; this.calmSince = now; return }
-    if (this.rest) { this.calmSince = now; this.judgeRest(deltaMs, now); return }   // rest frames judge the rest DPR only
+    if (this.rest) { this.calmSince = now; this.fastOver = this.fastSevere = 0; this.judgeRest(deltaMs, now); return }   // rest frames judge the rest DPR only
+    if (this.fastJudge(deltaMs, now)) return    // PERFGOV
     if (now - this.lastStep < STEP_COOLDOWN_MS || now < this.settleUntil) return
     // an isolated stall (tab switch, a big decode) is not a rendering verdict; a run of them is a device that is simply
     // that slow, and those frames count (clamped) so it still steps down
@@ -295,6 +335,7 @@ class Quality {
     if (this.probing !== -99) { this.probing = -99; this.backoff = PROBE_CALM_MS }   // the probe held: stay
     const up = this.nextUp()
     if (up === this.level) return
+    if (now < this.climbAfter) return           // PERFGOV: slow, hysteretic climb after a fast step down
     const calm = now - this.calmSince
     if (this.gpuFresh(now)) {
       // measured: predict the GPU time at the next DPR (cost ∝ pixels) and only probe where it fits
@@ -307,6 +348,35 @@ class Quality {
     }
     // unmeasured (no timer query): today's blind probe; boost steps wait twice as long
     if (calm > this.backoff * (up < 0 ? 2 : 1)) this.probe(up, now)
+  }
+  /** PERFGOV: the per-frame verdict. Returns true when it stepped (the caller skips the slow window this frame). */
+  private fastJudge(deltaMs: number, now: number): boolean {
+    if (now - this.lastStep < FAST_SETTLE_MS || now < this.settleUntil) { this.fastOver = this.fastSevere = 0; return false }
+    // a lone stall (tab switch, a decode, a first-use link) says nothing about the per-frame GPU cost; three in a row is
+    // a device that is that slow (the window below clamps those too)
+    this.fastStall = deltaMs > 250 ? this.fastStall + 1 : 0
+    if (deltaMs > 250 && this.fastStall < 3) return false
+    const gpuOver = this.gpuMs >= 0 && now - this.gpuAt < 250 && this.gpuMs > BUDGET_MS * GPU_OVER
+    const m = (1 << FAST_OF) - 1
+    this.fastOver = ((this.fastOver << 1) | (deltaMs > FAST_OVER_MS || gpuOver ? 1 : 0)) & m
+    this.fastSevere = ((this.fastSevere << 1) | (deltaMs > FAST_SEVERE_MS ? 1 : 0)) & m
+    if (bits(this.fastOver) < FAST_NEED) return false
+    const severe = bits(this.fastSevere) >= FAST_NEED
+    this.fastOver = this.fastSevere = 0
+    this.calmSince = now
+    this.climbAfter = now + CLIMB_HOLD_MS
+    if (this.probing !== -99) {                                 // a probe that drops frames: back at once, wait longer
+      this.stats.failedProbes++
+      this.backoff = Math.min(MAX_BACKOFF_MS, this.backoff * 2)
+      const back = this.probing; this.probing = -99
+      this.set(back, now)
+      return true
+    }
+    if (this.level >= this.maxLevel) return false
+    this.stats.fastSteps++
+    if (severe) this.stats.emergency++
+    this.set(this.level + (severe ? 2 : 1), now)
+    return true
   }
   private probe(up: number, now: number) {
     this.stats.probes++

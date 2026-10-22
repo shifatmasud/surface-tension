@@ -19,6 +19,7 @@ let repeat = false
 try { repeat = !!localStorage.getItem(VISIT_KEY); localStorage.setItem(VISIT_KEY, String(Date.now())) } catch { /* private mode */ }
 
 let expected = 0, arrived = 0
+let sExpected = 0, sArrived = 0 // PERFGOV: the later stages warmed behind the curtain (gl/Scene.tsx LaterStages)
 export const preload = {
   /** same browser has been here before: shorter counter */
   repeat,
@@ -26,7 +27,15 @@ export const preload = {
   expect(n = 1) { expected += n },
   arrived(n = 1) { arrived += n },
   /** next-section progress 0..1 (1 when nothing was registered by the time the scene is up) */
-  next(sceneUp: boolean): number { return expected ? Math.min(1, arrived / expected) : (sceneUp ? 1 : 0) },
+  next(sceneUp: boolean): number {
+    const lab = expected ? Math.min(1, arrived / expected) : (sceneUp ? 1 : 0)
+    // PERFGOV: the stages are half of this share whatever the poster count (counted with the posters, a dozen posters
+    // diluted them below the counter's 97 % "parked" rule, which then lifted the curtain on half-warmed stages)
+    return sExpected ? 0.5 * lab + 0.5 * Math.min(1, sArrived / sExpected) : lab
+  },
+  /** PERFGOV: the later stages' warm-up (gl/Scene.tsx), 0..n */
+  expectStages(n: number) { sExpected += n },
+  arrivedStages(n: number) { sArrived += n },
   /** byte-weighted progress of the boot JS (entry + vendor chunks + Scene), 0..1; 1 when the inline loader is absent (dev) */
   files(): number { try { return W.__stboot ? W.__stboot.files() : 1 } catch { return 1 } },
   /** the number the static shell counter already shows (the React counter never goes backwards from it) */
@@ -157,7 +166,10 @@ export const warmGate = {
     const done = this._skipped === 0
     if (done || now - this.openedAt > 15000) { this.close(); return true }
     // adapt to the GPU: fast frames take more first draws, slow ones fewer (each frame stays well under ~0.5 s)
-    if (this.frames > 1) this.budget = dt < 60 ? Math.min(this.budget * 2, 32) : dt < 160 ? this.budget + 1 : dt > 420 ? Math.max(1, this.budget - 1) : this.budget
+    // PERFGOV (Shifat 18:21Z "preloader & hero freeze"): the budget used to grow until a gate frame took ~160 ms and only
+    // shrank past 420 ms, so the odometer could sit still for 0.2–0.4 s per frame on a phone. Now it aims at ~50 ms frames
+    // (halve above 60 ms, grow only below 30 ms): the same programs are built, spread over more, shorter frames.
+    if (this.frames > 1) this.budget = dt < 30 ? Math.min(this.budget * 2, 32) : dt < 45 ? this.budget + 1 : dt > 60 ? Math.max(1, this.budget >> 1) : this.budget
     this._skipped = 0; this._allow = this.budget
     return false
   },

@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { Spring } from '../../../core/spring'
+import { runToEnd } from '../../prewarm' // PERFGOV
 
 /**
  * The crewmate, modelled in code: a bean body with a backpack, two stubby legs hinged at the hip,
@@ -12,14 +13,20 @@ export const CREW_CENTER_Y = 0.85
 
 let shared: { body: THREE.BufferGeometry; leg: THREE.BufferGeometry; visor: THREE.BufferGeometry } | null = null
 export function crewGeometry(lowPoly = false) {
+  return shared ?? runToEnd(crewGeometrySteps(lowPoly))
+}
+/** PERFGOV: the same build as short steps (built behind the preloader by the journey's warm-up) */
+export function* crewGeometrySteps(lowPoly = false) {
   if (shared) return shared
   const seg = lowPoly ? 14 : 28
   const body = new THREE.CapsuleGeometry(0.44, 0.42, lowPoly ? 6 : 10, seg)
   body.scale(1, 1, 0.92); body.translate(0, 0.9, 0)
   const pack = new RoundedBoxGeometry(0.58, 0.68, 0.34, lowPoly ? 2 : 4, 0.12)
   pack.translate(0, 0.9, -0.38)
+  yield // PERFGOV
   const bodyGeo = mergeGeometries([body.toNonIndexed(), pack.toNonIndexed()])!
   bodyGeo.computeBoundingSphere()
+  yield // PERFGOV
   // leg pivots at the hip (y = 0.42): geometry hangs below its origin
   const leg = new THREE.CapsuleGeometry(0.175, 0.2, lowPoly ? 4 : 6, lowPoly ? 10 : 18)
   leg.translate(0, -0.2, 0)

@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { runToEnd } from '../../prewarm' // PERFGOV
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { props } from '../../../state/props'
@@ -165,8 +166,12 @@ function noise3(x: number, y: number, z: number) {
   return l(l(l(c(0, 0, 0), c(1, 0, 0), u), l(c(0, 1, 0), c(1, 1, 0), u), v), l(l(c(0, 0, 1), c(1, 0, 1), u), l(c(0, 1, 1), c(1, 1, 1), u), v), w)
 }
 
+/** PERFGOV: the spires built behind the preloader (prebuildSpires), taken by the first mount; else built at mount as before */
+let spiresPre: THREE.BufferGeometry | null = null
+export function* prebuildSpires() { if (!spiresPre) spiresPre = yield* spires() }
+const takeSpires = () => { const g = spiresPre; spiresPre = null; return g }
 /** basalt spires around the systems, merged into one static geometry */
-function spires() {
+function* spires() {
   const R = rng(41)
   const parts: THREE.BufferGeometry[] = []
   const spots: [number, number, number, number][] = [
@@ -188,6 +193,7 @@ function spires() {
     g.computeVertexNormals()
     g.translate(SYS_C.x + Math.sin(a) * d, SYS_C.y - 18, SYS_C.z + Math.cos(a) * d)
     parts.push(g.index ? g.toNonIndexed() : g)
+    yield // PERFGOV: one spire per step
   }
   // merge
   let n = 0; for (const g of parts) n += g.getAttribute('position').count
@@ -236,7 +242,7 @@ export function DeepSea({ u }: { u: Record<string, THREE.IUniform> }) {
     const pp = new Float32Array(plN * 3), pr = new Float32Array(plN * 3)
     for (let i = 0; i < plN * 3; i++) { pp[i] = R(); pr[i] = R() }
     pl.setAttribute('position', new THREE.BufferAttribute(pp, 3)); pl.setAttribute('aRand', new THREE.BufferAttribute(pr, 3))
-    const geos = { bubbles, rocks: spires(), plankton: pl }
+    const geos = { bubbles, rocks: takeSpires() ?? runToEnd(spires()), plankton: pl }
     const mats = {
       bubbles: new THREE.ShaderMaterial({ vertexShader: bubbleVert, fragmentShader: bubbleFrag, uniforms: { ...u, u_box: { value: 9 }, u_colH: { value: 26 }, u_warp: { value: 0 } }, transparent: true, depthWrite: false, blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor }),
       rocks: new THREE.ShaderMaterial({ vertexShader: rockVert, fragmentShader: rockFrag, uniforms: { ...u } }),

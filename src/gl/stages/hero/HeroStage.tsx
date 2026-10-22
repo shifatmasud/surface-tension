@@ -18,6 +18,8 @@ import { dive, DIVE_LAYER } from '../dive/diveState'
 import { quality } from '../../quality' // PERF HOOK
 import { waterInput } from '../../water/waterInput' // WATER HOOK
 import { gemMask } from '../../systems/stickerMask'
+/** PERFGOV: the water plane's normal, shared (the reflection pass rebuilt it every frame) */
+const WATER_UP = new THREE.Vector3(0, 1, 0)
 
 export const GEM_LAYER = 2
 export const gem = { pos: new THREE.Vector3(0, 0.45, 0), radius: 0.5, touch: 0 }
@@ -111,6 +113,29 @@ function gemPatch(fresPow: string, lod: string) {
 const gemPatchHi = gemPatch('10.0', '4.0')
 const gemPatchLo = gemPatch('10.0', '3.0')
 
+/** PERFGOV-3 (M02s census: the hero's boot was one ~0.9 s task at 6x CPU, after the shell counter's first frame): the
+ *  lake mesh (the 141² / 261² plane remapped toward the stone) and the stone's facets are built in short steps before
+ *  the hero mounts (gl/Scene.tsx BootStager), and the mount takes them as they are. Same vertices in the same order,
+ *  same bounding sphere: the picture is unchanged. A mount without them (a second instance) builds them as before. */
+const pre: { water?: THREE.PlaneGeometry; gem?: THREE.BufferGeometry } = {}
+export function* heroGeoSteps(): Generator<unknown, void, unknown> {
+  const hi = settings.TIER === 'high' || settings.TIER === 'mid'
+  if (!pre.gem) { pre.gem = brilliantGeometry(1); yield }
+  if (pre.water) return
+  const g = new THREE.PlaneGeometry(500, 500, hi ? 260 : 140, hi ? 260 : 140)
+  yield
+  const p = g.getAttribute('position') as THREE.BufferAttribute
+  for (let i0 = 0; i0 < p.count; i0 += 2048) {
+    for (let i = i0, e = Math.min(p.count, i0 + 2048); i < e; i++) {
+      const x = p.getX(i) / 250, y = p.getY(i) / 250, r = Math.hypot(x, y)
+      if (r > 0) { const k = Math.pow(r, 2.4) / r; p.setXY(i, x * k * 250, y * k * 250) }
+    }
+    yield
+  }
+  g.computeBoundingSphere()
+  pre.water = g
+}
+
 export function HeroStage() {
   const { gl, scene, camera, size } = useThree()
   const group = useRef<THREE.Group>(null!)
@@ -122,6 +147,7 @@ export function HeroStage() {
   ;(window as any).__gem = { gem, gemMesh } // QA
   const dome = useMemo(createSkyDome, [])
   const waterGeo = useMemo(() => {
+    if (pre.water) { const g = pre.water; pre.water = undefined; return g }   // PERFGOV-3: built in steps before the mount
     const g = new THREE.PlaneGeometry(500, 500, hi ? 260 : 140, hi ? 260 : 140)
     // concentrate vertices near the gem (where the sim and the camera are): r' = r^1.8 remap
     const p = g.getAttribute('position') as THREE.BufferAttribute
@@ -132,7 +158,7 @@ export function HeroStage() {
     g.computeBoundingSphere()
     return g
   }, [hi])
-  const gemGeo = useMemo(() => brilliantGeometry(1), [])
+  const gemGeo = useMemo(() => { const g = pre.gem; pre.gem = undefined; return g ?? brilliantGeometry(1) }, [])   // PERFGOV-3
   const sheen = useMemo(() => { const s = createGemSheen({ strength: 0.75 }); s.uniforms.u_feather = gemFeather; s.uniforms.u_dep = gemDep; return s }, [])   // W25 R6.41: the shell's silhouette ramp = the stone's
   const sheenMesh = useRef<THREE.Mesh>(null!)
   // DIAG: the refraction shader maps gl_FragCoord / resolution to the camera ray it takes its mip gradients from, and
@@ -373,7 +399,7 @@ export function HeroStage() {
     // tip or a sinking stone never shows up as a ghost in its own reflection. Only the z row changes, so the
     // reflection's screen mapping above stays valid
     {
-      const pl = refl.plane.set(new THREE.Vector3(0, 1, 0), 0).applyMatrix4(rc.matrixWorldInverse)
+      const pl = refl.plane.set(WATER_UP, 0).applyMatrix4(rc.matrixWorldInverse)  // PERFGOV: no per-frame Vector3
       const cp = refl.cp.set(pl.normal.x, pl.normal.y, pl.normal.z, pl.constant)
       const e = rc.projectionMatrix.elements
       const q = refl.q.set((Math.sign(cp.x) + e[8]) / e[0], (Math.sign(cp.y) + e[9]) / e[5], -1, (1 + e[10]) / e[14])

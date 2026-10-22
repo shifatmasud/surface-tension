@@ -55,6 +55,12 @@ class FboHelper {
     gl.setRenderTarget(target); gl.setClearColor(new THREE.Color(r, g, b), a); gl.clear(true, false, false)
     gl.setClearColor(c, pa); gl.setRenderTarget(prev)
   }
+  /** PERFGOV: stand-in quads for the materials this helper draws (+ `extra`), with the helper's own scene and camera:
+   *  prewarm.ts compiles them behind the preloader (the trail's passes used to compile on the first touch) */
+  warmJob(extra: THREE.Material[], target: THREE.WebGLRenderTarget | null) {
+    const roots = [copyMat, ...this.materials, ...extra].map((m) => { const q = new THREE.Mesh(tri, m); q.frustumCulled = false; return q })
+    return { roots, scene: this.scene, camera: this.cam, target }
+  }
   /** Material compile counts as a loading task (ch.9.6). */
   track<M extends THREE.Material>(m: M) { this.materials.push(m); return m }
 }

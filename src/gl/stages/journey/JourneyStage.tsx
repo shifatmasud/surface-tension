@@ -9,11 +9,12 @@ import { engine } from '../../engine'
 import { settings } from '../../../services/settings'
 import { mix, smoothstep as ss } from '../../../core/math'
 import { journey } from './journeyState'
-import { Crewmate, CREW_HEIGHT, CREW_CENTER_Y, crewMaterials } from './crewmate'
+import { Crewmate, crewGeometrySteps, CREW_HEIGHT, CREW_CENTER_Y, crewMaterials } from './crewmate'
 import { makeEnvs } from './env'
-import { buildForest, buildShadows, longShadowGeometry, longShadowMaterial } from './forest'
+import { buildForestSteps, buildShadows, longShadowGeometry, longShadowMaterial } from './forest'
 import { buildSunFan, buildMist, buildMotes } from './forestFx'
-import { buildFoliage } from './foliage' // FOLIAGE HOOK (foliage helper): fluffy grass + trees
+import { buildFoliageSteps } from './foliage' // FOLIAGE HOOK (foliage helper): fluffy grass + trees
+import { runToEnd, prewarm, type CompileJob } from '../../prewarm' // PERFGOV
 import { buildFireflies, buildCanopy } from './nightFx'
 import { buildTunnel, buildTunnelLights } from './tunnel'
 import { buildTunnelBlur } from './tunnelBlur' // TUNNEL DRAMA: half-res zoom blur
@@ -55,7 +56,7 @@ export function JourneyStage(): JSX.Element {
   const { gl } = useThree()
   const [portrait, setPortrait] = useState(() => window.innerHeight > window.innerWidth * 1.05)
   const low = settings.TIER === 'low'
-  const S = useMemo(() => build(gl, portrait, low), [gl, portrait, low])
+  const S = useMemo(() => takePrebuilt(portrait, low) ?? build(gl, portrait, low), [gl, portrait, low]) // PERFGOV: built behind the preloader
   const group = useRef<THREE.Group>(null!)
   // W18 (Shifat 14:01Z): the CTA odometer type at full device density, drawn by the text layer behind the crewmate's depth
   const { camera: mainCam } = useThree()
@@ -97,16 +98,36 @@ export function JourneyStage(): JSX.Element {
     }
     const list = (engine as any).chain?.text?.extras as typeof extra[] | undefined
     list?.push(extra)
-    return () => { if (list) { const i = list.indexOf(extra); if (i >= 0) list.splice(i, 1) } }
+    // PERFGOV: the CTA type and the crewmate's depth-only pass, compiled behind the preloader into a target like the text layer's
+    const off = prewarm.add('journey', () => {
+      const rt = engine.chain?.composer.inputBuffer ?? null
+      return { jobs: [
+        { roots: [S.cta.typeRoot], scene: S.cta.typeRoot as unknown as THREE.Scene, camera: mainCam, target: rt },
+        { roots: [S.crewOut.root], scene: depthScene, camera: mainCam, target: rt, override: depthScene.overrideMaterial },
+      ] }
+    })
+    return () => { off(); if (list) { const i = list.indexOf(extra); if (i >= 0) list.splice(i, 1) } }
   }, [S, mainCam])
 
   useEffect(() => {
     // warm the inner world's programs up front (its lights live in its own scene, so they compile exactly once)
     // PERF HOOK: compiled with the tablet target bound — the inner world only ever draws into it (linear, no tone
     // mapping), and a compile against the screen built variants it never used, so it compiled again on first view
-    const prev = gl.getRenderTarget()
-    try { gl.setRenderTarget(S.rt); gl.compile(S.inner, S.icam) } catch { /* compile is a warm-up only */ } finally { gl.setRenderTarget(prev) }
-    return () => S.dispose()
+    // PERFGOV: behind the preloader this is done in short steps (prewarm.ts, jobs below); a later re-mount still does it here
+    if (!innerWarm.has(S) && !prewarm.active) {
+      const prev = gl.getRenderTarget()
+      try { gl.setRenderTarget(S.rt); gl.compile(S.inner, S.icam) } catch { /* compile is a warm-up only */ } finally { gl.setRenderTarget(prev) }
+    }
+    const off = prewarm.add('journey', () => {
+      innerWarm.add(S)
+      const blurQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), S.tunnelBlur.material); blurQuad.frustumCulled = false
+      const jobs: CompileJob[] = [
+        { roots: [S.inner], scene: S.inner, camera: S.icam, target: S.rt, force: S.inner },
+        { roots: [blurQuad], scene: new THREE.Scene(), camera: new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), target: S.tunnelBlur.rt },
+      ]
+      return { jobs, targets: [S.rt, S.tunnelBlur.rt], steps: (function* () { yield; prebuildShards(S, gl, portrait) })() }
+    })
+    return () => { off(); S.dispose() }
   }, [S, gl])
 
   useStageFrame('journey', (state) => {
@@ -237,12 +258,7 @@ export function JourneyStage(): JSX.Element {
     const needH = Math.max((S.sh + 1) * 1.75, ((S.sw + 1) * 1.45) / aspect)
     const fit = { dFill: fillH / vh(1), dFar: needH / vh(1), lateral: aspect > 1.1 ? S.sw * 0.16 : 0 }
     // where the inner crewmate sits on the glass at the moment of the break (same pose, so the hand-off is seamless)
-    const B = inner(T.BREAK, S.IB, portrait)
-    const proj = S.tmp.set(B.crew.x, B.crew.y + CREW_CENTER_Y, B.crew.z)
-    S.bcam.position.copy(B.cam); S.bcam.fov = fovIn(B.fov); S.bcam.updateProjectionMatrix(); S.bcam.lookAt(B.look); S.bcam.updateMatrixWorld()
-    const top = S.tmp2.set(B.crew.x, B.crew.y + CREW_HEIGHT, B.crew.z).project(S.bcam)
-    proj.project(S.bcam)
-    const start = { x: proj.x * S.sw / 2, y: proj.y * S.sh / 2, k: Math.max(0.6, (top.y - proj.y) * S.sh / 2 / (CREW_HEIGHT - CREW_CENTER_Y)) }
+    const start = breakStart(S, portrait, fovIn)
     const O = outer(p, S.O, fit, start, SCREEN_Z, farCorner(S.sw, S.sh, start.x, start.y))
     // ---- W18 THE ENDING (STRUCTURE v3 13:27Z–13:33Z): glide down past the tablet with the crewmate alongside into the
     // aligned CTA on the black wall (ctaScene.ts). g: a first touch of the glide as the crewmate floats free, the rest
@@ -316,12 +332,7 @@ export function JourneyStage(): JSX.Element {
     const far = farCorner(S.sw, S.sh, start.x, start.y)
     S.shards.visible = O.shardsVisible
     if (O.shardsVisible || p > 0.7) {
-      const key = `${start.x.toFixed(1)},${start.y.toFixed(1)},${start.k.toFixed(1)}`
-      if (key !== S.shardKey) {
-        S.shards.geometry.dispose()
-        S.shards.geometry = buildShatterGeometry({ sw: S.sw, sh: S.sh, impact: new THREE.Vector2(start.x, start.y), k: start.k, tier: S.tier }).geometry
-        S.shardKey = key
-      }
+      ensureShards(S, start)
     }
     if (O.shardsVisible) {
       const u = S.shardMat.uniforms
@@ -369,19 +380,62 @@ function crewMatsOf(root: THREE.Object3D) {
 }
 
 /** PERF HOOK: the furthest screen corner from a point, without the per-frame array spread/map garbage */
+/** where the inner crewmate sits on the glass at the moment of the break, in screen units (the shatter's impact) */
+function breakStart(S: Built, portrait: boolean, fovIn: (f: number) => number) {
+  const B = inner(T.BREAK, S.IB, portrait)
+  const proj = S.tmp.set(B.crew.x, B.crew.y + CREW_CENTER_Y, B.crew.z)
+  S.bcam.position.copy(B.cam); S.bcam.fov = fovIn(B.fov); S.bcam.updateProjectionMatrix(); S.bcam.lookAt(B.look); S.bcam.updateMatrixWorld()
+  const top = S.tmp2.set(B.crew.x, B.crew.y + CREW_HEIGHT, B.crew.z).project(S.bcam)
+  proj.project(S.bcam)
+  return { x: proj.x * S.sw / 2, y: proj.y * S.sh / 2, k: Math.max(0.6, (top.y - proj.y) * S.sh / 2 / (CREW_HEIGHT - CREW_CENTER_Y)) }
+}
+/** the burst's geometry for this impact (rebuilt only if a resize moves it) */
+function ensureShards(S: Built, start: { x: number; y: number; k: number }) {
+  const key = `${start.x.toFixed(1)},${start.y.toFixed(1)},${start.k.toFixed(1)}`
+  if (key !== S.shardKey) {
+    S.shards.geometry.dispose()
+    S.shards.geometry = buildShatterGeometry({ sw: S.sw, sh: S.sh, impact: new THREE.Vector2(start.x, start.y), k: start.k, tier: S.tier }).geometry
+    S.shardKey = key
+  }
+}
+/** PERFGOV: the shatter built behind the preloader for the current viewport (it was a ~240 ms task at 6x on the way in) */
+function prebuildShards(S: Built, gl: THREE.WebGLRenderer, portrait: boolean) {
+  const v = gl.getSize(new THREE.Vector2())
+  const wideK = portrait ? 1 : Math.max(1, (v.x / v.y) / 1.6)
+  const fovIn = (f: number) => THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(f) / 2) * wideK))
+  ensureShards(S, breakStart(S, portrait, fovIn))
+}
 function farCorner(sw: number, sh: number, x: number, y: number) {
   const hx = sw / 2, hy = sh / 2
   return Math.max(Math.hypot(-hx - x, -hy - y), Math.hypot(hx - x, -hy - y), Math.hypot(-hx - x, hy - y), Math.hypot(hx - x, hy - y))
 }
 
 type Built = ReturnType<typeof build>
-function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
+/** PERFGOV: the build as steps, spread over frames behind the preloader (prebuildJourney); run in one go it is the
+ *  same build as before (same order, same random streams) */
+function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) { return runToEnd(buildSteps(gl, portrait, low)) }
+let prebuilt: { key: string; S: Built } | null = null
+/** PERFGOV: build the stage ahead of its mount (behind the odometer); the mount then takes it instead of building */
+export function* prebuildJourney(gl: THREE.WebGLRenderer) {
+  const portrait = window.innerHeight > window.innerWidth * 1.05, low = settings.TIER === 'low'
+  const S = yield* buildSteps(gl, portrait, low)
+  prebuilt = { key: `${portrait}|${low}`, S }
+}
+function takePrebuilt(portrait: boolean, low: boolean) {
+  const p = prebuilt
+  if (!p || p.key !== `${portrait}|${low}`) return null
+  prebuilt = null
+  return p.S
+}
+const innerWarm = new WeakSet<object>() // PERFGOV: inner worlds already compiled behind the preloader
+export function* buildSteps(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   const sw = portrait ? 8.8 : 12.8, sh = portrait ? 12.8 : 8.8
   const long = low ? 512 : 1024 // the long side; the screen's aspect sets the other
   const rt = new THREE.WebGLRenderTarget(portrait ? Math.round(long * sw / sh) : long, portrait ? long : Math.round(long * sh / sw), {
     type: THREE.HalfFloatType, samples: 0 /* PERF HOOK: no MSAA anywhere (SMAA on the final frame covers the tablet) */, depthBuffer: true, generateMipmaps: false,
   })
   const envs = makeEnvs(gl)
+  yield // PERFGOV
 
   // ===== inner world
   const innerScene = new THREE.Scene()
@@ -442,6 +496,7 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   const glintMat = glintStarMaterial(starPr)
   const glintStars = new THREE.Points(gg, glintMat); glintStars.frustumCulled = false; glintStars.renderOrder = -8
   stars.add(glintStars)
+  yield // PERFGOV
 
   // Lambert: matte foliage with no grazing sheen against the low sun (and cheaper on phones)
   const forestMat = new THREE.MeshLambertMaterial({ vertexColors: true })
@@ -460,11 +515,13 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   }
   // the ground is smooth (the grass carries the texture); the trees are soft stylised foliage (forest.ts)
   const groundMat = new THREE.MeshLambertMaterial({ vertexColors: true })
-  const { group: forest, spots } = buildForest(low, forestMat, groundMat)
+  const { group: forest, spots } = yield* buildForestSteps(low, forestMat, groundMat) // PERFGOV: in steps
+  yield // PERFGOV
   const treeShadows = buildShadows(spots, SUN_DIR)
   forest.add(treeShadows.mesh)
   // FOLIAGE HOOK (foliage helper): fluffy grass, trees and meadow floor replace buildGrass and the old trees/shadows
-  const foliage = buildFoliage({ low, tier: settings.TIER as 'low' | 'mid' | 'high', portrait, sunDir: SUN_DIR, forest, shadows: treeShadows.mesh })
+  yield // PERFGOV
+  const foliage = yield* buildFoliageSteps({ low, tier: settings.TIER as 'low' | 'mid' | 'high', portrait, sunDir: SUN_DIR, forest, shadows: treeShadows.mesh })
   const grass = foliage.grass
   const fan = buildSunFan(SUN_DIR)
   const mist = buildMist(low)
@@ -472,7 +529,9 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   forest.add(grass.mesh, mist.group, motes.points)
   const innerMats = crewMaterials(envs.space)
   innerMats.visor.envMap = envs.page // the visor always catches two soft studio highlights: it reads as glass in every beat
+  yield* crewGeometrySteps(false) // PERFGOV: the shared geometry in steps; full detail, as live (the dive's tablet-window crewmate always built it first)
   const crewIn = new Crewmate(innerMats, low)
+  yield // PERFGOV
   const shadowMat = longShadowMaterial(false)
   const shadow = new THREE.Mesh(longShadowGeometry(), shadowMat)
   const hemi = new THREE.HemisphereLight('#6a4cff', '#06121a', 0.6)
@@ -482,11 +541,13 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   const lightRig = new THREE.Group(); lightRig.add(sun, rim, sun.target, rim.target)
   innerScene.add(sky, stars, fan.mesh, forest, shadow, crewIn.root, hemi, lightRig)
   const fireflies = buildFireflies(260), canopy = buildCanopy()
+  yield // PERFGOV
   const tunnel = buildTunnel()
   // TUNNEL DRAMA: the light objects share the wall's uniforms (one set per frame); the blur reads the inner target
   const tunnelLights = buildTunnelLights(tunnel.uniforms)
   const tunnelBlur = buildTunnelBlur(rt, (settings.TIER === 'low' || low ? 'low' : settings.TIER === 'mid' ? 'mid' : 'high'))
   innerScene.add(fireflies.points, canopy.mesh, tunnel.mesh, tunnelLights.orbs, tunnelLights.rings)
+  yield // PERFGOV
 
   // ===== outer world: the tablet + the crewmate that breaks out
   const outerG = new THREE.Group()
@@ -507,6 +568,7 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   outerMats.body.envMapIntensity = 1.0
   outerMats.visor.envMapIntensity = 2.6
   const crewOut = new Crewmate(outerMats, low)
+  yield // PERFGOV
   crewOut.root.visible = false
   // the cover glass that breaks (geometry built on first use for the real impact point) + its glass dust
   const tier = (settings.TIER === 'low' || low ? 'low' : settings.TIER === 'mid' ? 'mid' : 'high') as 'low' | 'mid' | 'high'
@@ -521,6 +583,7 @@ function build(gl: THREE.WebGLRenderer, portrait: boolean, low: boolean) {
   backdrop.position.set(0, 0, -60); backdrop.renderOrder = -5
   outerG.add(backdrop, body, bezel, lens, screen, shards, glints.points, crewOut.root)
   // W18 THE ENDING: the tablet hangs on a matte black wall (ctaScene.ts); the wall replaces the studio backdrop
+  yield // PERFGOV
   const cta = buildCta(portrait)
   outerG.add(cta.group)
   backdrop.visible = false

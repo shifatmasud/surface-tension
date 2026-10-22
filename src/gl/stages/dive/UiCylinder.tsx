@@ -9,6 +9,8 @@ import { SYSUI_LAYER } from '../hero/HeroStage'
 import { dive, SYS_C, TAB_F } from './diveState'
 import { sys, type ControlId } from '../systems/state' // W20: the Shade DS keyboard proxies (dom/sections/Systems.tsx)
 import { AtomField } from './Atom'
+import { prewarm, runToEnd } from '../../prewarm' // PERFGOV
+import { crewGeometrySteps } from '../journey/crewmate' // PERFGOV
 import { TabletWindow, IPAD_GLASS, IPAD_T, WIN_HW, WIN_HH } from '../journey/tabletWindow'; import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'; import { tabletPose } from '../../world/handoff' // TABLET HOOK: the live 3D window (journey/tabletWindow.ts) + the tablet's pose (world/handoff.ts)
 /** QA: ?atom holds the sequence at the atom, ?drum at the drum; window.__morph (0..1) pins it */
 const KEEP_EYE = new THREE.Vector3(0, 0, -1e3), KEEP_F = new THREE.Vector3(0, 0, 1), KEEP_V = new THREE.Vector3() // POLISH-2: the main lens, for the ring's keep-out
@@ -365,40 +367,69 @@ const ROWS: { y: number; phase: number; kinds: Kind[] }[] = [
   { y: -1.3, phase: 0.66, kinds: ['input', 'checkbox', 'progress', 'badge'] },
 ]
 
+/** PERFGOV: the cylinder's build as steps (one part per step: its labels are canvas text), spread over short tasks behind
+ *  the preloader by prebuildCylinder; a later re-mount runs it in one go as before */
+function* buildCylSteps(gl: THREE.WebGLRenderer, u: Record<string, THREE.IUniform>) {
+  const envRT = deepEnv(gl)
+  yield // PERFGOV
+  const M = makeMats(u, envRT.texture)
+  const items: { g: THREE.Group; a: number; y: number; ph: number }[] = []
+  let alt = 0
+  for (const row of ROWS) {
+    const n = row.kinds.length
+    for (let i = 0; i < n; i++) {
+      const k = row.kinds[i]
+      const g = piece(k, M, u, alt++)
+      // the dive's backdrop sphere draws at renderOrder 10 with no depth test: the parts draw after it (11, with the
+      // stone and the sand, depth-sorted; transparent ones in the transparent list)
+      g.traverse((o) => { o.layers.set(SYSUI_LAYER); o.renderOrder = 11 })
+      items.push({ g, a: ((i + row.phase) / n) * Math.PI * 2, y: row.y, ph: Math.random() * 6.28 })
+      yield
+    }
+  }
+  // the last light from above, and a cold fill from the open water
+  const key = new THREE.DirectionalLight('#ffffff', 3.2); key.position.set(2.5, 10, 3)
+  // a cold rim from behind and above: every part gets a lit edge against the deep
+  const rim = new THREE.DirectionalLight('#e4edf5', 2.0); rim.position.set(-3, 4, -9)
+  const hemi = new THREE.HemisphereLight('#cfd8e0', '#040506', 0.6)
+  yield
+  const tablet = makeTablet(M); yield
+  yield* crewGeometrySteps(false) // PERFGOV: the tablet window's crewmate geometry (shared), in steps
+  new TabletWindow(gl, tablet) // TABLET HOOK: swaps the glass for the portal; disposed with the painted material
+  yield
+  const atom = new AtomField(gl)
+  atom.setTargets(items.map((it) => it.g))
+  // the parts fade in as the particles settle on them: every part material can be faded (opaque ones keep depth)
+  for (const k of ['black', 'white', 'silver'] as const) { M[k].transparent = true; M[k].depthWrite = true }
+  const fades: { m: THREE.Material & { opacity: number }; base: number }[] = []
+  const seen = new Set<THREE.Material>()
+  for (const it of items) it.g.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.Material & { opacity: number }; if (m && !seen.has(m)) { seen.add(m); fades.push({ m, base: m.opacity }) } })
+  return { M, items, key, rim, hemi, envRT, tablet, atom, fades, fade: { v: -1 } }
+}
+type CylBuilt = ReturnType<typeof buildCylSteps> extends Generator<unknown, infer R, unknown> ? R : never
+let prebuilt: { u: Record<string, THREE.IUniform>; gl: THREE.WebGLRenderer; b: CylBuilt } | null = null
+/** PERFGOV: build the cylinder behind the preloader (gl/Scene.tsx), for the dive's shared uniforms */
+export function* prebuildCylinder(gl: THREE.WebGLRenderer, u: Record<string, THREE.IUniform>) {
+  if (prebuilt && prebuilt.u === u && prebuilt.gl === gl) return
+  const b = yield* buildCylSteps(gl, u)
+  prebuilt = { u, gl, b }
+}
+
 export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
   const { camera, gl } = useThree()
   const root = useRef<THREE.Group>(null!)
   const spin = useRef<THREE.Group>(null!)
   const built = useMemo(() => {
-    const envRT = deepEnv(gl)
-    const M = makeMats(u, envRT.texture)
-    const items: { g: THREE.Group; a: number; y: number; ph: number }[] = []
-    let alt = 0
-    for (const row of ROWS) {
-      const n = row.kinds.length
-      row.kinds.forEach((k, i) => {
-        const g = piece(k, M, u, alt++)
-        // the dive's backdrop sphere draws at renderOrder 10 with no depth test: the parts draw after it (11, with the
-        // stone and the sand, depth-sorted; transparent ones in the transparent list)
-        g.traverse((o) => { o.layers.set(SYSUI_LAYER); o.renderOrder = 11 })
-        items.push({ g, a: ((i + row.phase) / n) * Math.PI * 2, y: row.y, ph: Math.random() * 6.28 })
-      })
-    }
-    // the last light from above, and a cold fill from the open water
-    const key = new THREE.DirectionalLight('#ffffff', 3.2); key.position.set(2.5, 10, 3)
-    // a cold rim from behind and above: every part gets a lit edge against the deep
-    const rim = new THREE.DirectionalLight('#e4edf5', 2.0); rim.position.set(-3, 4, -9)
-    const hemi = new THREE.HemisphereLight('#cfd8e0', '#040506', 0.6)
-    const tablet = makeTablet(M); new TabletWindow(gl, tablet) // TABLET HOOK: swaps the glass for the portal; disposed with the painted material
-    const atom = new AtomField(gl)
-    atom.setTargets(items.map((it) => it.g))
-    // the parts fade in as the particles settle on them: every part material can be faded (opaque ones keep depth)
-    for (const k of ['black', 'white', 'silver'] as const) { M[k].transparent = true; M[k].depthWrite = true }
-    const fades: { m: THREE.Material & { opacity: number }; base: number }[] = []
-    const seen = new Set<THREE.Material>()
-    for (const it of items) it.g.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.Material & { opacity: number }; if (m && !seen.has(m)) { seen.add(m); fades.push({ m, base: m.opacity }) } })
-    return { M, items, key, rim, hemi, envRT, tablet, atom, fades, fade: { v: -1 } }
+    // PERFGOV: the one built behind the preloader, else built here in one go
+    if (prebuilt && prebuilt.u === u && prebuilt.gl === gl) { const b = prebuilt.b; prebuilt = null; return b }
+    return runToEnd(buildCylSteps(gl, u))
   }, [u, gl])
+  // PERFGOV: the particle sim's own pass and the tablet's live window, warmed behind the preloader (prewarm.ts)
+  useEffect(() => prewarm.add('dive', () => {
+    const a = built.atom as unknown as { scene: THREE.Scene; cam: THREE.Camera; rtA: THREE.WebGLRenderTarget; rtB: THREE.WebGLRenderTarget }
+    const tw = TabletWindow.last
+    return { jobs: [{ roots: [a.scene], scene: a.scene, camera: a.cam, target: a.rtB }], targets: [a.rtA, a.rtB, built.envRT], steps: tw ? tw.warmSteps() : undefined }
+  }), [built])
   useEffect(() => {
     camera.layers.enable(SYSUI_LAYER)
     return () => { Object.values(built.M).forEach((m) => m.dispose()); built.envRT.dispose(); (built.tablet.userData.mat as THREE.Material).dispose(); built.tablet.children.forEach((c, i) => { if (i !== 1) ((c as THREE.Mesh).material as THREE.Material).dispose() }); built.atom.dispose() }

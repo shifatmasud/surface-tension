@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { groundHeight, buildShadows } from './forest'
 import { grassVert, grassFrag, floorVert, floorFrag, treeVert, treeFrag } from './foliageShaders'
+import { runToEnd } from '../../prewarm' // PERFGOV
 
 /**
  * FOLIAGE — the fluffy, cinema-grade grass and trees of the journey clearing (Shifat 08:54Z: "crewmate is the hero.
@@ -51,7 +52,9 @@ function makeUniforms(sunDir: THREE.Vector3) {
 type U = ReturnType<typeof makeUniforms>
 
 // ================================================================================================ grass
-function buildFluffyGrass(o: FoliageOptions, U: U) {
+/** PERFGOV: a generator so the build can be spread over frames behind the preloader (prewarm.ts); run to the end in one
+ *  go it is the same function as before (same RNG order, same buffers) */
+function* buildFluffyGrass(o: FoliageOptions, U: U): Generator<void, { mesh: THREE.Group; material: THREE.ShaderMaterial; count: number }> {
   const tier: Tier = o.low ? 'low' : o.tier
   // PERF HOOK (Shifat 10:21Z: same object count on every tier): every tier plants the same 100k blades over the same
   // field with the same blade width; only the blade's geometry gets cheaper (5 / 3 / 2 segments = 27 / 15 / 9 verts)
@@ -87,8 +90,9 @@ function buildFluffyGrass(o: FoliageOptions, U: U) {
   // its own draw with a real bounding sphere, so three's frustum test drops the ones off screen (phones' narrow
   // portrait frame, the descent shot, the close crewmate shots), and the band edges line up with the LOD steps
   const BANDS = [5, 10, 17, Infinity], COLS = 3
-  let i = 0
+  let i = 0, nextYield = 4096 // PERFGOV
   while (i < count) {
+    if (i >= nextYield) { nextYield += 4096; yield } // PERFGOV
     // one tuft (clump) of blades
     const d = 0.6 + Math.pow(r(), 1.9) * range
     const half = 1.0 + d * spread
@@ -117,7 +121,9 @@ function buildFluffyGrass(o: FoliageOptions, U: U) {
   for (let c = 0; c < NC; c++) start[c + 1] = start[c] + cnt[c]
   const fill = start.slice(0, NC)
   const sOff = new Float32Array(count * 4), sPrm = new Float32Array(count * 4), sClump = new Float32Array(count * 4)
+  yield // PERFGOV
   for (let b = 0; b < count; b++) {
+    if ((b & 16383) === 16383) yield // PERFGOV
     const t = fill[band[b]]++
     sOff.set(off.subarray(b * 4, b * 4 + 4), t * 4); sPrm.set(prm.subarray(b * 4, b * 4 + 4), t * 4); sClump.set(clump.subarray(b * 4, b * 4 + 4), t * 4)
   }
@@ -164,6 +170,7 @@ function buildFluffyGrass(o: FoliageOptions, U: U) {
       lodStats[L] += a1 - a0
     }
     mesh.add(m)
+    yield // PERFGOV
   }
   ;(window as any).__grassLod = { segs: lodSegs, chunks: mesh.children.length, stats: lodStats, reset() { lodStats.fill(0) } } // QA
   return { mesh, material: mat, count }
@@ -222,7 +229,7 @@ function barkPart(P: Parts, from: THREE.Vector3, to: THREE.Vector3, r0: number, 
 }
 
 /** a crown of lobes: dark displaced core spheres + leaf cards on the lobe shells, one shared outward normal field */
-function crown(P: Parts, lobes: Lobe[], centre: THREE.Vector3, sy: number, cards: number, size: [number, number], seed: number, y0: number, y1: number, coreDetail: number) {
+function* crown(P: Parts, lobes: Lobe[], centre: THREE.Vector3, sy: number, cards: number, size: [number, number], seed: number, y0: number, y1: number, coreDetail: number) {
   const r = rng(seed)
   const tmp = new THREE.Vector3(), out = new THREE.Vector3(), nrm = new THREE.Vector3(), col = new THREE.Color()
   const canopyN = (p: THREE.Vector3, lobeC: THREE.Vector3 | null) => {
@@ -243,6 +250,7 @@ function crown(P: Parts, lobes: Lobe[], centre: THREE.Vector3, sy: number, cards
       tmp.sub(lc).multiplyScalar(k).add(lc); pa.setXYZ(i, tmp.x, tmp.y, tmp.z)
     }
     addSolid(P, geo, 1, () => col.setRGB(1, 1, 1), (p) => canopyN(p, lc).clone(), (p) => exposure(p, canopyN(p, lc)) * 0.75, swayOf)
+    yield // PERFGOV: one lobe per step
   }
   // cards: rejection-sample the visible shell (skip points buried inside another lobe)
   const totalW = lobes.reduce((s, l) => s + l[3] * l[3], 0)
@@ -269,11 +277,12 @@ function crown(P: Parts, lobes: Lobe[], centre: THREE.Vector3, sy: number, cards
     col.r *= 0.98 + r() * 0.04; col.b *= 0.96 + r() * 0.06
     addCard(P, p, nrm.clone(), THREE.MathUtils.lerp(size[0], size[1], r()), ao, col, r(), swayOf(p), r() * Math.PI * 2)
     placed++
+    if ((placed & 127) === 0) yield // PERFGOV
   }
 }
 
 /** a soft broadleaf: a curved trunk with two limbs into a cumulus crown of lobes */
-function broadleaf(quality: number, seed: number) {
+function* broadleaf(quality: number, seed: number) {
   const P = newParts(), r = rng(seed)
   const lean = (r() - 0.5) * 0.3
   const top = new THREE.Vector3(lean, 2.0, (r() - 0.5) * 0.2)
@@ -286,12 +295,13 @@ function broadleaf(quality: number, seed: number) {
     [0.45, 3.4, -0.28, 0.6], [-0.42, 3.3, 0.36, 0.6], [0.05, 2.05, 0.05, 0.62], [-0.55, 2.2, 0.55, 0.52], [0.62, 2.15, -0.5, 0.5],
   ]
   for (const l of lobes) { l[0] += (r() - 0.5) * 0.2; l[1] += (r() - 0.5) * 0.15; l[2] += (r() - 0.5) * 0.2; l[3] *= 0.92 + r() * 0.16 }
-  crown(P, quality > 0.6 ? lobes : lobes.slice(0, 7), new THREE.Vector3(0, 2.7, 0), 0.82, Math.round(700 * quality), quality > 0.6 ? [0.28, 0.45] : [0.38, 0.58], seed * 7 + 1, 1.5, 4.0, quality > 0.6 ? 2 : 1)
+  yield // PERFGOV
+  yield* crown(P, quality > 0.6 ? lobes : lobes.slice(0, 7), new THREE.Vector3(0, 2.7, 0), 0.82, Math.round(700 * quality), quality > 0.6 ? [0.28, 0.45] : [0.38, 0.58], seed * 7 + 1, 1.5, 4.0, quality > 0.6 ? 2 : 1)
   return partsToGeometry(P)
 }
 
 /** a fluffy conifer: drooping tiers of leaf cards around a tall trunk */
-function conifer(quality: number, seed: number) {
+function* conifer(quality: number, seed: number) {
   const P = newParts(), r = rng(seed)
   barkPart(P, new THREE.Vector3(0, -0.1, 0), new THREE.Vector3(0, 4.4, 0), 0.18, 0.04, 4.6)
   const tiers = quality > 0.6 ? 6 : 4
@@ -310,6 +320,7 @@ function conifer(quality: number, seed: number) {
       col.setRGB(0.86 + r() * 0.1, 0.92 + r() * 0.1, 0.95 + r() * 0.1)
       addCard(P, p, n, THREE.MathUtils.lerp(0.22, 0.34, r()) * (quality > 0.6 ? 1 : 1.35), ao, col, r(), THREE.MathUtils.clamp(y / 4.6, 0, 1), r() * Math.PI * 2)
     }
+    yield // PERFGOV: one tier per step
   }
   const core = mergeGeometries(coreGeos)!
   addSolid(P, core, 1, () => col.setRGB(0.9, 0.95, 1), (p, n) => tmp.set(p.x, 0.5, p.z).normalize().lerp(n, 0.3).normalize().clone(), (p) => THREE.MathUtils.clamp(p.y / 4.6, 0, 1) * 0.6, (p) => THREE.MathUtils.clamp(p.y / 4.6, 0, 1))
@@ -349,7 +360,7 @@ function layout(o: FoliageOptions): Spot[] {
   return S.filter((t) => !(t.z < -2 && t.z > -90 && Math.abs(t.x - t.z * 0.05) < 3.4 + Math.max(0, -t.z - 20) * 0.1))
 }
 
-function buildFluffyTrees(o: FoliageOptions, U: U) {
+function* buildFluffyTrees(o: FoliageOptions, U: U): Generator<void, { meshes: THREE.InstancedMesh[]; material: THREE.ShaderMaterial; spots: Spot[] }> { // PERFGOV: generator (see buildFluffyGrass)
   const spots = layout(o)
   const q = o.low ? 0.62 : o.tier === 'mid' ? 0.78 : 1
   const mat = new THREE.ShaderMaterial({
@@ -381,10 +392,10 @@ function buildFluffyTrees(o: FoliageOptions, U: U) {
     meshes.push(m)
   }
   const round = spots.filter((t) => t.kind === 'round'), pine = spots.filter((t) => t.kind === 'pine')
-  make(broadleaf(q, 11), round.filter(near), 'foliage-round-near')
-  make(broadleaf(q * 0.45, 12), round.filter((t) => !near(t)), 'foliage-round-far')
-  make(conifer(q, 13), pine.filter(near), 'foliage-pine-near')
-  make(conifer(q * 0.45, 14), pine.filter((t) => !near(t)), 'foliage-pine-far')
+  make(yield* broadleaf(q, 11), round.filter(near), 'foliage-round-near'); yield // PERFGOV
+  make(yield* broadleaf(q * 0.45, 12), round.filter((t) => !near(t)), 'foliage-round-far'); yield // PERFGOV
+  make(yield* conifer(q, 13), pine.filter(near), 'foliage-pine-near'); yield // PERFGOV
+  make(yield* conifer(q * 0.45, 14), pine.filter((t) => !near(t)), 'foliage-pine-far')
   return { meshes, material: mat, spots }
 }
 
@@ -402,18 +413,22 @@ function reshadeFloor(o: FoliageOptions, U: U) {
 }
 
 // ================================================================================================ entry
-export function buildFoliage(o: FoliageOptions) {
+export function buildFoliage(o: FoliageOptions) { return runToEnd(buildFoliageSteps(o)) }
+/** PERFGOV: the same build as steps (prewarm.ts spreads them over frames behind the preloader) */
+export function* buildFoliageSteps(o: FoliageOptions) {
   const U = makeUniforms(o.sunDir)
   // replace the old faceted trees (and their shadows) with the fluffy ones
   for (const c of [...o.forest.children]) {
     if ((c as THREE.InstancedMesh).isInstancedMesh && c !== o.shadows) { o.forest.remove(c); (c as THREE.InstancedMesh).geometry.dispose() }
   }
-  const trees = buildFluffyTrees(o, U)
+  const trees = yield* buildFluffyTrees(o, U)
+  yield // PERFGOV
   if (o.shadows) { o.forest.remove(o.shadows); (o.shadows as THREE.Mesh).geometry?.dispose() }
   const shadows = buildShadows(trees.spots, o.sunDir)
   o.forest.add(shadows.mesh, ...trees.meshes)
   const floor = reshadeFloor(o, U)
-  const grass = buildFluffyGrass(o, U)
+  yield // PERFGOV
+  const grass = yield* buildFluffyGrass(o, U)
   ;(window as any).__foliage = { U, grassCount: grass.count, trees: trees.spots.length } // QA
   return {
     /** add this to the forest group (JourneyStage keeps driving grass.material.uniforms.u_time as before) */

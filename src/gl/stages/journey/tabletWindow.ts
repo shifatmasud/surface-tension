@@ -9,6 +9,7 @@ import { inner, type Inner } from './timeline'
 import { Crewmate, crewMaterials, CREW_CENTER_Y } from './crewmate'
 import { makeEnvs } from './env'
 import { skyMaterial, starMaterial, glintStarMaterial } from './shaders'
+import { warmSteps as prewarmSteps, prewarm } from '../../prewarm' // PERFGOV
 
 /**
  * TABLET WINDOW (Shifat 16:19Z: "Tablet must not show 2d thumbnail but actual 3d").
@@ -212,7 +213,10 @@ export class TabletWindow {
    * material). The glass is switched to the portal material; the painted one keeps receiving its uniforms from the dive
    * (u_on, u_sweep, u_fill, u_time), which this reads, and its disposal disposes this too: a 3-line hook, nothing else moves.
    */
+  /** PERFGOV: the newest window (UiCylinder keeps no handle; the preloader's warm-up reaches it here) */
+  static last: TabletWindow | null = null
   constructor(private gl: THREE.WebGLRenderer, tablet: THREE.Group) {
+    TabletWindow.last = this // PERFGOV
     this.screen = tablet.children[1] as THREE.Mesh
     this.src = tablet.userData.mat as THREE.ShaderMaterial
     tablet.userData.tw = this
@@ -320,10 +324,13 @@ export class TabletWindow {
     this.screen.material = this.material
     this.src.addEventListener('dispose', this.onSrcDispose)
     // env maps, programs and buffers are built in idle time 1 s after mount (well before systems progress 0.3 on any real scroll), off the scroll path (update() keeps a fallback)
-    this.idleT = window.setTimeout(() => {
+    // PERFGOV: while the page's warm-up (prewarm.ts) runs, it does this in short steps (warmSteps) and this waits
+    const idle = () => {
+      if (prewarm.active) { this.idleT = window.setTimeout(idle, 1000); return }
       const ric = (window as any).requestIdleCallback as ((cb: () => void, o?: { timeout: number }) => number) | undefined
       if (ric) ric(() => this.warm(), { timeout: 3000 }); else this.warm()
-    }, 1000)
+    }
+    this.idleT = window.setTimeout(idle, 1000)
   }
   private disposed = false
   private idleT = 0
@@ -385,6 +392,16 @@ export class TabletWindow {
     this.envs.forest.dispose()
   }
 
+  /** PERFGOV: warm() as short steps behind the preloader (prewarm.ts); the idle-time warm() then finds it done */
+  *warmSteps(): Generator<unknown, void, unknown> {
+    if (this.compiled || this.disposed) return
+    this.compiled = true
+    this.ensureEnvs()
+    yield
+    this.layout(props.height > props.width * 1.05, 1.0)
+    yield* prewarmSteps(this.gl, [{ roots: [this.scene], scene: this.scene, camera: this.cam, target: this.rt }], [this.rt])
+    this.tinyDraw()
+  }
   /** build the expensive bits ahead of the first view (env maps + program warm-up), once */
   warm() {
     if (this.compiled || this.disposed) return

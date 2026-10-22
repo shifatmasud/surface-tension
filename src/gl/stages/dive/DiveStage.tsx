@@ -17,6 +17,7 @@ import { vegVert, vegFrag, rayMaskVert, rayMaskFrag } from './vegetation'
 import { applyCaustics, causticUniforms, causticsFrame } from '../../water/caustics'
 import { DeepSea } from './DeepSea'
 import { UiCylinder } from './UiCylinder'
+import { prewarm, runToEnd } from '../../prewarm' // PERFGOV
 import { backdropVert, backdropFrag, floorVert, floorFrag, siltVert, siltFrag, starVert, starFrag } from './shaders'
 
 const ss = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
@@ -31,12 +32,21 @@ function rng(seed: number) { let s = seed >>> 0; return () => { s = (s + 0x6d2b7
  * The forest: kelp ribbons frame the glide on both sides (clear lane down the middle so the light and his tools
  * stay the one focal point), a few near the camera's path for parallax; seagrass in patches on the shelf.
  */
-function plantForest(nKelp: number, nGrass: number) {
+function plantForest(nKelp: number, nGrass: number): Planted {
+  if (plantPre && plantPre.k === nKelp && plantPre.g === nGrass) return plantPre.f
+  return runToEnd(plantForestSteps(nKelp, nGrass))
+}
+/** PERFGOV: the forest layout (seeded: the same every visit) built behind the preloader in steps, kept for the mounts */
+type Planted = { kelp: number[]; kShape: number[]; grass: number[]; gShape: number[]; fore: number[]; fShape: number[] }
+let plantPre: { k: number; g: number; f: Planted } | null = null
+export function* prebuildDiveForest() { if (!plantPre) plantPre = { k: 320, g: 6400, f: yield* plantForestSteps(320, 6400) } }
+function* plantForestSteps(nKelp: number, nGrass: number): Generator<unknown, Planted, unknown> {
   const R = rng(7)
   const kelp: number[] = [], kShape: number[] = []
   const nearTool = (x: number, z: number) => TOOL_POS.some((p) => Math.hypot(p[0] - x, p[2] - z) < 1.5)
   let guard = 0
   while (kelp.length / 4 < nKelp && guard++ < nKelp * 40) {
+    if ((guard & 63) === 0) yield // PERFGOV
     const fore = false
     const side = R() < 0.5 ? -1 : 1
     const x = side * (fore ? 2.0 + R() * 1.2 : 3.0 + Math.pow(R(), 1.5) * 19)
@@ -64,6 +74,7 @@ function plantForest(nKelp: number, nGrass: number) {
     clumps.push([x, z, 0.5 + R() * 1.1])
   }
   for (let i = 0; i < nGrass && clumps.length; i++) {
+    if ((i & 1023) === 1023) yield // PERFGOV
     const c = clumps[i % clumps.length]
     const a = R() * 6.283, r = Math.sqrt(-2 * Math.log(1 - R() * 0.98)) * c[2] * 0.6
     const x = c[0] + Math.cos(a) * r, z = c[1] + Math.sin(a) * r
@@ -101,6 +112,28 @@ function sunDirs() {
   return { air, travel: toSunWater.clone().negate() }
 }
 
+/** PERFGOV: the dive's uniforms, one set for the page (the cylinder is built against them before the stage mounts) */
+let diveU: ReturnType<typeof makeDiveUniforms> | null = null
+function makeDiveUniforms() {
+  const { air, travel } = sunDirs()
+  return {
+    u_cam: { value: new THREE.Vector3() },
+    u_sun: { value: travel },
+    u_sunAir: { value: air },
+    u_time: shared.u_time,
+    u_deep: { value: 0 },
+    u_split: { value: -1 },
+    u_star: { value: 0 },
+    u_amb: { value: 0 },
+    u_abyss: { value: 0 },
+    u_res: shared.u_resolution,
+    u_bn: shared.u_blueNoise,
+    u_caus: { value: QA.noCaus ? 0 : 1 },
+    u_xk: { value: 1 },
+  }
+}
+export const diveUniforms = () => (diveU ??= makeDiveUniforms())
+
 /**
  * S5 — the dive. One star: the light coming through the surface (Snell's window + the shafts under it).
  * Everything lives on its own layer so the hero's cube/planar captures never see it.
@@ -112,24 +145,7 @@ export function DiveStage() {
   const tier = settings.TIER
   const hi = tier === 'high', low = tier === 'low'
 
-  const u = useMemo(() => {
-    const { air, travel } = sunDirs()
-    return {
-      u_cam: { value: new THREE.Vector3() },
-      u_sun: { value: travel },
-      u_sunAir: { value: air },
-      u_time: shared.u_time,
-      u_deep: { value: 0 },
-      u_split: { value: -1 },
-      u_star: { value: 0 },
-      u_amb: { value: 0 },
-      u_abyss: { value: 0 },
-      u_res: shared.u_resolution,
-      u_bn: shared.u_blueNoise,
-      u_caus: { value: QA.noCaus ? 0 : 1 },
-      u_xk: { value: 1 },
-    }
-  }, [])
+  const u = useMemo(() => diveUniforms(), [])   // PERFGOV: shared with the cylinder built behind the preloader
 
   const mats = useMemo(() => {
     const defines = low ? { LOW: 1 } : {}
@@ -196,6 +212,8 @@ export function DiveStage() {
     s.add(bg)
     return s
   }, [geos, mats])
+  // PERFGOV: the god-ray mask pass (drawn into its own target by post/DiveGodRays), warmed behind the preloader
+  useEffect(() => prewarm.add('dive', () => ({ jobs: [{ roots: [maskScene], scene: maskScene, camera, target: engine.chain?.composer.inputBuffer ?? null }] })), [maskScene, camera])
 
   useEffect(() => {
     camera.layers.enable(DIVE_LAYER)
