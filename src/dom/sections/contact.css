@@ -143,3 +143,7 @@ html.foot-glbar:not(.no-gl) .site-footer--world .overscroll__bar::before { conte
 html.no-gl .site-footer--world { clip-path: none; background: var(--c-paper); }
 /* W29 (scorer-r666 #3): the CTA's keyboard ring was currentColor (black) on the dark CTA wall; a light ring there, focus-visible only (the unfocused pill is unchanged) */
 html[data-bg='dark'] .contact .big-btn:focus-visible { outline-color: #fafafa; }
+
+/* R6.80 (Shifat Oct 22 "scroll hard to loop to top", rubber band): the footer is the end of the page; the loop is a
+   pull past it (services/loopPull.ts), not a runway. Reduced motion keeps the runway (native scroll fills the bar). */
+@media (prefers-reduced-motion: no-preference) { :root { --loop-runway: 0px; } }
