@@ -5,6 +5,7 @@ html { -webkit-text-size-adjust: 100%; text-rendering: optimizeLegibility; -webk
 html.vscroll { scroll-behavior: auto !important; overscroll-behavior-y: none; }
 html.vscroll body { overscroll-behavior-y: none; }
 html.vs-stopped { overflow: hidden; }
+html.vs-hold { overflow: hidden; }   /* R6.81: the 0.8 s hold at the top after a rubber-band loop (native touch: stops momentum) */
 /* an open project card keeps the page layout as it is (overflow hidden on html breaks the lab's sticky track and
    removes the scrollbar, so the slide the card came from would jump); the overlay itself swallows touch + wheel */
 html.overlay-open.vs-stopped { overflow: visible; }
@@ -496,7 +497,7 @@ html[data-bg='dark'] .systems .systems__hit:focus-visible, html[data-bg='dark'] 
    0.6 s release; a finger waits 70 ms so a swipe never flashes) → focus-visible (the existing 2 px ring, unchanged).
    No ink, ripple or fill on touch: the press itself is the feedback (a ripple would be a gradient). */
 a, button, [role='button'], .stk-hit { -webkit-tap-highlight-color: transparent; }
-.big-btn, .pill, .wordmark, .skip-link, .overlay__link, .site-footer__links a, .site-footer__top-link { -webkit-touch-callout: none; touch-action: manipulation; }
+.big-btn, .pill, .wordmark, .skip-link, .overlay__link, .site-footer__links a { -webkit-touch-callout: none; touch-action: manipulation; }
 /* hover lives only where a real pointer hovers: these were global and stuck after a tap on phones */
 .card:hover .card__media { filter: grayscale(1); }
 .card.is-active .card__media, .card:focus-visible .card__media { filter: none; }
@@ -510,17 +511,17 @@ a, button, [role='button'], .stk-hit { -webkit-tap-highlight-color: transparent;
 @media (hover: hover) { .wordmark:hover { opacity: .56; } }
 .wordmark.is-press { opacity: .4; }
 /* footer links + back-to-top: the underline the reduced-motion work list already uses; press dims */
-.site-footer__links a, .site-footer__top-link { text-decoration-line: underline; text-decoration-color: transparent; text-decoration-thickness: 1px; text-underline-offset: 4px; transition: text-decoration-color var(--dur-ui) var(--ease), opacity var(--dur-fade) var(--ease); }
+.site-footer__links a { text-decoration-line: underline; text-decoration-color: transparent; text-decoration-thickness: 1px; text-underline-offset: 4px; transition: text-decoration-color var(--dur-ui) var(--ease), opacity var(--dur-fade) var(--ease); }
 /* the footer words are drawn in GL (.is-ufx makes the DOM text transparent), so the rule takes the frame's fg ink, not currentColor */
-@media (hover: hover) { .site-footer__links a:hover, .site-footer__top-link:hover { text-decoration-color: var(--c-fg); } }
-.site-footer__links a.is-press, .site-footer__top-link.is-press { opacity: .56; }
+@media (hover: hover) { .site-footer__links a:hover { text-decoration-color: var(--c-fg); } }
+.site-footer__links a.is-press { opacity: .56; }
 /* the CTA arrow answers a press the way it answers a hover (the pill's colours and placement are locked) */
 /* the sound pill: the hover lift stays mouse-only; a press cancels it so the pill sinks straight down */
 .pill--sound.is-press { transform: none; }
 /* pills sit near-invisible over bright water, so their press also takes an ink fill: 12 % of their own ink (follows
    the header ink rule by construction, no new colour), on the pill's existing background transition */
 .pill.is-press { background-color: color-mix(in srgb, currentColor 12%, transparent); }
-@media (prefers-reduced-motion: reduce) { .wordmark, .site-footer__links a, .site-footer__top-link, .overlay__link { transition-duration: .01s; } }
+@media (prefers-reduced-motion: reduce) { .wordmark, .site-footer__links a, .overlay__link { transition-duration: .01s; } }
 
 /* ── BUTTON v2 (mockup for Shifat 11:48Z "We can do better for button"; 11:50Z / 11:52Z the SVG circle ripple) ──────
    services/inkButton.ts drives every value on one rAF loop; here is only the structure. Colours stay the locked pair:
