@@ -30,7 +30,7 @@ export function startClock() {
     const now = performance.now()
     const ms = lastNow < 0 ? deltaMs : now - lastNow
     lastNow = now
-    const dt = Math.min(Math.max(ms, 0) / 1000, (window as any).__dtCap ?? 1 / 20)  // __dtCap: QA on slow remote GPUs (camera damping converges)
+    const dt = props.sceneHold ? 0 : Math.min(Math.max(ms, 0) / 1000, (window as any).__dtCap ?? 1 / 20)   // Shifat 1:55 PM: the page scene never moves while the gift is in or out (time frozen while held)  // __dtCap: QA on slow remote GPUs (camera damping converges)
     props.dt = dt; props.time += dt; props.frame++
     taskManager.update()
     input.update()
