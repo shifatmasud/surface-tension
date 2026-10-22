@@ -166,7 +166,8 @@ function Renderer() {
     // because the CTA scene now keeps drawing through the runway, Contact.tsx)
     { const cam = camera as THREE.PerspectiveCamera; if (cam.view && cam.view.enabled) cam.clearViewOffset() }
     sys.chain.render(dt)
-    if (wrapFade.want) wrapFade.grab(gl.domElement)   // W21: the loop wrap freezes this exact frame (services/wrapFade.ts)
+    if (wrapFade.want) wrapFade.grab(gl.domElement)
+    if (engine.grab) { const g = engine.grab; engine.grab = null; g(gl.domElement) }   // R6.83 GIFT: the gift's blurred still   // W21: the loop wrap freezes this exact frame (services/wrapFade.ts)
     // PRELOAD: the gate closed: every program of the real frame (every post pass, the neighbour chain, the mirror/under
     // targets) has drawn once, so the old full-size warm frame has nothing left to build (measured: it was 3.1 s of pure
     // fill on a slow GPU with the counter parked). Reset the sims the gate starved; the warm-up is done (counter → 100)
