@@ -8,7 +8,7 @@ import { inkWipe } from './inkWipe'
 import { labGL } from '../../gl/stages/lab/labGL'
 import { browser } from '../../services/settings'
 import { HOUSE } from '../../core/house'
-import { morphGL } from './morphGL'
+import { morphGL, SB } from './morphGL'
 import { blurFadeIn, blurFadeOut } from '../../services/blurFade'
 
 /** MOCKUP (Shifat 12:49Z "The cards x button must have frosted glassy fully circular 1:1 container"): the close X is a
@@ -182,13 +182,13 @@ export function ProjectOverlay() {
       glassAt(T_OPEN * 0.4); texts(pn).forEach((el) => { el.style.opacity = '' }); arrive(T_OPEN * 0.72); xIn(T_OPEN * 0.8)
       fly({ ...from }, imgTo, p.poster, T_OPEN * 0.88, EASE_OPEN).then(land)
     }
-    const FLY = 800
+    const FLY = 880   // TUNE (Shifat 16:41 PT): was 800; calmer flight, see morphGL
     blurIn(FLY * 0.9)
     gl.style.opacity = '0'
     morphGL.fly({ ...from }, imgTo, p.poster, 1, FLY).then((m) => {
       gl.style.opacity = ''
       if (!m) { fallback(); return }
-      const flatAt = FLY + 560
+      const flatAt = FLY + SB.SETTLE
       glassAt(flatAt); texts(pn).forEach((el) => { el.style.opacity = '' }); arrive(flatAt + T_OPEN * 0.32); xIn(flatAt + T_OPEN * 0.45)
       m.flat.then(() => { land(); requestAnimationFrame(m.hide) })
     })
@@ -230,7 +230,7 @@ export function ProjectOverlay() {
       const mr = md.getBoundingClientRect()
       md.style.opacity = '0'
       const fr = { left: mr.left, top: mr.top, width: mr.width, height: mr.height, radius: 18 }
-      morphGL.fly(fr, { ...to }, p.poster, -1, 680).then((m) => {
+      morphGL.fly(fr, { ...to }, p.poster, -1, 740).then((m) => {
         if (!m) { fly(fr, { ...to }, p.poster, T_CLOSE * 0.8, EASE_CLOSE).then(() => { pn.style.visibility = 'hidden'; finish() }); return }
         pn.style.visibility = 'hidden'
         m.flat.then(() => { finish(); requestAnimationFrame(m.hide) })

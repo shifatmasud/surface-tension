@@ -7,7 +7,7 @@ import { createWaterMaterial } from '../../materials/water'
 import { createSkyDome, sky } from '../../shaders/sky'
 import { brilliantGeometry } from './diamond'
 import { createGemSheen } from '../../materials/gemSheen'
-import { props } from '../../../state/props'
+import { props, shared } from '../../../state/props'
 import { settings } from '../../../services/settings'
 import { fboHelper } from '../../core/fbo'
 import { pool } from '../../systems/pool'
@@ -25,6 +25,8 @@ export const gem = { pos: new THREE.Vector3(0, 0.45, 0), radius: 0.5, touch: 0 }
 export const STUDIO_LAYER = 6
 /** v3: the 3D Shade DS parts in the deep (seen by the camera AND by the stone's env capture, so the stone refracts them) */
 export const SYSUI_LAYER = 7
+/** LAKERES: the phone lake pass draws the water alone into its low-res target (main camera, this layer only) */
+const LAKE_LAYER = 9
 /** how far the stone has sunk below its resting hover, metres (the Scene-1 path sets it as it dives) */
 export const sink = { depth: 0 }
 
@@ -242,6 +244,25 @@ export function HeroStage() {
     return quality.on(fit)
   }, [size, under])
   useEffect(() => { wu.u_underTex.value = under.rt.texture }, [under, wu])
+  // LAKERES (Shifat 16:02 PT: "water surface pixel resolution can be turned down a bit for faster hero section … feels slow
+  // in phone"): on phones the lake's own full-screen shader (the hero's biggest cost) runs into a 0.65x target; the main
+  // camera's draw of the same mesh then only reads it back (water.ts u_lakeComp). Same vertex shader → full-res, exact depth:
+  // the stone's silhouette, its submerged cut and the meniscus line are still drawn at scene resolution, and the stone is
+  // never in this target, so nothing of it can bleed (no halo). Desktop/mid: nothing here exists (hi).
+  const lake = useMemo(() => hi ? null : { rt: new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType }), scale: 0.65, low: false, frame: -1, mw: new THREE.Matrix4(), pm: new THREE.Matrix4(), comps: 0 }, [hi])
+  useEffect(() => {
+    if (!lake) return
+    // the governor's MOVING rung only (noRest), as `under`: no re-allocation on every pointer stop/start
+    const fit = () => { const d = quality.dprFor(size.width, size.height, true); const w = Math.max(2, Math.floor(size.width * d * lake.scale)), h = Math.max(2, Math.floor(size.height * d * lake.scale)); if (w !== lake.rt.width || h !== lake.rt.height) lake.rt.setSize(w, h) }
+    fit()
+    return quality.on(fit)
+  }, [size, lake])
+  useEffect(() => {
+    if (!lake) return
+    wu.u_lakeTex!.value = lake.rt.texture
+    waterMesh.current.layers.enable(LAKE_LAYER)
+    if (/[?&]qa\b/.test(location.search)) (window as any).__lake = lake   // QA only (comps = main draws served from the low-res lake)
+  }, [lake, wu])
 
   const st = useMemo(() => ({
     tiltX: new Spring(0, 1.1, 0.55, 0), tiltZ: new Spring(0, 1.1, 0.55, 0), lift: new Spring(0, 0.9, 0.45, 0),
@@ -283,7 +304,17 @@ export function HeroStage() {
     // W18-DIVE OVER-UNDER: the lake is cut at the lens waterline for the main camera only (never in the env/mirror captures)
     if (!waterMesh.current.userData.wl) {
       waterMesh.current.userData.wl = true
-      waterMesh.current.onBeforeRender = (_r, _s, cam) => { wu.u_wlClip.value = cam === camera ? dive.split : -1 }
+      waterMesh.current.onBeforeRender = lake ? (_r, _s, cam) => {
+        // LAKERES (phones): the lake pass shades the whole lake (no lens cut) at the target's size; the main camera's draw reads
+        // it back only when it is THIS frame's lake from THIS pose (the neighbour pass and any other camera shade in full)
+        const main = cam === camera && !lake.low
+        const comp = main && lake.frame === props.frame && !nb.active && lake.mw.equals(cam.matrixWorld) && lake.pm.equals((cam as THREE.PerspectiveCamera).projectionMatrix)
+        wu.u_lakeComp!.value = comp ? 1 : 0
+        wu.u_lakeTex!.value = lake.low ? null : lake.rt.texture   // never bound while drawing INTO it (a WebGL feedback loop drops the draw)
+        if (comp) lake.comps++
+        if (!lake.low) wu.u_resolution.value.copy(shared.u_resolution.value)
+        wu.u_wlClip.value = main ? dive.split : -1
+      } : (_r, _s, cam) => { wu.u_wlClip.value = cam === camera ? dive.split : -1 }
     }
     // gem: slow breathing hover; the tip dips into the water once per ~3.4 s
     st.phase += dt * (Math.PI * 2 / 3.4)
@@ -370,6 +401,15 @@ export function HeroStage() {
       gl.render(scene, c)
       gemDep.value.x = 0
       c.layers.mask = ml
+    }
+    // LAKERES (phones): the lake alone, main camera, into its 0.65x target (cleared transparent: the read-back divides by alpha)
+    if (lake && !nb.active) {
+      const ml = c.layers.mask; c.layers.set(LAKE_LAYER)
+      lake.low = true; wu.u_resolution.value.set(lake.rt.width, lake.rt.height)
+      gl.setRenderTarget(lake.rt); gl.setClearColor(0x000000, 0); gl.clear(true, true, false)
+      gl.render(scene, c)
+      lake.low = false; c.layers.mask = ml
+      lake.frame = props.frame; lake.mw.copy(c.matrixWorld); lake.pm.copy(c.projectionMatrix)
     }
     }
     // underwater the stone sees the water, not the studio: the cards go and the env re-captures as it sinks

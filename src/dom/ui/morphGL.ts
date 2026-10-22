@@ -2,7 +2,11 @@
  * MOCKUP v2 (Shifat 11:44–11:46Z): the slide image comes TOWARD the viewer as a soft body, settles flat, and only then
  * does the card reveal from behind it. A tiny dedicated WebGL canvas draws the flying image as a 32×32 plane:
  * per-vertex delayed progress (top corners lead, bottom corners lag) so the edges really bend, a forward z swell with
- * perspective (the plane comes at you and bulges convex), and a damped landing spring (ζ 0.45) that flattens it.
+ * perspective (the plane comes at you and bulges convex), and a soft landing that flattens it.
+ * TUNE (Shifat 16:41 PT Oct 21: "Image to card wooble animation must be fluid gentler. Its too much snappy bouncy now"):
+ * same path, calmer. The flight ease is a soft-start ease-out (peak speed 1.75x average, was the 3x of a cubic in-out),
+ * the flight is 10 % longer, and the landing is one critically damped breath (≈2 % toward the viewer, peaking 1/5 into
+ * the settle, starting and ending at rest, no reversal) instead of the ζ 0.45 spring (19 % rebound, then a dip behind).
  * One canvas, created on the first open and reused; it only draws while an image is in flight.
  */
 export type MR = { left: number; top: number; width: number; height: number; radius: number }
@@ -14,8 +18,9 @@ export const SB = {
   BOW: 0.075,     // convex bulge: edges bow outward at mid-flight (fraction of size)
   PULL: 0.03,     // the leading (top) corners pull up and out
   LIFT: 0.06,     // the body rises on its way (fraction of viewport height)
-  SETTLE: 560,    // ms of landing spring after the flight
-  ZETA: 0.45,     // spring damping ratio
+  SETTLE: 720,    // ms of soft landing after the flight (TUNE: was 560)
+  LAND: 0.12,     // TUNE: landing breath strength (× SPR_Z / SPR_BOW); the old spring peaked at 1.0
+  OUT: 1.4,       // TUNE: ease-out shape of the flight (1 = symmetric smoothstep; higher = earlier, longer tail)
   SPR_Z: 0.16,    // landing rebound toward the viewer (fraction of focal)
   SPR_BOW: 0.07,  // landing bulge
   LIGHT: 0.10,    // soft light on the near parts of the plane
@@ -25,9 +30,12 @@ const N = 32
 const VS = `
 attribute vec2 a_uv;
 uniform vec4 u_a; uniform vec4 u_b; uniform vec2 u_res;
-uniform float u_pp, u_spr, u_spread, u_z, u_bow, u_pull, u_lift, u_sz, u_sbow, u_amp, u_dir, u_ts;
+uniform float u_pp, u_spr, u_spread, u_z, u_bow, u_pull, u_lift, u_sz, u_sbow, u_amp, u_dir, u_ts, u_out;
 varying vec2 v_uv; varying float v_z; varying vec2 v_sz; varying float v_eg;
-float ease(float x){ x=clamp(x,0.,1.); return x<.5 ? 4.*x*x*x : 1.-pow(-2.*x+2.,3.)/2.; }
+// TUNE: soft start (zero speed), long ease-out tail; the close (u_dir < 0, progress runs 1 → 0) mirrors it so it too
+// leaves gently and eases into the slide
+float eo(float x){ float w = 1.-pow(1.-x, u_out); return w*w*(3.-2.*w); }
+float ease(float x){ x=clamp(x,0.,1.); return u_dir > 0. ? eo(x) : 1.-eo(1.-x); }
 void main(){
   vec2 uv = a_uv;
   float ax = abs(2.*uv.x-1.);
@@ -106,7 +114,7 @@ class Morph {
       const ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(ix), gl.STATIC_DRAW)
       gl.useProgram(pr)
       const loc = gl.getAttribLocation(pr, 'a_uv'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0)
-      for (const k of ['u_a', 'u_b', 'u_res', 'u_pp', 'u_spr', 'u_spread', 'u_z', 'u_bow', 'u_pull', 'u_lift', 'u_sz', 'u_sbow', 'u_amp', 'u_dir', 'u_ts', 'u_tex', 'u_ia', 'u_ra', 'u_rb', 'u_light', 'u_alpha']) this.u[k] = gl.getUniformLocation(pr, k)
+      for (const k of ['u_a', 'u_b', 'u_res', 'u_pp', 'u_spr', 'u_spread', 'u_z', 'u_bow', 'u_pull', 'u_lift', 'u_sz', 'u_sbow', 'u_amp', 'u_dir', 'u_ts', 'u_out', 'u_tex', 'u_ia', 'u_ra', 'u_rb', 'u_light', 'u_alpha']) this.u[k] = gl.getUniformLocation(pr, k)
       gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
       document.body.appendChild(cv)
       this.cv = cv; this.gl = gl; this.pr = pr; this.n = ix.length
@@ -143,9 +151,10 @@ class Morph {
     gl.uniform2f(U.u_res, W, H); gl.uniform1f(U.u_ia, t.aspect); gl.uniform1f(U.u_ra, A.radius); gl.uniform1f(U.u_rb, B.radius)
     gl.uniform1f(U.u_spread, SB.SPREAD); gl.uniform1f(U.u_z, SB.Z); gl.uniform1f(U.u_bow, SB.BOW); gl.uniform1f(U.u_pull, SB.PULL)
     gl.uniform1f(U.u_lift, SB.LIFT); gl.uniform1f(U.u_sz, SB.SPR_Z); gl.uniform1f(U.u_sbow, SB.SPR_BOW); gl.uniform1f(U.u_light, SB.LIGHT)
-    gl.uniform1f(U.u_dir, dir); gl.uniform1f(U.u_alpha, 1); gl.uniform1i(U.u_tex, 0)
-    const settle = dir > 0 ? SB.SETTLE : SB.SETTLE * 0.75, sAmp = dir > 0 ? 1 : 0.6
-    const w = 3.9 / (SB.ZETA * settle / 1000), wd = w * Math.sqrt(1 - SB.ZETA * SB.ZETA)
+    gl.uniform1f(U.u_dir, dir); gl.uniform1f(U.u_out, SB.OUT); gl.uniform1f(U.u_alpha, 1); gl.uniform1i(U.u_tex, 0)
+    const settle = dir > 0 ? SB.SETTLE : SB.SETTLE * 0.75, sAmp = dir > 0 ? SB.LAND : SB.LAND * 0.6
+    // TUNE: a critically damped breath, (t/τ)² e^(2(1 − t/τ)): 0 with zero speed at touchdown, 1 at τ, ~0 by the end
+    const tau = settle / 5000
     const t0 = performance.now()
     let done!: () => void; const flat = new Promise<void>((r) => { done = r })
     let stop = false
@@ -155,7 +164,7 @@ class Morph {
       const p = Math.min(1, el / ms)
       const pp = dir > 0 ? p : 1 - p
       const ts = Math.max(0, el - ms) / 1000
-      const spr = el > ms ? sAmp * Math.exp(-SB.ZETA * w * ts) * Math.sin(wd * ts) / 0.51 : 0
+      const k = ts / tau, spr = el > ms ? sAmp * k * k * Math.exp(2 - 2 * k) * Math.max(0, 1 - ts * 1000 / settle) : 0
       gl.uniform1f(U.u_pp, pp); gl.uniform1f(U.u_spr, spr); gl.uniform1f(U.u_amp, SB.AMP); gl.uniform1f(U.u_ts, ts)
       gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT)
       gl.drawElements(gl.TRIANGLES, this.n, gl.UNSIGNED_SHORT, 0)

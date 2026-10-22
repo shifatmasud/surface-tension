@@ -48,9 +48,13 @@ export function createWaterMaterial() {
     u_dbg: { value: 0 },
     u_underTex: { value: null as THREE.Texture | null },          // the submerged stone (screen space), for refraction
     u_underOn: { value: 0 },
-    u_resolution: shared.u_resolution,                                           // stochastic sun glints
+    u_resolution: hi ? shared.u_resolution : { value: new THREE.Vector2(1, 1) },   // LAKERES: phones set it per draw (HeroStage: the low-res target's size in the lake pass, the scene's otherwise)                                           // stochastic sun glints
     u_fogNear: { value: 7 }, u_fogFar: { value: 26 },
     u_wlClip: { value: -1 },   // W18-DIVE OVER-UNDER (set per draw by HeroStage: main camera only)
+    // LAKERES (Shifat 16:02 PT 'water surface pixel resolution can be turned down a bit … feels slow in phone'): phones only.
+    // HeroStage draws the full lake shader into a ~0.65x target first; the main camera's draw of the SAME mesh (same vertex
+    // shader, so the depth is full-res and exact: the stone's edge and the meniscus line stay crisp) then only reads it back.
+    ...(hi ? {} : { u_lakeTex: { value: null as THREE.Texture | null }, u_lakeComp: { value: 0 } }),
   }
   const material = new THREE.ShaderMaterial({
     uniforms,
@@ -86,7 +90,7 @@ export function createWaterMaterial() {
       uniform float u_bedDepth, u_cauRipple, u_refrK; uniform vec3 u_absorb, u_sigS; uniform vec3 u_scatter; uniform vec3 u_bedColor;
       uniform vec4 u_gem; uniform vec3 u_gemTint; uniform float u_touch, u_glint, u_dbg, u_underOn, u_cau; uniform sampler2D u_underTex; uniform vec2 u_resolution; uniform float u_fogNear, u_fogFar;
       uniform float u_wlClip;   // W18-DIVE OVER-UNDER: -1 off, else the lens waterline (screen y); the lake draws above it only
-      ${WL_EDGE}
+${hi ? '' : '      uniform sampler2D u_lakeTex; uniform float u_lakeComp;   // LAKERES (phones)\n'}      ${WL_EDGE}
       varying vec3 v_world; varying vec2 v_ruv; varying float v_rmask; varying vec4 v_refl;
 
       // ---- height gradient: swells (analytic derivative) -------------------------------------
@@ -194,7 +198,14 @@ export function createWaterMaterial() {
 
       void main(){
         if (u_wlClip > -0.5 && gl_FragCoord.y < (u_wlClip + wlEdge(gl_FragCoord.x / u_resolution.y, u_time)) * u_resolution.y) discard;   // W18-DIVE OVER-UNDER
-        vec3 V = normalize(cameraPosition - v_world);
+${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on phones = read back the low-res lake (alpha-normalised, so the lake's own edge never pulls in the cleared texels)
+          vec4 lk = texture2D(u_lakeTex, gl_FragCoord.xy / u_resolution);
+          gl_FragColor = vec4(lk.rgb / max(lk.a, 1e-4), 1.0);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+          return;
+        }
+`}        vec3 V = normalize(cameraPosition - v_world);
         float dist = length(cameraPosition - v_world);
         // ---- normal ----
         // WATER LANE: derivative-aware detail. fp = the pixel's footprint on the water in metres; each octave fades as

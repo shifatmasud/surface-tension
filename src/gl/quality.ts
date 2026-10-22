@@ -81,7 +81,7 @@ const CANVAS_PIXELS = 9.0e6
  *  native 3x (a 3x phone drew 4x the scene pixels of 1.5x and 2.25x the canvas pixels of 2x, every frame it sat still,
  *  with the lake, the stone and the trail still animating). At the phone's viewing size 1.5x + SMAA reads the same;
  *  text stays at 2x, the sharpest thing on screen. */
-const PHONE_SCENE_DPR = 1.5
+const PHONE_SCENE_DPR = 1.0 // TUNE (Shifat 16:41 PT Oct 21: "On phone low dpr make site faster. Set max dpr to 1 max"): was 1.5; also caps the phone text layer (textDprFor)
 /** W27 R6.65: phone text density drops from 2x to 1.5x at this governor level and holds there (see textDprFor) */
 const TEXT_DROP_LEVEL = 1
 const PHONE_CANVAS_DPR = 2
@@ -128,7 +128,7 @@ class Quality {
   /** the rest target before the rest judge: native within 1.2x the scene pixel cap */
   private restTarget(w: number, h: number) { return Math.min(this.nativeFor(w, h), Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h)) * 1.2, tier === 'low' ? PHONE_SCENE_DPR : Infinity) }
   /** the canvas density a rest frame refines to: native, phones capped at PHONE_CANVAS_DPR */
-  private textCeil(w: number, h: number) { const n = this.nativeFor(w, h); return tier === 'low' ? Math.min(n, PHONE_CANVAS_DPR) : n }
+  private textCeil(w: number, h: number) { const n = this.nativeFor(w, h); return tier === 'low' ? Math.min(n, PHONE_CANVAS_DPR, PHONE_SCENE_DPR) : n } // TUNE: phones max 1.0
   /** DPR for a window size: the level's step, clipped by the device DPR and the total-pixel cap, floored at 0.6.
    *  At rest: native (the device's own DPR, phones up to 3) within 1.2x the pixel cap, lowered by the rest judge.
    *  Never above the text density (eng review #25: text stays the sharpest thing on screen, at rest too). */
@@ -150,7 +150,7 @@ class Quality {
     // W27 R6.65: the text rung drops to 1.5x from level 1 on (the same absolute level as before the ladder grew: it was
     // "the last two of three"), and NEVER lower — the new 0.85 / 0.72 / 0.6 scene steps keep the text at 1.5x, so
     // text stays the sharpest thing on screen at the floor too.
-    return Math.min(n, this.level >= TEXT_DROP_LEVEL ? 1.5 : 2)
+    return Math.min(n, PHONE_SCENE_DPR, this.level >= TEXT_DROP_LEVEL ? 1.5 : 2) // TUNE: phones max 1.0
   }
   /** SHARP REST REFINEMENT (Shifat 15:39Z + the sharp lane): after ~300 ms with no scroll or pointer the canvas renders
    *  at native density with SMAA (razor stills); motion drops it back. Every tier, phones included. A rest frame that
