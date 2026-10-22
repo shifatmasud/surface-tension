@@ -24,7 +24,10 @@ function detectWebGL2() {
     return { ok: floatRT, renderer }
   } catch { return { ok: false, renderer: 'error' } }
 }
-const gl2 = detectWebGL2()
+// R6.76 LOAD PATH: index.html's first-paint probe already made a WebGL2 context and read the same two facts; reuse them
+// (one context creation fewer in the boot task). Without the probe's record (?nogl, reduced motion skip it) detect here.
+const probed = (window as any).__stgl as { ok: boolean; renderer: string } | undefined
+const gl2 = probed && typeof probed.renderer === 'string' ? { ok: !!probed.ok, renderer: probed.renderer } : detectWebGL2()
 
 const lowPower = /Mali-4|Adreno \(TM\) [2-4]/i.test(gl2.renderer)
 /** No GPU at all (a software rasteriser: VMs, disabled hardware acceleration, headless test browsers): the live scenes

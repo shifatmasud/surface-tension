@@ -143,11 +143,18 @@ export function TextLayer() {
     window.addEventListener('st:drop', onDrop)
     if (props.introDone) onDrop()
 
-    const build = () => {
+    // R6.76 LOAD PATH (M02 census: the first build was one ~0.46 s task at 6x CPU behind the curtain, the shell counter
+    // frozen through it): the build is a step generator, one step per text element. The first build runs in short tasks
+    // (the counter keeps rolling, the same lines and textures come out); a resize still rebuilds in one go. A newer build
+    // cancels an older one still in flight (gen), so nothing is ever added twice.
+    let gen = 0
+    function* buildSteps(): Generator<void, void, unknown> {
+      const my = ++gen
       // tear down, then split every beat's copy into lines and rasterise each line once (fonts are ready)
       st.forEach((s) => { s.lines.forEach((l) => { ufx.remove(l.it); (l.mat.uniforms.u_map.value as THREE.Texture).dispose(); l.mat.dispose() }); s.lines = []; s.dom = [] })
       splits.forEach((s) => s.revert()); splits = []
-      beatsEl.forEach((b, bi) => {
+      for (let bi = 0; bi < beatsEl.length; bi++) {
+        const b = beatsEl[bi]
         b.style.visibility = 'hidden'; b.style.display = 'flex'   // W19: the 17:12Z text-block rule is a flex row
         for (const el of Array.from(b.querySelectorAll<HTMLElement>('[data-role]'))) {
           const role = el.dataset.role as LineGL['role']
@@ -175,12 +182,28 @@ export function TextLayer() {
             ufx.add(it)
             st[bi].lines.push({ it, mat, el: line, role })
           }
+          b.style.visibility = ''; b.style.display = ''
+          yield
+          if (my !== gen) return   // a newer build took over (it rebuilt and restyled every beat itself)
+          b.style.visibility = 'hidden'; b.style.display = 'flex'
         }
         b.style.visibility = ''; b.style.display = ''
-      })
-      if (gl) host.classList.add('is-gl')
-      host.classList.add('is-built')   // W21: until the lines are split and masked, no beat paints (app.css)
+      }
+      if (gl) host!.classList.add('is-gl')
+      host!.classList.add('is-built')   // W21: until the lines are split and masked, no beat paints (app.css)
     }
+    const build = () => { const g = buildSteps(); while (!g.next().done) { /* one go */ } }
+    /** the first build: its steps back to back in short tasks (~8 ms of steps each), yielding to frames between */
+    const buildSliced = () => new Promise<void>((resolve) => {
+      const g = buildSteps(), ch = new MessageChannel()
+      const run = () => {
+        const t0 = performance.now()
+        for (;;) { if (g.next().done) { ch.port1.close(); resolve(); return } if (performance.now() - t0 > 8) break }
+        ch.port2.postMessage(0)
+      }
+      ch.port1.onmessage = run
+      run()
+    })
     let active = -1, built = false
     const set = (i: number) => {
       if (i === active) return
@@ -259,14 +282,17 @@ export function TextLayer() {
     }
     gsap.ticker.add(tick)
     let ro: ResizeObserver | null = null
-    document.fonts.ready.then(() => {
-      build(); measure(); built = true
+    let gone = false
+    document.fonts.ready.then(() => buildSliced()).then(() => {
+      if (gone) return
+      measure(); built = true
       ro = new ResizeObserver(() => { measure() }); ro.observe(document.body)
     })
     let rt = 0
     const onResize = () => { clearTimeout(rt); rt = window.setTimeout(() => { measure(); const a = active; active = -1; build(); set(a); slotBox.top = a >= 0 ? beatsEl[a].getBoundingClientRect().top : 1e5; st.forEach((s, i) => { if (i === a) { s.on = true; s.dir = 1; s.t0 = -10 } }) }, 180) }
     window.addEventListener('resize', onResize)
     return () => {
+      gone = true; gen++
       gsap.ticker.remove(tick); window.removeEventListener('resize', onResize); window.removeEventListener('st:drop', onDrop); ro?.disconnect()
       st.forEach((s) => s.lines.forEach((l) => ufx.remove(l.it))); splits.forEach((s) => s.revert())
       document.documentElement.classList.remove('slot-on')

@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Environment, Lightformer } from '@react-three/drei'
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
+import { lazy, startTransition, Suspense, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
 import { props, shared } from '../state/props'
 import { settings, capDpr } from '../services/settings'
 import { fboHelper, FS_VERT } from './core/fbo'
@@ -535,7 +535,9 @@ function BootStager() {
     if (k >= BOOT_STEPS) { bootDone(); return }
     if (!heroGeo) heroGeo = sliced(heroGeoSteps(), () => 200).catch(() => {})   // the hero's geometry, in short slices
     let gone = false, t: ReturnType<typeof setTimeout> | undefined
-    const next = () => { if (gone) return; gone = true; setK(k + 1) }
+    // R6.76 LOAD PATH: each step renders as a transition (React builds the step's objects in ~5 ms slices, the counter
+    // keeps rolling); the commit and everything the step mounts are the same
+    const next = () => { if (gone) return; gone = true; startTransition(() => setK(k + 1)) }
     // a frame between steps (the counter paints), then a fresh task; a hidden tab (no frames) still boots on the timer
     const step = () => { t = setTimeout(next, 120); requestAnimationFrame(() => setTimeout(next, 0)) }
     if (k === 1) heroGeo.then(() => { if (!gone) step() })   // the hero mounts once its lake and stone are built

@@ -31,6 +31,8 @@
           if (!g) no = true
           else { var e = g.getExtension('WEBGL_debug_renderer_info'), r = e ? String(g.getParameter(e.UNMASKED_RENDERER_WEBGL)) : ''
             if (/SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(r) && !/[?&]forcegl/.test(q)) no = true
+            // R6.76 LOAD PATH: services/settings.ts reads this probe instead of creating a second WebGL2 context at boot
+            window.__stgl = { ok: !!g.getExtension('EXT_color_buffer_float') || !!g.getExtension('EXT_color_buffer_half_float'), renderer: e ? r : 'unknown' }
             var l = g.getExtension('WEBGL_lose_context'); if (l) l.loseContext() } }
         if (no) h.classList.add('no-gl')
       } catch (_) {} })()
