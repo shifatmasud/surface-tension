@@ -23,6 +23,7 @@ import { skyMaterial, starMaterial, glintStarMaterial, screenMaterial, backdropM
 import { buildShatterGeometry, shatterMaterial, buildGlints } from './shatter'
 import { inner, outer, T, type Inner, type Outer } from './timeline'
 import { journeyAudio, resetJourneyAudio } from './journeyAudio'
+import { audio } from '../../../services/audio' // W29 R6.74: mute the primed cue calls
 
 /** Where the stage lives in the main world (the pool owns the origin). */
 export const JOURNEY_ORIGIN = new THREE.Vector3(200, 0, 0)
@@ -147,7 +148,19 @@ export function JourneyStage(): JSX.Element {
     journey.snap = false
     const prevP = S.lastP
     S.lastP = p
-    if (!nb.active) journey.beat = journeyAudio(p) // NEIGHBOUR HOOK: the soundtrack follows the live section only
+    if (!nb.active) {
+      // W29 R6.74 (Shifat "Glass sound has bugs?"): journeyAudio.ts is locked, and it fires a beat's cue on ANY change of
+      // beat. So (a) landing mid-journey cold (a jump, a re-entry after the stage hid) fired the cue of wherever you landed:
+      // a shatter with no break on screen; (b) scrolling back UP out of the bloop beat into the break beat shattered again.
+      // Those two calls now run with the cues muted, so the beat is primed silently and the glass only sounds on the
+      // forward crossing into the break. Entering from the top (beat 0) still plays the space hum. Edges: journeyAudio EDGES/HYST.
+      const prev = journey.beat
+      const mute = (prev < 0 && p >= 0.24) || (prev === 5 && p < 0.9 - 0.012)
+      const was = audio.enabled
+      if (mute) audio.enabled = false
+      journey.beat = journeyAudio(p) // NEIGHBOUR HOOK: the soundtrack follows the live section only
+      if (mute) audio.enabled = was
+    }
 
     // ---- inner world
     const I = inner(p, S.I, portrait)
