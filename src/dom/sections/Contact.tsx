@@ -7,7 +7,7 @@ import { visuals } from '../../gl/systems/visuals'
 import { props } from '../../state/props'
 import { clamp } from '../../core/math'
 import { SITE } from '../../content/site'
-import { ArrowUpRight, GithubLogo, XLogo, ArrowUp } from '@phosphor-icons/react'
+import { ArrowUpRight, GithubLogo, XLogo } from '@phosphor-icons/react'
 import { scroll } from '../../services/scroll'
 import { audio } from '../../services/audio'
 import { settings } from '../../services/settings'
@@ -129,7 +129,10 @@ export function Contact() {
         props.overscroll = f
         footerBar.el?.style.setProperty('--f', f.toFixed(3))
         if (FOOT_MODE) footerBar.el?.parentElement?.parentElement?.style.setProperty('--f', f.toFixed(3))   // FOOTER MOCKUP: the lime glow reads it
-        if (f > 0.985 && !fired) { fired = true; audio.swell(false); scroll.wrapToTop(); loopPull.reset(); setTimeout(() => (fired = false), 900) }
+        // R6.81 (Shifat Oct 22 05:12 "When fill is 80% auto fill to 100% and loop back to top & stop scroll a bit moment",
+        // option B): past 80 % loopPull fills itself to 100 % and the loop then holds the page at the top for 0.8 s
+        const rubber = !(RM.matches || !settings.USE_GL)
+        if ((rubber ? f >= 1 : f > 0.985) && !fired) { fired = true; audio.swell(false); scroll.wrapToTop(rubber ? 800 : 0); loopPull.reset(); setTimeout(() => (fired = false), 900) }
       },
     }
   })
@@ -195,8 +198,8 @@ export function Footer() {
   return createPortal(
     <footer className={FOOT_MODE ? `site-footer site-footer--world site-footer--w${FOOT_MODE}` : 'site-footer'} aria-label="Footer"
       onFocus={() => {
-        // W28 (scorer-r664 #1): a keyboard stop inside the footer while the curtain still covers it (GitHub, X, Back to the
-        // surface took focus behind the clip, no ring on screen) jumps to where the footer is fully uncovered and the bar is
+        // W28 (scorer-r664 #1): a keyboard stop inside the footer while the curtain still covers it (GitHub, X; R6.81: the
+        // Back to the surface link is gone) took focus behind the clip, no ring on screen) jumps to where the footer is fully uncovered and the bar is
         // still empty (k0 = fh + 2, f = 0: no wrap), the same jump-cut Systems.tsx uses for its drum controls
         if (!settings.USE_GL || !FOOT_MODE) return
         const sec = document.getElementById('contact'), vh = props.height || window.innerHeight
@@ -215,8 +218,7 @@ export function Footer() {
       <div className="overscroll__bar" aria-hidden="true"><p className="overscroll__label" data-roll="split">{noOrphan('Keep scrolling — back to the surface')}</p><div className="overscroll__track"><div className="overscroll__fill" ref={(e) => { footerBar.el = e }} /></div></div>
       <div className="site-footer__bottom" data-roll="marked">
         <span data-roll-line="inline">© <Odometer value={new Date().getFullYear()} digits={4} /> {SITE.name}. Surface Tension.</span>
-        {/* POLISH (one CTA button): a plain text link, not a button */}
-        <a className="site-footer__top-link" href="#hero" aria-label="Back to the surface" data-cursor data-roll-line="inline" onClick={(e) => { e.preventDefault(); audio.swell(false); scroll.scrollTo(0, { duration: 3.2 }) }}>Back to the surface <ArrowUp size={14} weight="bold" /></a>
+        {/* R6.81 (Shifat Oct 22 05:12/05:18, option A for both sites): the "Back to the surface" text link is gone; the rubber band is the way back */}
       </div>
     </footer>, document.body)
 }
