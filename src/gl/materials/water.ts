@@ -54,7 +54,7 @@ export function createWaterMaterial() {
     // LAKERES (Shifat 16:02 PT 'water surface pixel resolution can be turned down a bit … feels slow in phone'): phones only.
     // HeroStage draws the full lake shader into a ~0.65x target first; the main camera's draw of the SAME mesh (same vertex
     // shader, so the depth is full-res and exact: the stone's edge and the meniscus line stay crisp) then only reads it back.
-    ...(hi ? {} : { u_lakeTex: { value: null as THREE.Texture | null }, u_lakeComp: { value: 0 } }),
+    ...(hi ? {} : { u_lakeTex: { value: null as THREE.Texture | null }, u_lakeComp: { value: 0 }, u_lakeHalf: { value: new THREE.Vector2(0, 0) } }),
   }
   const material = new THREE.ShaderMaterial({
     uniforms,
@@ -90,7 +90,7 @@ export function createWaterMaterial() {
       uniform float u_bedDepth, u_cauRipple, u_refrK; uniform vec3 u_absorb, u_sigS; uniform vec3 u_scatter; uniform vec3 u_bedColor;
       uniform vec4 u_gem; uniform vec3 u_gemTint; uniform float u_touch, u_glint, u_dbg, u_underOn, u_cau; uniform sampler2D u_underTex; uniform vec2 u_resolution; uniform float u_fogNear, u_fogFar;
       uniform float u_wlClip;   // W18-DIVE OVER-UNDER: -1 off, else the lens waterline (screen y); the lake draws above it only
-${hi ? '' : '      uniform sampler2D u_lakeTex; uniform float u_lakeComp;   // LAKERES (phones)\n'}      ${WL_EDGE}
+${hi ? '' : '      uniform sampler2D u_lakeTex; uniform float u_lakeComp; uniform vec2 u_lakeHalf;   // LAKERES (phones); W29: half a low-res texel, the read-back UV inset\n'}      ${WL_EDGE}
       varying vec3 v_world; varying vec2 v_ruv; varying float v_rmask; varying vec4 v_refl;
 
       // ---- height gradient: swells (analytic derivative) -------------------------------------
@@ -199,11 +199,15 @@ ${hi ? '' : '      uniform sampler2D u_lakeTex; uniform float u_lakeComp;   // L
       void main(){
         if (u_wlClip > -0.5 && gl_FragCoord.y < (u_wlClip + wlEdge(gl_FragCoord.x / u_resolution.y, u_time)) * u_resolution.y) discard;   // W18-DIVE OVER-UNDER
 ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on phones = read back the low-res lake (alpha-normalised, so the lake's own edge never pulls in the cleared texels)
-          vec4 lk = texture2D(u_lakeTex, gl_FragCoord.xy / u_resolution);
-          gl_FragColor = vec4(lk.rgb / max(lk.a, 1e-4), 1.0);
-          #include <tonemapping_fragment>
-          #include <colorspace_fragment>
-          return;
+          vec4 lk = texture2D(u_lakeTex, clamp(gl_FragCoord.xy / u_resolution, u_lakeHalf, 1.0 - u_lakeHalf));
+          // W29 R6.72 (Shifat: 'black lines at the end of the water surface'): the far lake is sub-texel slivers under the
+          // horizon that the 0.65x pass can miss; where the low-res coverage is under half this pixel shades in full instead
+          if (lk.a > 0.5) {
+            gl_FragColor = vec4(lk.rgb / lk.a, 1.0);
+            #include <tonemapping_fragment>
+            #include <colorspace_fragment>
+            return;
+          }
         }
 `}        vec3 V = normalize(cameraPosition - v_world);
         float dist = length(cameraPosition - v_world);

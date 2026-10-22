@@ -253,7 +253,7 @@ export function HeroStage() {
   useEffect(() => {
     if (!lake) return
     // the governor's MOVING rung only (noRest), as `under`: no re-allocation on every pointer stop/start
-    const fit = () => { const d = quality.dprFor(size.width, size.height, true); const w = Math.max(2, Math.floor(size.width * d * lake.scale)), h = Math.max(2, Math.floor(size.height * d * lake.scale)); if (w !== lake.rt.width || h !== lake.rt.height) lake.rt.setSize(w, h) }
+    const fit = () => { const d = quality.dprFor(size.width, size.height, true); const w = Math.max(2, Math.floor(size.width * d * lake.scale)), h = Math.max(2, Math.floor(size.height * d * lake.scale)); if (w !== lake.rt.width || h !== lake.rt.height) lake.rt.setSize(w, h); (wu as any).u_lakeHalf.value.set(0.5 / lake.rt.width, 0.5 / lake.rt.height) }
     fit()
     return quality.on(fit)
   }, [size, lake])
