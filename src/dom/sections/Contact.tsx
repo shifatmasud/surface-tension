@@ -14,6 +14,7 @@ import { settings } from '../../services/settings'
 import { journey } from '../../gl/stages/journey/journeyState'
 import './contact.css'
 import { Logo } from '../../assets/logo/Logo'
+import { giftTrigger, giftKey } from '../gift/gift' // R6.83 GIFT: the footer logo opens the gift box too
 import { ProjectLinks } from '../a11y/ProjectLinks'
 import { noOrphan } from '../a11y/noOrphans'
 import { lineRoll, type LineRoll } from '../ui/maskedRoll'
@@ -209,7 +210,7 @@ export function Footer() {
         scroll.scrollTo(y, { immediate: true })
       }}>
       <div className="site-footer__top">
-        <p className="site-footer__name" data-roll="marked"><span data-roll-line=""><span className="site-footer__lockup" role="img" aria-label={SITE.name}><span className="site-footer__mark" aria-hidden="true"><Logo size="100%" /></span><span aria-hidden="true">Shifat</span></span></span><span data-roll-line=""><span>{SITE.role}.</span></span></p>
+        <p className="site-footer__name" data-roll="marked"><span data-roll-line=""><span className="site-footer__lockup" role="button" tabIndex={0} aria-label={SITE.name} aria-haspopup="dialog" data-cursor onDoubleClick={giftTrigger} onKeyDown={giftKey}><span className="site-footer__mark" aria-hidden="true"><Logo size="100%" /></span><span aria-hidden="true">Shifat</span></span></span><span data-roll-line=""><span>{SITE.role}.</span></span></p>
         <nav className="site-footer__links" aria-label="Elsewhere" data-roll="marked">
           <a href={SITE.github} target="_blank" rel="noreferrer" aria-label="GitHub" data-cursor data-roll-line="inline"><GithubLogo size={16} /> GitHub</a>
           <a href={SITE.x} target="_blank" rel="noreferrer" aria-label="X / Twitter" data-cursor data-roll-line="inline"><XLogo size={16} /> X / Twitter</a>
