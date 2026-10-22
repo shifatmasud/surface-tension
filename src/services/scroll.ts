@@ -164,7 +164,11 @@ class ScrollService {
    * in the crewmate scene). Now it is a real wrap: one instant jump to 0 — the header and the hero at progress 0 —
    * under a white veil that matches the white footer and fades off over the hero, and the leftover inertia is dropped.
    */
-  wrapToTop() {
+  /** R6.81: ms the page HOLDS at the top after a rubber-band loop (wheel, finger, keys do nothing); 0 = none */
+  private holdUntil = 0
+  private holdOff = 0
+  private holdBlock = (e: Event) => { if (performance.now() < this.holdUntil && e.cancelable) e.preventDefault() }
+  wrapToTop(hold = 0) {
     // drop input for 0.6 s, and for as long after that as the wheel/trackpad inertia keeps streaming (each event while
     // muted extends the window by 0.22 s), up to 1.8 s: a deliberate new scroll after the loop is taken at once
     const now = performance.now()
@@ -177,10 +181,25 @@ class ScrollService {
     // W21 (Shifat 19:12Z: no jump cut, the wrap included): the outgoing frame is frozen and dissolves over the hero
     // (services/wrapFade.ts); without a frame to freeze, the plain jump
     const go = () => {
+      if (hold > 0) this.hold(hold)
       this.scrollTo(0, { immediate: true })
       ;(document.querySelector('#hero, main, body') as HTMLElement | null)?.focus?.({ preventScroll: true } as any)
     }
     if (!wrapFade.start(go)) go()
+  }
+  /** R6.81 (Shifat Oct 22 05:12 "stop scroll a bit moment"): from the jump, input is ignored for `ms`. The virtual
+   * engine drops wheel/keys/drag (update() zeroes them while muted, onWheel swallows even a fresh flick); native touch
+   * also locks the page (overflow hidden: momentum stops) and swallows touchmove. One class toggle, no per-frame work. */
+  private hold(ms: number) {
+    const now = performance.now()
+    this.holdUntil = now + ms
+    this.muteUntil = Math.max(this.muteUntil, this.holdUntil)
+    this.wheelAcc = 0; this.keyTarget = null; this.dragAcc = 0
+    const d = document.documentElement, nf = { passive: false } as AddEventListenerOptions
+    clearTimeout(this.holdOff)
+    if (!this.virtual) d.classList.add('vs-hold')
+    window.addEventListener('touchmove', this.holdBlock, nf)
+    this.holdOff = window.setTimeout(() => { d.classList.remove('vs-hold'); window.removeEventListener('touchmove', this.holdBlock, nf) }, ms)
   }
   resetScroll(v: number) {
     this.scrollPixel = this.targetScrollPixel = this.clampPx(v)
@@ -197,6 +216,7 @@ class ScrollService {
     e.preventDefault()
     if (this.stopped) return
     const now = performance.now()
+    if (now < this.holdUntil) { this.muteDy = Math.abs(dy); this.muteUntil = Math.max(this.muteUntil, Math.min(this.muteCap, now + 450)); return } // R6.81 hold
     if (now < this.muteUntil) {
       // still the gesture that hit the loop (trackpad/mouse inertia decays): keep dropping it until a 450 ms pause;
       // a fresh flick (the delta jumps back up) is a new, deliberate scroll and is taken at once
