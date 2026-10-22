@@ -53,6 +53,9 @@ class Input {
   hasThroughElem(el: Element) { return this.downEls.has(el) }
 
   update() {
+    // Shifat 2:01 PM: while the gift holds the page scene, the pointer is frozen for the scene too (moving to the gift's
+    // close button must not tilt the hero or swing the camera when the page comes back); the next real move resumes it
+    if (props.sceneHold) { this._pendingMoved = false; this.hadMoved = false; this.deltaPixelXY.set(0, 0); this.deltaXY.set(0, 0); this.clicked = false; return }
     this.prevMousePixelXY.copy(this.mousePixelXY)
     this.prevMouseXY.copy(this.mouseXY)
     if (this._pendingMoved) this.mousePixelXY.copy(this._pending)
