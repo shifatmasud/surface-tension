@@ -1,0 +1,22 @@
+/* R6.83 GIFT stage (lazy: loads with the gift chunk) */
+.gift__gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; opacity: 0; transition: opacity .6s var(--ease-sine); }
+.gift--ready .gift__gl { opacity: 1; }
+/* leaving: the last frame sinks back down and fades (the GL has already stopped drawing) */
+.gift--leaving .gift__gl { opacity: 0; transform: translate3d(0, 22vh, 0); transition: opacity .6s var(--ease-sine), transform .7s cubic-bezier(.55, 0, .75, .3); }
+/* the box's keyboard / screen-reader stand-in: sits exactly over the box, invisible until focused */
+.gift__hit { position: absolute; left: 0; top: 0; width: 1px; height: 1px; padding: 0; border: 0; margin: 0; background: transparent; color: transparent; border-radius: 24px; cursor: pointer; visibility: hidden; -webkit-tap-highlight-color: transparent; }
+.gift__hit:focus { outline: none; }
+.gift__hit:focus-visible { outline: 2px solid #fafafa; outline-offset: 4px; box-shadow: 0 0 0 6px rgba(18, 19, 21, .55); }
+/* the card's link: over the drawn button, only while the card faces you */
+.gift__cta { position: absolute; left: 0; top: 0; width: 1px; height: 1px; border-radius: 999px; color: transparent; font-size: 1px; overflow: hidden; pointer-events: none; visibility: hidden; -webkit-tap-highlight-color: transparent; text-decoration: none; }
+.gift__cta.is-on { pointer-events: auto; visibility: visible; cursor: pointer; }
+.gift__cta:focus { outline: none; }
+.gift__cta:focus-visible { outline: 2px solid #121315; outline-offset: 3px; box-shadow: 0 0 0 6px #fafafa; }
+/* the close X: the same 1:1 frosted-glass circle as the project card */
+.gift__close { position: absolute; top: calc(var(--pad-y, 20px) + 2px); right: var(--pad-x, 20px); width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; cursor: pointer; color: #fff;
+  background: rgba(255, 255, 255, .24); -webkit-backdrop-filter: blur(16px) saturate(1.4); backdrop-filter: blur(16px) saturate(1.4); transition: background .4s var(--ease), transform .5s var(--ease); }
+.gift__close svg { display: block; }
+@media (hover: hover) { .gift__close:hover { background: rgba(255, 255, 255, .36); transform: scale(1.06); } }
+.gift__close:focus-visible { outline: 2px solid #111; outline-offset: 2px; box-shadow: 0 0 0 6px #fafafa; }
+/* no WebGL: the card as plain DOM, centred on the blurred page */
+.gift--flat .gift__cta { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: auto; height: auto; padding: 14px 22px; font-size: var(--fs-small); color: #fff; background: #121315; visibility: visible; pointer-events: auto; }
