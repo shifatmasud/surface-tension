@@ -54,7 +54,7 @@ const tier = pickTier()
  * laptop for the same picture. Keep w*h*dpr^2 under ~3.7M px (the post chain sharpens when below native). */
 export const MAX_RENDER_PIXELS = 3.7e6
 export function capDpr(w: number, h: number) {
-  const tierCap = tier === 'high' ? 1.5 : 1.25
+  const tierCap = tier === 'low' ? 1.25 : 1.2 // R6.79: desktop max 1.2 (Shifat Oct 22)
   const byPixels = Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h))
   return Math.max(0.6, Math.min(browser.dpr, tierCap, byPixels))
 }
