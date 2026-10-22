@@ -104,6 +104,8 @@ const PHONE_SCENE_DPR = 1.0 // TUNE (Shifat 16:41 PT Oct 21: "On phone low dpr m
 /** W27 R6.65: phone text density drops from 2x to 1.5x at this governor level and holds there (see textDprFor) */
 const TEXT_DROP_LEVEL = 1
 const PHONE_CANVAS_DPR = 2
+/** R6.79 (Shifat 04:38 PT Oct 22: "We need max dpr 1.2 in desktop"): desktop/tablet scene ceiling — moving, boost and rest all clip here. The text layer stays native. */
+const DESKTOP_SCENE_DPR = 1.2
 
 /** PERFGOV: phone GPUs well under a 2019 mid-range part (Adreno 3xx/4xx/50x, Mali-4xx/T6xx–T8xx/G31/G51/G52,
  *  PowerVR GE8xxx) — ?lowend forces it (QA) */
@@ -160,9 +162,9 @@ class Quality {
   stepAt(level: number) { return level < 0 ? this.boost[Math.min(this.boost.length, -level) - 1] : this.ladder[Math.min(this.maxLevel, level)] }
   /** the device's own density for this window: device DPR (cap 3) within the canvas pixel cap — the single ceiling */
   nativeFor(w: number, h: number) { return Math.max(1, Math.min(3, window.devicePixelRatio || 1, Math.sqrt(CANVAS_PIXELS / Math.max(1, w * h)))) }
-  private cap(w: number, h: number) { return Math.min(browser.dpr, this.nativeFor(w, h), Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h)), tier === 'low' ? PHONE_SCENE_DPR : Infinity) }
+  private cap(w: number, h: number) { return Math.min(browser.dpr, this.nativeFor(w, h), Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h)), tier === 'low' ? PHONE_SCENE_DPR : DESKTOP_SCENE_DPR) }
   /** the rest target before the rest judge: native within 1.2x the scene pixel cap */
-  private restTarget(w: number, h: number) { return Math.min(this.nativeFor(w, h), Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h)) * 1.2, tier === 'low' ? PHONE_SCENE_DPR : Infinity) }
+  private restTarget(w: number, h: number) { return Math.min(this.nativeFor(w, h), Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h)) * 1.2, tier === 'low' ? PHONE_SCENE_DPR : DESKTOP_SCENE_DPR) }
   /** the canvas density a rest frame refines to: native, phones capped at PHONE_CANVAS_DPR */
   private textCeil(w: number, h: number) { const n = this.nativeFor(w, h); return tier === 'low' ? Math.min(n, PHONE_CANVAS_DPR, PHONE_SCENE_DPR) : n } // TUNE: phones max 1.0
   /** DPR for a window size: the level's step, clipped by the device DPR and the total-pixel cap, floored at 0.6.
