@@ -824,7 +824,7 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
     const ck = reduced ? 1 : opened ? eInOut(seg(ot, TL.D0, TL.F1)) : 0
     const form = reduced ? 1 : opened ? eSine(seg(ot, TL.F0, TL.F1)) : 0
     U.uForm.value = form
-    close = reduced ? 1 : opened ? eInOut(seg(ot, TL.C0, TL.C1)) : 0
+    close = 0   // Shifat 1:41 PM: camera fully locked, no card dolly-in either
     const sh = shadow.material as THREE.MeshBasicMaterial
     sh.opacity = (1 - 0.6 * hover - (reduced ? 1 : 0)) * lerp(1, 0.32, ck) * ek
     shadow.scale.setScalar(lerp(1, 0.62, ck) * (1 - 0.08 * hover))
