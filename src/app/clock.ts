@@ -40,12 +40,16 @@ export function startClock() {
     audio.update(dt)
     // PRELOAD: from the moment the GL canvas exists until the hero's shaders are linked (parallel compile), the
     // frame loop holds, so no frame blocks on a shader link and the counter keeps moving
-    if (settings.USE_GL && (!engine.canvas || engine.warm)) advance(props.time)
+    // R6.83 GIFT: while the gift dialog is open its blurred still covers the page, so the scene does not draw at all
+    if (settings.USE_GL && (!engine.canvas || engine.warm) && !props.sceneHold) advance(props.time)
     input.postUpdate()
     // PERF HOOK: the governor judges real frame deltas once the intro is done and the page is visible
-    quality.judging = props.introDone && !props.overlayOpen && document.visibilityState === 'visible' && engine.warm
-    quality.frame(ms, now)
-    quality.restTick(Math.abs(props.scrollVel) > 0.5 || input.hadMoved || input.isDown || props.overlayOpen, now)
+    // (R6.83: frozen while the scene is held: no judging, no rest change, so nothing re-allocates under the gift)
+    if (!props.sceneHold) {
+      quality.judging = props.introDone && !props.overlayOpen && document.visibilityState === 'visible' && engine.warm
+      quality.frame(ms, now)
+      quality.restTick(Math.abs(props.scrollVel) > 0.5 || input.hadMoved || input.isDown || props.overlayOpen, now)
+    }
     stageWindow.step()
     // rolling FPS probe for QA (window.__fps)
     fpsSamples.push(deltaMs); if (fpsSamples.length > 120) fpsSamples.shift()
