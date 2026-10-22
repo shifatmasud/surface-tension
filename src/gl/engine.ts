@@ -12,5 +12,7 @@ export const engine = {
   ready: false,
   /** PRELOAD: the hero's programs are linked; the frame loop runs from here */
   warm: false,
+  /** R6.83 GIFT: a one-shot copy of the next drawn frame (called right after the chain renders, buffer intact) */
+  grab: null as null | ((src: HTMLCanvasElement) => void),
 }
 ;(window as any).__engine = engine
