@@ -292,7 +292,7 @@ function cardBack(pw: number) {
   return canvasTex(pw, ph, (g) => {
     g.fillStyle = INK; g.fillRect(0, 0, pw, ph)
     const m = 0.16 * s
-    g.save(); g.translate(pw / 2 + m / 2, ph / 2 - m / 2); g.scale(-m / 200, m / 200); g.fillStyle = '#ffffff'; g.fill(MARK); g.restore()   // mirrored: it reads right way round from behind
+    g.save(); g.translate(pw / 2 - m / 2, ph / 2 - m / 2); g.scale(m / 200, m / 200); g.fillStyle = '#ffffff'; g.fill(MARK); g.restore()   // Shifat 11:38: back texture flipped horizontally (was mirrored)
   })
 }
 function buttonTex(pw: number, hover: boolean) {
