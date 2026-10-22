@@ -49,7 +49,6 @@ html:not(.is-lifted) .site-footer { visibility: hidden; }
 .site-footer__time { grid-column: 10 / -1; display: grid; gap: 6px; font-size: var(--fs-body); }
 .site-footer__time > span:first-child { font-size: var(--fs-small); color: var(--c-silver-3); }
 .site-footer__bottom { display: flex; justify-content: space-between; align-items: center; gap: var(--s3); color: var(--c-silver-3); }
-.site-footer__top-link { color: var(--c-ink); text-decoration: none; padding: 8px 0; display: inline-flex; align-items: center; gap: 8px; }
 @media (max-width: 812px) {
   .site-footer { padding-top: var(--s4); }
   .site-footer__name, .site-footer__links, .site-footer__time { grid-column: 1 / -1; }
