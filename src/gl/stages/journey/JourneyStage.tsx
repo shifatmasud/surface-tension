@@ -57,6 +57,8 @@ function bezelGeometry(w: number, h: number, r: number, sw: number, sh: number) 
  * picture that fly at the lens in a slow-motion beat (shatter.ts).
  * The stage never renders the main scene and never moves the camera: it writes journey.pose.
  */
+const CTA_GLIDE = new URLSearchParams(location.search).has('ctaglide')   // R6.92b: off = the CTA rides up as a sheet
+
 export function JourneyStage(): JSX.Element {
   const { gl } = useThree()
   const [portrait, setPortrait] = useState(() => window.innerHeight > window.innerWidth * 1.05)
@@ -330,6 +332,12 @@ export function JourneyStage(): JSX.Element {
       // so their on-screen path is a straight glide from where they hold to where they settle. Pure function of scroll.
       {
         const fh = journey.footH, lift = Math.max(0, journey.lift || 0), H = Math.max(1, props.height)
+        // R6.92b (Shifat Oct 23 9:03 AM, from the desktop video: the CTA shrank to ~40 % and lifted as the footer revealed —
+        // "looks bad"; 9:58 AM option B): full size, NO scale ever, a translate-only settle. The type and the crewmate ride up
+        // 1:1 with the page as the footer starts to show, then ease to rest where both stay in frame at full reveal (the type
+        // under the header, the crewmate above the button; where the two cannot both fit above the footer the type keeps its
+        // place under the header and the feet go behind the curtain). One cubic of scroll: starts at the page's own speed,
+        // lands with zero speed, never overshoots. ?ctaglide brings back the R6.89 option-C settle (with its scale).
         const ft = fh > 0 && g > 0.999 ? Math.min(1, lift / fh) : 0
         if (ft > 0) {
           const tanH = Math.tan((O.fov * Math.PI) / 360), cz = O.camPos.z, cy = O.camPos.y
@@ -339,10 +347,23 @@ export function JourneyStage(): JSX.Element {
           const top0 = fr(A.top, A.z), feetY = L.crewY - CREW_CENTER_Y * L.crewScale, bot0 = fr(feetY, L.crewZ)
           // R6.89: the heroes settle above the CTA button, which lifts off the footer with the page
           const edge = 1 - fh / H, bot1 = edge - Math.max(0.06, ((journey.pillRes || 0) + 6) / H), span = Math.max(0.05, bot0 - top0)
-          const s = Math.min(0.85, (bot1 - (H > props.width ? 0.12 : 0.095)) / span), top1 = bot1 - s * span   // R6.89: clear air under the header too
+          const hdr = CTA_GLIDE ? (H > props.width ? 0.12 : 0.095) : (H > props.width ? 0.085 : 0.075)   // R6.92b B: the type may sit closer under the header (full size)
+          let s: number, top1: number
+          if (CTA_GLIDE) { s = Math.min(0.85, (bot1 - hdr) / span); top1 = bot1 - s * span }   // R6.89: clear air under the header too
+          else { s = 1; top1 = Math.max(hdr, Math.min(top0, bot1 - span)) }
           const lf = lift / H, sc = 1 + ft * (s - 1)
-          // a point at screen fraction y0 (curtain down) is shown at y0 + ft (m(y0) − y0); the chain then lifts it by lf
-          const dFrac = (y0: number) => ft * (top1 + s * (y0 - top0) - y0) + lf
+          let dFrac: (y0: number) => number
+          if (CTA_GLIDE) {
+            // a point at screen fraction y0 (curtain down) is shown at y0 + ft (m(y0) − y0); the chain then lifts it by lf
+            dFrac = (y0: number) => ft * (top1 + s * (y0 - top0) - y0) + lf
+          } else {
+            // on screen every point moves by off(ft) (down +); the chain lifts the picture by lf, so the stage adds off + lf
+            const T = top1 - top0, FH = fh / H
+            let off: number
+            if (T > -1e-4) off = 0
+            else { const k = Math.min(2.5, FH / -T); off = T * (k * ft + (3 - 2 * k) * ft * ft + (k - 2) * ft * ft * ft) }
+            dFrac = () => off + lf
+          }
           const ty0 = fr(A.y, A.z)
           // the stickers ride the curtain and lift on away past the top (the lower pair would otherwise end under the type)
           S.cta.setFoot(-dFrac(ty0) * hAt(A.z), sc, ft, ft * 0.8 * hAt(WALL_Z))   // R6.89: far enough that no sticker edge is left at the top (1440 check)

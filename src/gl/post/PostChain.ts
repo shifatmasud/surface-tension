@@ -258,6 +258,7 @@ void main(){
     { const W = window as any; const on = gemMask.on && !W.__gemSmear ? 1 : 0; (d('u_gem').value as THREE.Vector4).set(gemMask.x, gemMask.y, gemMask.r, on); if (on) (d('u_view').value as THREE.Vector2).set(innerWidth, innerHeight) }
   }
   render(dt: number) {
+    if (this.gl.getContext().isContextLost()) return   // R6.92: nothing to draw into while the context is lost (the loss handler reloads or goes static)
     this.sync()
     let sig = 0  // PERF HOOK: a bitmask, not a string built every frame (no per-frame garbage)
     const warm = this.warmAll

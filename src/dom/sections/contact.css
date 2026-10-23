@@ -157,6 +157,7 @@ html[data-bg='dark'] .contact .big-btn:focus-visible { outline-color: #fafafa; }
 .gift-sticker.is-gone { visibility: hidden; pointer-events: none; }   /* R6.91: peeled off (it gathers again) */
 .gift-sticker.is-on { visibility: visible; }
 .gift-sticker__cv { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+html.stk-gl:not(.no-gl):not(.gl-lost) .gift-sticker__cv { opacity: 0; }   /* R6.92b: the hero pass draws it, through the cursor trail (gl/post/stickerGL.ts) */
 .gift-sticker:focus { outline: none; }
 .gift-sticker:focus-visible { outline: 2px solid #ff2e93; outline-offset: 6px; }   /* R6.89: the sticker's own hot pink */
 @media (max-width: 760px) { .gift-sticker { width: 76px; height: 76px; border-radius: 22px; right: calc(var(--pad-x) + 2px); bottom: calc(var(--s5, 32px) + 96px); } }

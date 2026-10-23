@@ -115,7 +115,57 @@ function gemPatch(fresPow: string, lod: string) {
       // the under-surface pass only, the stone's coverage fades with its depth below the lake (full at the waterline, ~30 %
       // a stone-radius down), so the lake's refraction of the pavilion recedes into the water instead of a hard lilac lobe
       if (w26Dis > 0.0) { float w26R = disRaw(w26Dis, disFGem(w26O)); if (w26R >= 0.0) discard; gl_FragColor.rgb += disEmber(w26R); }   // R6.88 SINK
+      // R6.92b WATERLINE (Shifat 10:46 AM: "intersection line must not be visible when in water or on air"): the under-surface
+      // pass is the lake's view of the stone BELOW the surface; the part above it was drawn there too, so wherever the lake
+      // lies behind the stone's upper half its blurred copy (0.14x on phones, 0.7x on high) leaked past the real silhouette
+      // as a pale rim or pink fringe. Only the submerged part goes into it now.
+      if (w25Dep.x > 0.5 && vWorldPosition.y > 0.0) discard;
       if (w25Dep.x > 0.5) { float w25f = mix(1.0, 0.3, smoothstep(0.05, 0.9, max(0.0, -vWorldPosition.y) * w25Dep.y)); gl_FragColor.a *= w25f; if (w25Pre > 0.5) gl_FragColor.rgb *= w25f; }`)
+    // R6.92 LITE GEM (weak GPUs only: Shifat's Intel UHD 600 on Windows reset its GPU on the full stone). The full stone
+    // traces every pixel's ray through a BVH of its facets (three-mesh-bvh: nested dynamic loops, a uint stack array, up to
+    // 3 bounces) — on ANGLE-D3D11 that program is the multi-second compile at boot and by far the heaviest per-pixel work.
+    // Here the inside of the stone is the same cut in closed form: the ray's exit is the nearest of three planes (pavilion
+    // main, crown bezel, table) of the 16-sector brilliant around the exit azimuth (diamond.ts proportions: girdle r 1,
+    // crown 0.16 over a 0.56 table, pavilion 0.86 deep), so every facet still throws its own env direction (the sparkle)
+    // and the refraction / total internal reflection / chroma / grade below are untouched. The BVH functions become
+    // unreferenced and the compiler drops them. Phones and strong GPUs keep the traced stone.
+    if (settings.WEAK_GPU) sh.fragmentShader = sh.fragmentShader.replace(
+      /bvhIntersectFirstHit\(\s*bvh,\s*rayOrigin,\s*rayDirection,\s*faceIndices,\s*faceNormal,\s*barycoord,\s*side,\s*dist\s*\);/,
+      `{
+        vec3 lgO = rayOrigin, lgD = rayDirection;
+        float lgB = dot(lgO, lgD), lgC = dot(lgO, lgO) - 1.0;
+        vec3 lgP = lgO + lgD * (-lgB + sqrt(max(lgB * lgB - lgC, 0.0)));
+        vec3 lgN = vec3(0.0, 1.0, 0.0); float lgT = 0.0;
+        for (int lgI = 0; lgI < 2; lgI++) {
+          float lgA = atan(lgP.z, lgP.x);
+          float lgPh = (floor(lgA * 2.5464791) + 0.5) * 0.39269908;            // pavilion: 16 lower-girdle sectors
+          float lgPc = floor(lgA * 2.5464791 + 0.5) * 0.39269908;              // crown: the same 16, offset half a sector (star/kite)
+          vec2 lgS = vec2(cos(lgPh), sin(lgPh)), lgSc = vec2(cos(lgPc), sin(lgPc));
+          vec3 lgNP = normalize(vec3(lgS.x, -1.1628, lgS.y)); float lgHP = -0.86 * lgNP.y;
+          vec3 lgNC = normalize(vec3(lgSc.x, 2.75, lgSc.y)); float lgHC = lgNC.x * lgSc.x + lgNC.z * lgSc.y;
+          lgT = 1e3; lgN = vec3(0.0, 1.0, 0.0);
+          float lgDn = dot(lgD, lgNP); if (lgDn > 1e-4) { float lgTT = (lgHP - dot(lgO, lgNP)) / lgDn; if (lgTT < lgT) { lgT = lgTT; lgN = lgNP; } }
+          lgDn = dot(lgD, lgNC); if (lgDn > 1e-4) { float lgTT = (lgHC - dot(lgO, lgNC)) / lgDn; if (lgTT < lgT) { lgT = lgTT; lgN = lgNC; } }
+          if (lgD.y > 1e-4) { float lgTT = (0.16 - lgO.y) / lgD.y; if (lgTT < lgT) { lgT = lgTT; lgN = vec3(0.0, 1.0, 0.0); } }
+          lgT = clamp(lgT, 0.0, 4.0); lgP = lgO + lgD * lgT;
+        }
+        faceNormal = -lgN; dist = lgT; side = 1.0;
+        if (length(refract(lgD, -lgN, ior)) == 0.0) lgTir += 1.0;   // light trapped at this facet
+      }`)
+      // the traced stone's dark navy pockets (light trapped by total internal reflection) and its few cyan glints (an exit
+      // ray lined up with the key light): restored from the same closed-form facets
+      .replace('vec3 totalInternalReflection(', 'float lgTir = 0.0;\n  vec3 totalInternalReflection(')
+      .replace('float w22M = max(max(diffuseColor.r, diffuseColor.g), diffuseColor.b);', `{
+        #ifdef CHROMATIC_ABERRATIONS
+          vec3 lgX = rayDirectionG;
+        #else
+          vec3 lgX = rayDirection;
+        #endif
+        diffuseColor.rgb *= mix(1.0, 0.42, clamp(lgTir - 1.0, 0.0, 1.0));
+        float lgG = pow(max(dot(lgX, normalize(vec3(0.35, 0.8, 0.5))), 0.0), 90.0) + 0.6 * pow(max(dot(lgX, normalize(vec3(-0.6, 0.55, -0.3))), 0.0), 140.0);
+        diffuseColor.rgb += vec3(0.45, 1.1, 1.35) * lgG;
+      }
+      float w22M = max(max(diffuseColor.r, diffuseColor.g), diffuseColor.b);`)
   }
 }
 const gemPatchHi = gemPatch('10.0', '4.0')
@@ -268,7 +318,7 @@ export function HeroStage() {
   useEffect(() => { wu.u_reflTex.value = refl.rt.texture; wu.u_reflOn.value = 1 }, [refl, wu])
   // the submerged part of the stone, seen from above THROUGH the water (screen-space refraction): the stone alone,
   // main camera, every frame its tip is in the water (the bob's dip, or the dive's sink); the lake samples it
-  const under = useMemo(() => ({ rt: new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType }), scale: hi ? 0.6 : 0.28 }), [hi])   // WATERRES: phones 0.28 (was 0.4, ≈half the pixels)
+  const under = useMemo(() => ({ rt: new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType }), scale: settings.WEAK_GPU ? 1.0 : hi ? 0.6 : 0.28 }), [hi])   // WATERRES: phones 0.28 (was 0.4, ≈half the pixels). R6.92: a weak desktop 1.0 (its stone is the cheap closed-form one; at 0.28 × the 0.5 background the lake's refracted copy of the stone was a blurred ghost that read as a soft halo around the stone's edge)
   useEffect(() => {
     // DIAG: follows the governor too (it was sized once from props.dpr, so a DPR step left it at the old size)
     // W19: follow the governor's MOVING rung only (noRest): the rest refinement toggles on every pointer stop/start, and
@@ -291,6 +341,31 @@ export function HeroStage() {
     fit()
     return quality.on(fit)
   }, [size, lake])
+  // R6.92b WATERLINE: where the background runs below the canvas density (the low path's split resolution) the hero pass
+  // tests the stone against the background's upsampled depth, so its cut along the lake came out as a 2x2 sawtooth that
+  // crawled as the stone moved. While the stone touches the surface and the camera is above it, the lake's own depth is
+  // re-drawn into the hero target at the canvas density (its vertex shader, shared uniforms, no colour): a per-pixel cut.
+  // Above the water nothing stands between the camera and the lake but the heroes, so the overwrite cannot un-hide them.
+  useEffect(() => {
+    if (!heroPass.enabled) return
+    const mat = new THREE.ShaderMaterial({
+      uniforms: water.uniforms, defines: { ...(water.defines || {}) }, vertexShader: water.vertexShader,
+      fragmentShader: 'void main(){ gl_FragColor = vec4(0.0); }', side: THREE.DoubleSide,
+      colorWrite: false, depthTest: true, depthWrite: true, depthFunc: THREE.AlwaysDepth,
+    })
+    const proxy = new THREE.Mesh(waterGeo, mat); proxy.matrixAutoUpdate = false; proxy.frustumCulled = false; proxy.layers.mask = 0xffffffff
+    const sc = new THREE.Scene(); sc.add(proxy)
+    heroPass.depthFix = (r, cam) => {
+      const wm = waterMesh.current
+      if (!wm || !wm.visible) return
+      if ((props.dpr || 1) >= (props.heroDpr || 1)) return                        // same density: the scene's depth is already exact
+      if (cam.position.y < 0.02 || dive.under || dive.split >= 0 || Math.abs(gem.pos.y) > gem.radius * 1.25) return   // not while the lens waterline crosses (the lake is cut there; this depth would hide the stone below the line)
+      proxy.matrix.copy(wm.matrixWorld)
+      const mask = cam.layers.mask; cam.layers.mask = 0xffffffff
+      try { r.render(sc, cam) } finally { cam.layers.mask = mask }
+    }
+    return () => { heroPass.depthFix = null; mat.dispose() }
+  }, [water, waterGeo])
   // R6.87 SPLIT RESOLUTION: the stone (and its sheen shell) is a hero subject — drawn at the canvas density in its own
   // pass over the low-res scene (post/heroPass.ts); its reflection in the lake keeps coming from the mirror pass
   useEffect(() => {
@@ -356,6 +431,17 @@ export function HeroStage() {
         if (!lake.low) wu.u_resolution.value.copy(shared.u_resolution.value)
         wu.u_wlClip.value = main ? dive.split : -1
       } : (_r, _s, cam) => { wu.u_wlClip.value = cam === camera ? dive.split : -1 }
+    }
+    // R6.93 WATERLINE: the sheen's meniscus line is seen only from the air (gemSheen.ts): the main camera's draw gets the
+    // lens waterline and whether the lens is above the lake; the env/mirror/neighbour captures keep the line as before
+    if (!sheenMesh.current.userData.wl) {
+      sheenMesh.current.userData.wl = true
+      const su = sheen.uniforms
+      sheenMesh.current.onBeforeRender = (_r, _s, cam) => {
+        const main = cam === camera
+        su.u_split.value = main ? dive.split : -1
+        su.u_air.value = main ? (cam.position.y > 0 ? 1 : 0) : 1
+      }
     }
     // gem: slow breathing hover; the tip dips into the water once per ~3.4 s
     st.phase += dt * (Math.PI * 2 / 3.4)
@@ -540,7 +626,7 @@ export function HeroStage() {
           paths, so whole facets came out pure green, dark red or black (A/B on live: 0 removes them). Now a thin
           fast-chroma fringe (direction offset, one traced path) on every tier: the fire stays, the chips go */}
       <mesh ref={gemMesh} geometry={gemGeo} onUpdate={(o) => o.layers.enable(GEM_LAYER)} onBeforeRender={gemRes}>
-        <MeshRefractionMaterial envMap={env.rt.texture as any} bounces={hi ? 3 : 2} ior={2.2} fresnel={0.85} aberrationStrength={hi ? 0.006 : 0.008} fastChroma color={new THREE.Color(0.1, 0.34, 2.1)} toneMapped onBeforeCompile={hi ? gemPatchHi : gemPatchLo} />
+        <MeshRefractionMaterial envMap={env.rt.texture as any} bounces={hi || settings.WEAK_GPU ? 3 : 2} ior={2.2} fresnel={0.85} aberrationStrength={hi || settings.WEAK_GPU ? 0.006 : 0.008} fastChroma color={new THREE.Color(0.1, 0.34, 2.1)} toneMapped onBeforeCompile={hi || settings.WEAK_GPU ? gemPatchHi : gemPatchLo} />
       </mesh>
       <mesh ref={sheenMesh} geometry={gemGeo} material={sheen.material} renderOrder={2} onUpdate={(o) => o.layers.enable(GEM_LAYER)} />
     </group>

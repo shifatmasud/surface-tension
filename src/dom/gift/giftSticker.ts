@@ -15,6 +15,7 @@
 import { giftOpen } from './gift'
 import { Spring } from '../../core/spring'   // R6.91: the wall stickers' springs
 import { audio } from '../../services/audio'
+import { stickerGL } from '../../gl/post/stickerGL'   // R6.92b: the trail refracts the sticker (drawn by the hero pass)
 
 const smooth = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
 
@@ -53,6 +54,7 @@ export function mountGiftSticker(btn: HTMLButtonElement) {
   const cv = document.createElement('canvas'); cv.className = 'gift-sticker__cv'; cv.setAttribute('aria-hidden', 'true')
   cv.width = cv.height = Math.round(W * k); cv.style.width = cv.style.height = W + 'px'
   btn.appendChild(cv)
+  stickerGL.cv = cv; stickerGL.el = btn; stickerGL.W = W; stickerGL.dirty = true
   const cx2 = cv.getContext('2d')!
   const img = drawSticker(W, S, k, true)
   // the points: one per ~2 css px cell of the sticker (no shadow), each with its target, colour, delay and swirl
@@ -100,6 +102,7 @@ export function mountGiftSticker(btn: HTMLButtonElement) {
       cx2.putImageData(buf, 0, 0)
     }
     if (land > 0) { cx2.globalAlpha = land; cx2.drawImage(img, 0, 0); cx2.globalAlpha = 1 }
+    stickerGL.dirty = true
     if (t < DUR && shown && fixedT < 0) raf = requestAnimationFrame(frame)
   }
   // ---- R6.91 (Shifat Oct 23 6:51 AM "make gift sticker behave same like others. Peel, & draggable"): the CTA wall's
@@ -110,6 +113,9 @@ export function mountGiftSticker(btn: HTMLButtonElement) {
   // Space too (it is a real button). The wall's stickers come back on the next visit; this one, being the way into the
   // gift, gathers again out of its embers a moment after it has flown off.
   const face = drawSticker(W, S, k, false)
+  // R6.92c: the scratch canvases the shadows are cast on (see draw)
+  const shadowCv = document.createElement('canvas'), flapCv = document.createElement('canvas')
+  shadowCv.width = shadowCv.height = flapCv.width = flapCv.height = cv.width
   const LONG_PRESS = 400, SLOP = 9, PEEL_OFF = 0.35, FLY_S = 1.35, REACH = 0.53
   const st = {
     ox: new Spring(0, 2.4, 0.62, 0), oy: new Spring(0, 2.4, 0.62, 0), tx: 0, ty: 0,
@@ -135,34 +141,49 @@ export function mountGiftSticker(btn: HTMLButtonElement) {
     const L = reduced ? 0 : Math.max(0, st.lift.value), pe = reduced ? 0 : Math.max(0, st.peel.value)
     const start = (0.72 - REACH) / 1.55, pw = pe > 0.001 ? start + Math.min(1, pe) * (1 - start) : 0
     const t = (0.72 - pw * 1.55) * S, rr = (0.055 + 0.05 * pw) * S, cdx = Math.cos(st.ang), cdy = Math.sin(st.ang)
-    const R = S / 2, base = () => { cx2.setTransform(k, 0, 0, k, 0, 0); cx2.translate(W / 2, W / 2); cx2.rotate(TILT) }
+    const R = S / 2, base = (c: CanvasRenderingContext2D = cx2) => { c.setTransform(k, 0, 0, k, 0, 0); c.translate(W / 2, W / 2); c.rotate(TILT) }
     // the half-plane on one side of the fold (sticker space), as a big quad
-    const half = (beyond: boolean, at: number) => {
+    const half = (beyond: boolean, at: number, c: CanvasRenderingContext2D = cx2) => {
       const nx = cdx, ny = cdy, px = -ny, py = nx, B = S * 3, s = beyond ? 1 : -1
-      cx2.beginPath(); cx2.moveTo(nx * at + px * B, ny * at + py * B); cx2.lineTo(nx * at - px * B, ny * at - py * B)
-      cx2.lineTo(nx * (at + s * B) - px * B, ny * (at + s * B) - py * B); cx2.lineTo(nx * (at + s * B) + px * B, ny * (at + s * B) + py * B); cx2.closePath()
+      c.beginPath(); c.moveTo(nx * at + px * B, ny * at + py * B); c.lineTo(nx * at - px * B, ny * at - py * B)
+      c.lineTo(nx * (at + s * B) - px * B, ny * (at + s * B) - py * B); c.lineTo(nx * (at + s * B) + px * B, ny * (at + s * B) + py * B); c.closePath()
     }
-    cx2.setTransform(1, 0, 0, 1, 0, 0); cx2.clearRect(0, 0, cv.width, cv.height)
+    // R6.92c (the dark ring round the sticker after a hover / under the trail): Chromium keeps a canvas that takes a
+    // shadowBlur fill and then a drawImage in the same frame from clearing between frames once its pixels are read back
+    // (each frame the hero pass uploads it to the GPU), so the soft shadow piled up frame after frame into a thick black
+    // ring (measured: alpha 49 → 253 one row under the edge in ~20 hover frames; clearRect and reset() both left it).
+    // Every shadow is now cast on its own scratch canvas that only ever takes plain fills (never a drawImage), and the
+    // visible canvas only takes clears, drawImages and plain fills: the same shadow, the same numbers, nothing piles up.
+    const sh = shadowCv.getContext('2d')!
+    sh.setTransform(1, 0, 0, 1, 0, 0); sh.clearRect(0, 0, shadowCv.width, shadowCv.height)
     // the cast shadow (the flat part only; the flap's own shadow follows)
-    base(); cx2.save()
-    if (pw > 0) { half(false, t); cx2.clip() }
-    cx2.shadowColor = `rgba(10, 12, 14, ${(0.28 * (1 - 0.45 * L)).toFixed(3)})`; cx2.shadowBlur = S * (0.14 + 0.3 * L); cx2.shadowOffsetY = S * (0.05 + 0.16 * L)   // (device px, as drawSticker's)
-    cx2.fillStyle = '#f4f4f2'; shape(cx2, R); cx2.fill(); cx2.restore()
+    base(sh); sh.save()
+    if (pw > 0) { half(false, t, sh); sh.clip() }
+    sh.shadowColor = `rgba(10, 12, 14, ${(0.28 * (1 - 0.45 * L)).toFixed(3)})`; sh.shadowBlur = S * (0.14 + 0.3 * L); sh.shadowOffsetY = S * (0.05 + 0.16 * L)   // (device px, as drawSticker's)
+    sh.fillStyle = '#f4f4f2'; shape(sh, R); sh.fill(); sh.restore()
+    sh.setTransform(1, 0, 0, 1, 0, 0)
+    cx2.setTransform(1, 0, 0, 1, 0, 0); cx2.clearRect(0, 0, cv.width, cv.height)
+    cx2.drawImage(shadowCv, 0, 0)
     // the flat face up to the fold
     base(); cx2.save()
     if (pw > 0) { half(false, t); cx2.clip() }
     cx2.setTransform(1, 0, 0, 1, 0, 0); cx2.drawImage(face, 0, 0); cx2.restore()
     if (pw > 0) {
-      // the flap: what lay beyond the fold, rolled back over it (mirrored about the roll's far side) showing its paper
+      // the flap: what lay beyond the fold, rolled back over it (mirrored about the roll's far side) showing its paper;
+      // drawn with its shadow on the flap scratch canvas (plain fills only), then laid over the face
+      const fl = flapCv.getContext('2d')!
+      fl.setTransform(1, 0, 0, 1, 0, 0); fl.clearRect(0, 0, flapCv.width, flapCv.height)
       const tr = t + rr * 1.2
-      base()
+      base(fl)
       const m11 = 1 - 2 * cdx * cdx, m12 = -2 * cdx * cdy, m22 = 1 - 2 * cdy * cdy
-      cx2.transform(m11, m12, m12, m22, 2 * tr * cdx, 2 * tr * cdy)
-      cx2.save(); half(true, t); cx2.clip()
-      const gr = cx2.createLinearGradient(cdx * t, cdy * t, cdx * (t + S), cdy * (t + S))
+      fl.transform(m11, m12, m12, m22, 2 * tr * cdx, 2 * tr * cdy)
+      fl.save(); half(true, t, fl); fl.clip()
+      const gr = fl.createLinearGradient(cdx * t, cdy * t, cdx * (t + S), cdy * (t + S))
       gr.addColorStop(0, '#e6e6e6'); gr.addColorStop(0.35, '#d2d2d2'); gr.addColorStop(1, '#c4c4c4')
-      cx2.shadowColor = 'rgba(8, 10, 12, .26)'; cx2.shadowBlur = S * 0.07
-      cx2.fillStyle = gr; shape(cx2, R); cx2.fill(); cx2.restore()
+      fl.shadowColor = 'rgba(8, 10, 12, .26)'; fl.shadowBlur = S * 0.07
+      fl.fillStyle = gr; shape(fl, R); fl.fill(); fl.restore()
+      fl.setTransform(1, 0, 0, 1, 0, 0)
+      cx2.setTransform(1, 0, 0, 1, 0, 0); cx2.drawImage(flapCv, 0, 0)
       // the rolled edge: a bright crease along the fold, inside the sticker's outline
       base(); cx2.save(); shape(cx2, R); cx2.clip()
       const eg = cx2.createLinearGradient(cdx * (t - rr), cdy * (t - rr), cdx * (t + rr * 1.6), cdy * (t + rr * 1.6))
@@ -170,6 +191,7 @@ export function mountGiftSticker(btn: HTMLButtonElement) {
       half(true, t - rr); cx2.fillStyle = eg; cx2.fill(); cx2.restore()
     }
     cx2.setTransform(1, 0, 0, 1, 0, 0)
+    stickerGL.dirty = true
   }
   const place = () => {
     const L = reduced ? 0 : st.lift.value, fe = st.fly * st.fly * (3 - 2 * st.fly), side = 1
@@ -177,6 +199,7 @@ export function mountGiftSticker(btn: HTMLButtonElement) {
     const rot = st.rot.value + fe * fe * 1.9 * side
     const css = `translate3d(${(st.ox.value + fx).toFixed(1)}px,${(st.oy.value + fy).toFixed(1)}px,0) rotate(${rot.toFixed(3)}rad) scale(${((1 + 0.07 * L) * fs).toFixed(3)})`
     if (btn.style.transform !== css) btn.style.transform = css
+    stickerGL.rot = rot; stickerGL.sc = (1 + 0.07 * L) * fs
   }
   const moving = () => !!g || !!pending || st.fly > 0 || [[st.ox, st.tx], [st.oy, st.ty], [st.lift, st.liftT], [st.peel, st.peelT], [st.rot, 0]].some(([s_, tg]) => Math.abs((s_ as Spring).velocity) > 1e-4 || Math.abs((s_ as Spring).value - (tg as number)) > 1e-4)
   const tick = (now: number) => {
@@ -195,7 +218,7 @@ export function mountGiftSticker(btn: HTMLButtonElement) {
   const kick = () => { if (!iraf) { last = 0; iraf = requestAnimationFrame(tick) } }
   const resetAll = () => {
     st.ox.reset(0); st.oy.reset(0); st.tx = st.ty = 0; st.lift.reset(0); st.liftT = 0; st.peel.reset(0); st.peelT = 0; st.rot.reset(0); st.fly = 0
-    g = null; if (pending) { clearTimeout(pending.timer); pending = null } btn.style.transform = ''; btn.classList.remove('is-gone')
+    g = null; if (pending) { clearTimeout(pending.timer); pending = null } btn.style.transform = ''; btn.classList.remove('is-gone'); stickerGL.rot = 0; stickerGL.sc = 1
   }
   function regather() { reborn = 0; if (!shown) return; resetAll(); shown = false; set(true) }   // the embers gather it again where it lived
   const begin = (id: number, cx: number, cy: number, touch: boolean) => {
@@ -277,7 +300,7 @@ export function mountGiftSticker(btn: HTMLButtonElement) {
   window.addEventListener('touchmove', onTouchMove, { passive: false, capture: true })
   window.addEventListener('blur', onBlur)
 
-  const still = () => { cx2.setTransform(1, 0, 0, 1, 0, 0); cx2.clearRect(0, 0, cv.width, cv.height); cx2.drawImage(img, 0, 0) }
+  const still = () => { cx2.setTransform(1, 0, 0, 1, 0, 0); cx2.clearRect(0, 0, cv.width, cv.height); cx2.drawImage(img, 0, 0); stickerGL.dirty = true }
   function set(on: boolean) {
     if (on === shown) return
     shown = on
@@ -287,11 +310,11 @@ export function mountGiftSticker(btn: HTMLButtonElement) {
     if (on) {
       if (reduced) { still(); return }
       t0 = performance.now(); raf = requestAnimationFrame(frame)
-    } else cx2.clearRect(0, 0, cv.width, cv.height)
+    } else { cx2.clearRect(0, 0, cv.width, cv.height); stickerGL.dirty = true }
   }
   // a click opens the gift unless it ended a drag or a peel (Enter / Space on the button arrive here as clicks too)
   const open = (e: Event) => { e.preventDefault(); if (suppressClick) { suppressClick = false; return } if (st.fly > 0) return; giftOpen(btn) }
   btn.addEventListener('click', open)
   ;(window as any).__giftSticker = { set, state: () => ({ shown, points: pts.length, S, W, k, peel: +st.peel.value.toFixed(3), lift: +st.lift.value.toFixed(3), ox: +st.ox.value.toFixed(1), oy: +st.oy.value.toFixed(1), fly: st.fly }), at: (t: number) => { fixedT = t; if (raf) { cancelAnimationFrame(raf); raf = 0 } frame(0) }, live: () => { fixedT = -1 } }
-  return { set, still, destroy() { if (raf) cancelAnimationFrame(raf); if (iraf) cancelAnimationFrame(iraf); if (reborn) clearTimeout(reborn); btn.removeEventListener('click', open); window.removeEventListener('touchmove', onTouchMove, { capture: true } as EventListenerOptions); window.removeEventListener('blur', onBlur); cv.remove() } }
+  return { set, still, destroy() { if (stickerGL.el === btn) { stickerGL.el = null; stickerGL.cv = null }; if (raf) cancelAnimationFrame(raf); if (iraf) cancelAnimationFrame(iraf); if (reborn) clearTimeout(reborn); btn.removeEventListener('click', open); window.removeEventListener('touchmove', onTouchMove, { capture: true } as EventListenerOptions); window.removeEventListener('blur', onBlur); cv.remove() } }
 }

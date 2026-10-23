@@ -117,7 +117,8 @@ export function Contact() {
         let pillDown = 0
         if (ctaEl && k > 0 && settings.USE_GL) {
           if (vh !== pillVh || pillGap < 0) { const r = ctaEl.getBoundingClientRect(); pillVh = vh; pillGap = (vh - k) - (r.bottom - pillCur); pillH = r.height }
-          pillDown = Math.round((k / Math.max(1, fh)) * Math.max(0, pillGap - 50))
+          // R6.92b option B: the pill keeps its R6.89 translate-only glide toward the edge (the heroes settle above it)
+          pillDown = Math.round((k / Math.max(1, fh)) * Math.max(0, pillGap - 18))   // R6.92b B: settles 18 px above the edge (was 50): full-size heroes need the room
           // the room it takes above the curtain's edge, for the crewmate and the type settling above it (JourneyStage)
           journey.pillRes = pillGap - pillDown + pillH + 18
         } else if (k <= 0) pillGap = -1
@@ -133,7 +134,9 @@ export function Contact() {
         // the CTA lines no longer roll out; ctaOut stays 0 (ctaScene keeps reading it, so the old behaviour is one line back)
         journey.ctaOut = 0
         // (the pill stays on screen above the footer, so its label stays: it only rolls in, never leaves an empty button)
-        footRoll(clamp((k0 - 0.08 * fh) / (0.62 * fh)))
+        // R6.92b (Shifat 9:06 AM: the footer's logo/text were not seen in the reveal): its lines roll in earlier, readable by
+        // ~60 % of the reveal and all in by ~85 % (was: starting at 8 %, done at 70 % + the stagger, ~100 %)
+        footRoll(clamp((k0 - 0.03 * fh) / (0.45 * fh)))
         // R6.89 GIFT STICKER: the surprise at the very end of the scroll (the footer fully uncovered); it gathers once each
         // time you arrive, and is put away again when you scroll back up off the end
         if (giftBtn.ctl) { const end = k0 >= fh - 2; if (end) giftBtn.ctl.set(true); else if (k0 < fh * 0.85) giftBtn.ctl.set(false) }

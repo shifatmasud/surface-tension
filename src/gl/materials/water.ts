@@ -373,6 +373,15 @@ ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on p
             vec4 ugB = texture2D(u_underTex, suv + off * (1.0 + disp));
             vec3 sc = vec3(ugR.r / max(ugR.a, 1e-3), ug.g / max(ug.a, 1e-3), ugB.b / max(ugB.a, 1e-3));
             sc = mix(ug.rgb / max(ug.a, 1e-3), sc, step(0.02, min(ugR.a, ugB.a)));
+          #if HI == 0
+            // R6.92b WATERLINE (Shifat 9:59 AM, phone + weak PC): on the low path the under-pass is ~0.14x the screen, so
+            // its rim is several screen pixels wide and the per-channel un-premultiply above (a red or blue tap barely
+            // inside the rim divided by its own tiny alpha) blew up into pink and white specks along the stone's cut. The
+            // split channels now only take over well inside the silhouette, and never brighter than the plain sample.
+            { vec3 sb = ug.rgb / max(ug.a, 1e-3);
+              sc = mix(sb, sc, smoothstep(0.2, 0.55, min(ugR.a, ugB.a)));
+              sc = min(sc, sb * 1.35 + 0.03); }
+          #endif
             sc *= mix(1.0, (0.78 + 0.4 * cauL) * focus, 0.65 * clamp(gdp * 3.0, 0.3, 1.0));
             vec3 Tg = exp(-u_absorb * gdp * 0.9);
             refr = mix(refr, sc * Tg + inscatter * (1.0 - Tg.g) * 0.45, smoothstep(0.05, 0.85, ug.a) * 0.88);

@@ -34,16 +34,36 @@ class GpuTimer {
       const ext = g.getExtension('EXT_disjoint_timer_query_webgl2') as Ext | null
       if (!ext) return
       this.gl = g; this.ext = ext; this.ok = true
+      // R6.92 (Shifat's Windows log: "getQueryParameter: object does not belong to this context" right after "Context
+      // Restored"): queries die with the context. Lost → forget them (no GL call on a lost context); restored → start
+      // over with the new context's extension object on the next frame.
+      if (!this.hooked) {
+        this.hooked = true
+        const c = r.domElement
+        c.addEventListener('webglcontextlost', () => { this.drop() }, false)
+        c.addEventListener('webglcontextrestored', () => { this.drop(); this.tried = false }, false)
+      }
     } catch { this.ok = false }
   }
+  private hooked = false
+  private waits = 0
+  /** forget every query and the extension (their context is gone) */
+  drop() { this.q = null; this.open = null; this.gl = null; this.ext = null; this.ok = false }
   begin() {
     const g = this.gl, x = this.ext
     if (!g || !x) return
+    if (g.isContextLost()) { this.drop(); return }
+    // R6.92: never touch a query this context does not own (a stale one from before a restore)
+    if (this.open && !g.isQuery(this.open)) this.open = null
+    if (this.q && !g.isQuery(this.q)) this.q = null
     // a frame that began a query but never reached the post chain (intro, a held loop): close it and discard it
     if (this.open) { g.endQuery(x.TIME_ELAPSED_EXT); g.deleteQuery(this.open); this.open = null }
     // collect the previous frame's result first (non-blocking)
     if (this.q) {
-      if (!g.getQueryParameter(this.q, g.QUERY_RESULT_AVAILABLE)) return   // still in flight: time a later frame
+      // R6.92: a driver that exposes the timer but never answers (Adreno with disable_timestamp_queries style workarounds)
+      // stops being asked after ~4 s of frames: the governor keeps its blind probe, as without the extension
+      if (!g.getQueryParameter(this.q, g.QUERY_RESULT_AVAILABLE)) { if (++this.waits > 240) { try { g.deleteQuery(this.q) } catch { /* lost */ } this.drop() } return }
+      this.waits = 0
       const dj = g.getParameter(x.GPU_DISJOINT_EXT)
       if (dj) this.disjoint++
       else { quality.gpuSample(g.getQueryParameter(this.q, g.QUERY_RESULT) / 1e6, performance.now()); this.samples++ }
@@ -58,6 +78,7 @@ class GpuTimer {
   end() {
     const g = this.gl, x = this.ext
     if (!g || !x || !this.open) return
+    if (g.isContextLost() || !g.isQuery(this.open)) { this.open = null; return }
     g.endQuery(x.TIME_ELAPSED_EXT)
     this.q = this.open; this.open = null
   }

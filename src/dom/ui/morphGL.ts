@@ -27,6 +27,8 @@ export const SB = {
 }
 
 const N = 32
+/** R6.94: how much of the slide's own grade the plane carries at the slide end (0 = none) */
+const GRADE = 1
 const VS = `
 attribute vec2 a_uv;
 uniform vec4 u_a; uniform vec4 u_b; uniform vec2 u_res;
@@ -70,13 +72,22 @@ void main(){
 }`
 const FS = `
 precision highp float;
-uniform sampler2D u_tex; uniform float u_ia, u_ra, u_rb, u_light, u_alpha;
+uniform sampler2D u_tex; uniform float u_ia, u_ra, u_rb, u_light, u_alpha, u_osa, u_grade;
 varying vec2 v_uv; varying float v_z; varying vec2 v_sz; varying float v_eg;
 void main(){
   float ba = v_sz.x/v_sz.y;
   vec2 t = v_uv;
   if (ba > u_ia) t.y = .5 + (t.y-.5)*(u_ia/ba); else t.x = .5 + (t.x-.5)*(ba/u_ia);
+  // R6.94: the slide's own overscan at the slide end, the card's plain cover at the card end (no zoom jump either side)
+  t = .5 + (t-.5)*mix(u_osa, 1., v_eg);
   vec3 c = texture2D(u_tex, t).rgb;
+  // R6.94: the slide's levels + S-curve (labGL W24) at the slide end, easing to the card's plain picture
+  if (u_grade > 0.) {
+    vec3 sq = sqrt(pow(max(c, vec3(0.)), vec3(2.2)));
+    sq = clamp((sq - 0.075) / 0.94, 0., 1.);
+    sq = mix(sq, sq*sq*(3.-2.*sq), 0.45);
+    c = mix(pow(sq*sq, vec3(1./2.2)), c, clamp(v_eg + (1. - u_grade), 0., 1.));
+  }
   c *= 1. + u_light*clamp(v_z*4., -1., 1.);
   float r = mix(u_ra, u_rb, v_eg);
   vec2 p = (v_uv-.5)*v_sz; vec2 h = .5*v_sz - r;
@@ -114,7 +125,7 @@ class Morph {
       const ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(ix), gl.STATIC_DRAW)
       gl.useProgram(pr)
       const loc = gl.getAttribLocation(pr, 'a_uv'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0)
-      for (const k of ['u_a', 'u_b', 'u_res', 'u_pp', 'u_spr', 'u_spread', 'u_z', 'u_bow', 'u_pull', 'u_lift', 'u_sz', 'u_sbow', 'u_amp', 'u_dir', 'u_ts', 'u_out', 'u_tex', 'u_ia', 'u_ra', 'u_rb', 'u_light', 'u_alpha']) this.u[k] = gl.getUniformLocation(pr, k)
+      for (const k of ['u_a', 'u_b', 'u_res', 'u_pp', 'u_spr', 'u_spread', 'u_z', 'u_bow', 'u_pull', 'u_lift', 'u_sz', 'u_sbow', 'u_amp', 'u_dir', 'u_ts', 'u_out', 'u_tex', 'u_ia', 'u_ra', 'u_rb', 'u_light', 'u_alpha', 'u_osa', 'u_grade']) this.u[k] = gl.getUniformLocation(pr, k)
       gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
       document.body.appendChild(cv)
       this.cv = cv; this.gl = gl; this.pr = pr; this.n = ix.length
@@ -137,18 +148,34 @@ class Morph {
 
   /** fly from→to. dir 1 = open (slide→card), -1 = close (card→slide, the open played backwards).
    *  Resolves when the plane has settled FLAT on `to`; call hide() once the DOM under it has taken over. */
-  async fly(from: MR, to: MR, src: string, dir: 1 | -1, ms: number): Promise<{ flat: Promise<void>; hide: () => void } | null> {
+  vtex: WebGLTexture | null = null
+  /** R6.94: the plane can carry the slide's live reel (`video`), re-uploaded every frame of the flight, so the picture
+   *  keeps playing from the frame the slide was on; until the reel has a frame, the poster stands in (what the slide
+   *  showed too). `overscan` = the slide's framing at the slide end (labGL LAB_OVERSCAN), eased to the card's cover. */
+  async fly(from: MR, to: MR, src: string, dir: 1 | -1, ms: number, opt: { video?: HTMLVideoElement | null; overscan?: number } = {}): Promise<{ flat: Promise<void>; hide: () => void } | null> {
     if (!this.init()) return null
-    const t = await this.texture(src); if (!t) return null
+    const vid = opt.video && opt.video.readyState >= 2 && opt.video.videoWidth ? opt.video : null
+    const t = vid ? null : await this.texture(src); if (!vid && !t) return null
     const gl = this.gl!, cv = this.cv!
     const dpr = Math.min(window.devicePixelRatio || 1, 2), W = innerWidth, H = innerHeight
     if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr) }
     cv.style.display = 'block'
-    gl.viewport(0, 0, cv.width, cv.height); gl.useProgram(this.pr); gl.bindTexture(gl.TEXTURE_2D, t.tex)
+    gl.viewport(0, 0, cv.width, cv.height); gl.useProgram(this.pr)
+    if (vid) {
+      if (!this.vtex) {
+        this.vtex = gl.createTexture()!
+        gl.bindTexture(gl.TEXTURE_2D, this.vtex)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+      }
+      gl.bindTexture(gl.TEXTURE_2D, this.vtex)
+    } else gl.bindTexture(gl.TEXTURE_2D, t!.tex)
+    const up = () => { if (!vid) return; gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, vid) } catch { /* a frame that cannot be read keeps the last one */ } }
+    up()
     const A = dir > 0 ? from : to, B = dir > 0 ? to : from   // geometry is always slide (A) → card (B)
     const U = this.u
     gl.uniform4f(U.u_a, A.left, A.top, A.width, A.height); gl.uniform4f(U.u_b, B.left, B.top, B.width, B.height)
-    gl.uniform2f(U.u_res, W, H); gl.uniform1f(U.u_ia, t.aspect); gl.uniform1f(U.u_ra, A.radius); gl.uniform1f(U.u_rb, B.radius)
+    gl.uniform2f(U.u_res, W, H); gl.uniform1f(U.u_ia, vid ? vid.videoWidth / vid.videoHeight : t!.aspect); gl.uniform1f(U.u_osa, opt.overscan ?? 1); gl.uniform1f(U.u_grade, (opt.overscan ?? 1) < 1 ? GRADE : 0); gl.uniform1f(U.u_ra, A.radius); gl.uniform1f(U.u_rb, B.radius)
     gl.uniform1f(U.u_spread, SB.SPREAD); gl.uniform1f(U.u_z, SB.Z); gl.uniform1f(U.u_bow, SB.BOW); gl.uniform1f(U.u_pull, SB.PULL)
     gl.uniform1f(U.u_lift, SB.LIFT); gl.uniform1f(U.u_sz, SB.SPR_Z); gl.uniform1f(U.u_sbow, SB.SPR_BOW); gl.uniform1f(U.u_light, SB.LIGHT)
     gl.uniform1f(U.u_dir, dir); gl.uniform1f(U.u_out, SB.OUT); gl.uniform1f(U.u_alpha, 1); gl.uniform1i(U.u_tex, 0)
@@ -160,15 +187,17 @@ class Morph {
     let stop = false
     const draw = () => {
       if (stop) return
-      const el = performance.now() - t0
+      const qh = (window as any).__morphGLHold as number | undefined   // QA: freeze the flight at a fraction 0..1 of flight + landing
+      const el = qh != null ? qh * (ms + settle) : performance.now() - t0
       const p = Math.min(1, el / ms)
       const pp = dir > 0 ? p : 1 - p
       const ts = Math.max(0, el - ms) / 1000
       const k = ts / tau, spr = el > ms ? sAmp * k * k * Math.exp(2 - 2 * k) * Math.max(0, 1 - ts * 1000 / settle) : 0
       gl.uniform1f(U.u_pp, pp); gl.uniform1f(U.u_spr, spr); gl.uniform1f(U.u_amp, SB.AMP); gl.uniform1f(U.u_ts, ts)
+      up()
       gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT)
       gl.drawElements(gl.TRIANGLES, this.n, gl.UNSIGNED_SHORT, 0)
-      if (el >= ms + settle) { done(); return }
+      if (el >= ms + settle && qh == null) { done(); return }
       requestAnimationFrame(draw)
     }
     draw()

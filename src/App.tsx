@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react'
+import { Component, lazy, Suspense, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Header } from './dom/ui/Header'
 import { Cursor } from './dom/ui/Cursor'
@@ -14,6 +14,20 @@ import { Journey } from './dom/sections/Journey'
 import { Contact, Footer } from './dom/sections/Contact'
 import { settings } from './services/settings'
 
+/** R6.92: a WebGL context the browser refuses (Chrome after repeated GPU resets: "GL_VENDOR = Disabled", "Could not create a
+ *  WebGL context") must not take the page down with it. The scene's failure is caught here and the page reloads once on the
+ *  designed static path (st-gl-dead for this session; services/settings.ts reads it as tier 'none'). */
+class SceneGuard extends Component<{ children: ReactNode }, { dead: boolean }> {
+  state = { dead: false }
+  static getDerivedStateFromError() { return { dead: true } }
+  componentDidCatch(e: unknown) {
+    console.warn('[surface-tension] WebGL unavailable, static page:', (e as Error)?.message || e)
+    document.documentElement.classList.add('no-gl')
+    try { if (!sessionStorage.getItem('st-gl-dead')) { sessionStorage.setItem('st-gl-dead', '1'); location.reload() } } catch { /* private mode */ }
+  }
+  render() { return this.state.dead ? null : this.props.children }
+}
+
 const Scene = lazy(() => import('./gl/Scene').then((m) => ({ default: m.Scene })))
 
 /** R6.76 LOAD PATH: `lite` is the first, urgent commit on the WebGL path: the skip link and the preloader alone (it adopts the
@@ -24,7 +38,7 @@ export function App({ lite = false }: { lite?: boolean }) {
   return (
     <>
       <a className="skip-link" href="#main">Skip to content</a>
-      {!lite && settings.USE_GL && createPortal(<Suspense fallback={null}><Scene /></Suspense>, canvasHost)}
+      {!lite && settings.USE_GL && createPortal(<SceneGuard><Suspense fallback={null}><Scene /></Suspense></SceneGuard>, canvasHost)}
       <Intro />
       {!lite && <Header />}
       {!lite && <Cursor />}

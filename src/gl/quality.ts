@@ -110,6 +110,7 @@ const DESKTOP_SCENE_DPR = 1.2
 /** PERFGOV: phone GPUs well under a 2019 mid-range part (Adreno 3xx/4xx/50x, Mali-4xx/T6xx–T8xx/G31/G51/G52,
  *  PowerVR GE8xxx) — ?lowend forces it (QA) */
 export const LOW_END_GPU = /Adreno \(TM\) (3\d\d|4\d\d|50\d)\b|Mali-(4\d\d|T[678]\d\d|G31|G51|G52)|PowerVR Rogue GE/i.test(settings.GPU) || q.has('lowend')
+  || settings.WEAK_GPU   // R6.92: weak desktop GPUs (Intel UHD 6xx class) take the budget-GPU split: background 0.5–0.75
 
 /** R6.87 SPLIT RESOLUTION (Shifat 5:46–5:48 PM Oct 22: "Resolution Quality down the bg scene but quality up the stone,
  *  project images, [...] crewmate model only"; "Only crewmate, stone, project images/videos are my true hi res subjects").
@@ -121,6 +122,10 @@ export const LOW_END_GPU = /Adreno \(TM\) (3\d\d|4\d\d|50\d)\b|Mali-(4\d\d|T[678
  *  Budget GPUs (LOW_END_GPU) take the biggest background cut: ceiling 0.75, floor 0.5. ?nosplit = the R6.83 path. */
 export const SPLIT = settings.USE_GL && !q.has('nosplit')
 const LOW_BG_CAP = 0.75
+/** R6.92 (Shifat 8:46 AM: "Ensure my device gets the best treatment possible"): a weak DESKTOP GPU starts on the budget
+ *  floor (0.5) like a budget phone, but the governor may climb the background to 1.0 where its GPU timer measures headroom
+ *  (one rung at a time, probes only under 70 % of the frame budget, failed probes back off). Phones keep 0.75. */
+const WEAK_BG_CAP = 1.0
 const BG_FLOOR = SPLIT && LOW_END_GPU ? 0.5 : 0.6
 const PHONE_HERO_DPR = 1  // R6.89 (Shifat 4:09 AM Oct 23): phone heroes at 1.0 (was 1.5 since 3:15 AM; 2 before)
 /** R6.89 (Shifat 4:10 AM Oct 23 "keep the TEXT at 1.5 while heroes go to 1.0"): the phone canvas (the GPU text layer) has
@@ -178,7 +183,7 @@ class Quality {
   stepAt(level: number) { return level < 0 ? this.boost[Math.min(this.boost.length, -level) - 1] : this.ladder[Math.min(this.maxLevel, level)] }
   /** the device's own density for this window: device DPR (cap 3) within the canvas pixel cap — the single ceiling */
   nativeFor(w: number, h: number) { return Math.max(1, Math.min(3, window.devicePixelRatio || 1, Math.sqrt(CANVAS_PIXELS / Math.max(1, w * h)))) }
-  private cap(w: number, h: number) { return Math.min(browser.dpr, this.nativeFor(w, h), Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h)), tier === 'low' ? (SPLIT && LOW_END_GPU ? LOW_BG_CAP : PHONE_SCENE_DPR) : DESKTOP_SCENE_DPR) }
+  private cap(w: number, h: number) { return Math.min(browser.dpr, this.nativeFor(w, h), Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h)), tier === 'low' ? (SPLIT && LOW_END_GPU ? (settings.WEAK_GPU ? WEAK_BG_CAP : LOW_BG_CAP) : PHONE_SCENE_DPR) : DESKTOP_SCENE_DPR) }
   /** R6.87 SPLIT: the hero subjects' density — the device's own (canvas cap), phones at most 2x. Never moved by the governor. */
   heroDprFor(w: number, h: number) { const n = this.nativeFor(w, h); return tier === 'low' ? Math.min(n, PHONE_HERO_DPR) : n }
   /** the rest target before the rest judge: native within 1.2x the scene pixel cap */
@@ -295,7 +300,7 @@ class Quality {
   state(): QualityState { return { level: this.level, dpr: this.stepAt(this.level), aa: this.aa } }
   on(fn: Listener) { this.listeners.add(fn); return () => { this.listeners.delete(fn) } }
   /** phones only, and only at the very bottom of the ladder while moving: SMAA (3 passes) → FXAA (1 pass). Rest is SMAA. */
-  private aaFor(level: number): 'smaa' | 'fxaa' { return tier === 'low' && level >= this.maxLevel && !this.rest && !q.has('smaa') ? 'fxaa' : 'smaa' }
+  private aaFor(level: number): 'smaa' | 'fxaa' { return tier === 'low' && !settings.WEAK_GPU && level >= this.maxLevel && !this.rest && !q.has('smaa') ? 'fxaa' : 'smaa' }   // R6.92: a weak desktop keeps SMAA (FXAA's blur read as a soft halo on the stone's edge)
   set(level: number, now = performance.now()) {
     level = Math.max(this.minLevel, Math.min(this.maxLevel, level))
     if (level === this.level) return

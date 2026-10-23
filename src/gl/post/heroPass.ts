@@ -6,6 +6,7 @@ import { SPLIT, LOW_END_GPU, paintState } from '../quality'
 import { clip } from '../systems/clip'
 import { WL_EDGE } from '../water/waterline'
 import type { GradeEffect, ScreenPaintDistortionEffect } from './effects'
+import { stickerGL } from './stickerGL'   // R6.92b GIFT STICKER IN THE TRAIL
 
 /**
  * R6.87 SPLIT RESOLUTION — the hero pass (Shifat 5:46–5:48 PM Oct 22: "Resolution Quality down the bg scene but quality
@@ -51,7 +52,12 @@ class HeroPass {
   private quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2))
   private qcam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
   private depthMat = new THREE.ShaderMaterial({ uniforms: { u_depth: { value: null } }, vertexShader: VS, fragmentShader: DEPTH_FS, depthTest: true, depthWrite: true, depthFunc: THREE.AlwaysDepth, colorWrite: false })
+  /** R6.92b WATERLINE: re-writes the depth of the surface the heroes pierce at the canvas density (set by the stage) */
+  depthFix: ((gl: THREE.WebGLRenderer, camera: THREE.Camera) => void) | null = null
   private comp: THREE.ShaderMaterial | null = null
+  private stk: THREE.ShaderMaterial | null = null
+  private stkTex: THREE.CanvasTexture | null = null
+  private stkCls = false
   private ui: THREE.ShaderMaterial | null = null
   private qscene = new THREE.Scene()
   stats = { heroes: 0, ui: 0, box: [0, 0, 0, 0] as number[], w: 0, h: 0 }
@@ -194,6 +200,12 @@ class HeroPass {
     // the background's depth at canvas density
     const sd = this.sceneDepth()
     if (sd) { this.depthMat.uniforms.u_depth.value = sd; this.quad.material = this.depthMat; gl.render(this.qscene, this.qcam) }
+    // R6.92b WATERLINE (Shifat 9:59–10:02 AM: the line where the stone pierces the water was jagged and crawled on his
+    // weak-GPU PC and his phone): the depth above is the background's, upsampled from ITS density (0.5 on the low path),
+    // so the smooth plane of the lake arrived as 2x2 depth steps and the stone's cut along it was a sawtooth that shifted
+    // as the stone moved. The stage redraws just the lake's depth here at the canvas density (same vertex shader, an
+    // empty fragment), so the cut is computed per canvas pixel, as on desktop high.
+    if (this.depthFix) this.depthFix(gl, camera)
     scene.background = null; camera.layers.set(HERO_LAYER); gl.shadowMap.autoUpdate = false
     try { gl.render(scene, camera) } finally {
       scene.background = bg; camera.layers.mask = mask; gl.shadowMap.autoUpdate = su
@@ -271,6 +283,53 @@ void main(){
       blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
     })
     this.comp = mk(true); this.ui = mk(false)
+    // R6.92b GIFT STICKER IN THE TRAIL: the footer's gift sticker (a DOM button's 2D canvas, stickerGL.ts) at the canvas
+    // density, through the same 9-tap smear and wake fringe as the heroes; placed by the button's CSS transform
+    this.stk = new THREE.ShaderMaterial({
+      uniforms: { ...un, tStk: { value: null as THREE.Texture | null }, u_trail: { value: 0 }, u_sk: { value: new THREE.Vector4(0, 0, 0, 1) }, u_sk2: { value: new THREE.Vector3(1, 1, 1) } },
+      vertexShader: VS, depthTest: false, depthWrite: false, toneMapped: false, transparent: true,
+      blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
+      fragmentShader: /* glsl */ `
+uniform sampler2D tStk; uniform float u_trail; uniform vec4 u_sk; uniform vec3 u_sk2;
+uniform sampler2D u_screenPaintTexture; uniform vec2 u_screenPaintTexelSize;
+uniform float u_amount, u_rgbShift, u_multiplier, u_colorMultiplier, u_shade;
+uniform sampler2D u_blueNoise; uniform vec2 u_blueNoiseOffset; uniform vec2 u_blueNoiseSize;
+vec3 getBlueNoise(vec2 coord){ return texture2D(u_blueNoise, coord / u_blueNoiseSize + u_blueNoiseOffset).rgb; }
+varying vec2 vUv;
+vec3 h_enc(vec3 c){ c = max(c, 0.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
+vec3 h_dec(vec3 c){ c = max(c, 0.0); return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
+// the sticker at screen uv p (premultiplied): css px from the button's centre, un-rotated and un-scaled (CSS rotate, y down)
+vec4 stkAt(vec2 p){
+  vec2 pc = vec2(p.x * u_sk2.y, (1.0 - p.y) * u_sk2.z) - u_sk.xy;
+  float c = cos(u_sk.z), s = sin(u_sk.z);
+  vec2 t = vec2(c * pc.x + s * pc.y, -s * pc.x + c * pc.y) / (u_sk.w * u_sk2.x) + 0.5;
+  if (t.x < 0.0 || t.y < 0.0 || t.x > 1.0 || t.y > 1.0) return vec4(0.0);
+  vec4 h = texture2D(tStk, vec2(t.x, 1.0 - t.y));
+  return vec4(h.rgb * h.a, h.a);
+}
+void main(){
+  vec4 acc; float fr = 0.0; vec2 vel = vec2(0.0); float weight = 0.0;
+  if (u_trail > 0.5) {
+    vec3 bn = getBlueNoise(gl_FragCoord.xy + vec2(17.0, 29.0));
+    vec4 data = texture2D(u_screenPaintTexture, vUv);
+    weight = (data.z + data.w) * 0.5;
+    vel = (0.5 - data.xy - 0.001) * 2.0 * weight;
+    vec2 stepUv = vel * u_amount / 4.0 * u_screenPaintTexelSize * u_multiplier;
+    if (dot(stepUv, stepUv) > 1e-12) {
+      vec2 p = vUv + bn.xy * stepUv; acc = vec4(0.0);
+      for (int i = 0; i < 9; i++) { acc += stkAt(p); p += stepUv; }
+      acc /= 9.0; fr = 1.0;
+    } else acc = stkAt(vUv);
+  } else acc = stkAt(vUv);
+  float a = acc.a;
+  if (a < 0.002) discard;
+  vec3 c = h_enc(acc.rgb / max(a, 1e-4));
+  if (fr > 0.5) c += sin(vec3(vel.x + vel.y) * 40.0 + vec3(0.0, 2.0, 4.0) * u_rgbShift) * smoothstep(0.4, -0.9, weight) * u_shade * max(abs(vel.x), abs(vel.y)) * u_colorMultiplier;
+  gl_FragColor = vec4(h_dec(clamp(c, 0.0, 1.0)), 1.0);
+  #include <colorspace_fragment>
+  gl_FragColor = vec4(gl_FragColor.rgb * a, a);
+}`,
+    })
   }
 
   /** the live block's share of the frame during a crossfading boundary (heroes belong to the live render) */
@@ -307,6 +366,41 @@ void main(){
   composite(gl: THREE.WebGLRenderer, grade: GradeEffect, dist: ScreenPaintDistortionEffect, foot: Map<string, THREE.Uniform> | null, ufxUnder: THREE.Scene, ufxCamera: THREE.Camera) {
     if (!this.enabled) return
     if (!this.comp) this.build(grade, dist, foot)
+    this.compositeHeroes(gl, ufxUnder, ufxCamera)
+    this.sticker(gl)
+  }
+
+  /** R6.92b: the gift sticker over everything (it sits over the canvas in the DOM too), through the trail */
+  private sticker(gl: THREE.WebGLRenderer) {
+    const S = stickerGL, el = S.el, cv = S.cv
+    if (!el || !cv || !this.stk || !el.classList.contains('is-on') || el.classList.contains('is-gone')) return
+    if (!this.stkTex || this.stkTex.image !== cv) {
+      this.stkTex?.dispose()
+      const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.premultiplyAlpha = false; t.generateMipmaps = false   // straight alpha: decoded from sRGB, then premultiplied in the shader (premultiplied sRGB bytes decoded as colour darkened the soft shadow into a hard ring)
+      t.minFilter = THREE.LinearFilter; t.magFilter = THREE.LinearFilter
+      this.stkTex = t; S.dirty = true
+    }
+    if (S.dirty) { this.stkTex.needsUpdate = true; S.dirty = false }
+    const r = el.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2
+    const vw = props.width, vh = props.height, u = this.stk.uniforms
+    const trail = props.look.paintAmount > 0 && !paintState.asleep
+    u.tStk.value = this.stkTex; u.u_trail.value = trail ? 1 : 0
+    u.u_sk.value.set(cx, cy, S.rot, Math.max(0.01, S.sc)); u.u_sk2.value.set(Math.max(1, S.W), vw, vh)
+    // the canvas square, turned and scaled, plus the trail's reach (its smear pulls pixels up to ~8 % of the screen)
+    const half = S.W * Math.max(0.01, S.sc) * 0.72 + (trail ? 0.16 * Math.max(vw, vh) : 0)
+    const x0 = Math.max(0, Math.floor(cx - half)), x1 = Math.min(vw, Math.ceil(cx + half)), y0 = Math.max(0, Math.floor(cy - half)), y1 = Math.min(vh, Math.ceil(cy + half))
+    if (x1 <= x0 || y1 <= y0) return
+    const prev = gl.getRenderTarget(), auto = gl.autoClear
+    gl.setRenderTarget(null); gl.autoClear = false
+    this.quad.material = this.stk
+    gl.setScissorTest(true); gl.setScissor(x0, vh - y1, x1 - x0, y1 - y0)
+    gl.render(this.qscene, this.qcam)
+    gl.setScissorTest(false)
+    gl.autoClear = auto; gl.setRenderTarget(prev)
+    if (!this.stkCls) { this.stkCls = true; document.documentElement.classList.add('stk-gl') }
+  }
+
+  private compositeHeroes(gl: THREE.WebGLRenderer, ufxUnder: THREE.Scene, ufxCamera: THREE.Camera) {
     this.warmPending(gl)
     if (this.drawn) this.put(gl, this.comp!, this.box)
     this.drawn = false
@@ -334,7 +428,7 @@ void main(){
       if (!this.comp) this.build(grade, dist, foot)
       const prev = gl.getRenderTarget()
       gl.setRenderTarget(null)
-      for (const m of [this.comp!, this.ui!]) { this.quad.material = m; gl.compile(this.qscene, this.qcam) }
+      for (const m of [this.comp!, this.ui!, this.stk!]) { this.quad.material = m; gl.compile(this.qscene, this.qcam) }
       const rt = this.ensure(gl)
       gl.setRenderTarget(rt)
       this.quad.material = this.depthMat; gl.compile(this.qscene, this.qcam)

@@ -65,6 +65,15 @@ export const preload = {
  * program linked (at once without KHR_parallel_shader_compile), or after 6 s at the latest.
  */
 export function warmCompile(gl: THREE.WebGLRenderer, root: THREE.Object3D, camera: THREE.Camera, scene: THREE.Scene, target: THREE.WebGLRenderTarget | null, report?: (f: number) => void): Promise<void> {
+  // R6.92: without KHR_parallel_shader_compile (ANGLE-D3D11: Shifat's Intel UHD 600 desktop froze 6.9 s here) the whole
+  // root is no longer queued at once: one program is queued and linked per step (gl/prewarm.ts compileSteps), in the
+  // page's short warm-up tasks, so no task waits on more than one program's driver compile.
+  if (!gl.extensions.has('KHR_parallel_shader_compile')) {
+    return Promise.race([
+      import('../gl/prewarm').then(({ sliced, counted, compileSteps }) => sliced(counted(compileSteps(gl, { roots: [root], scene, camera, target }), (f) => report?.(f), 30), () => 1)),
+      new Promise<void>((r) => setTimeout(r, 30000)),
+    ]).then(() => undefined, (e) => { console.warn('[preload] warm', e) })
+  }
   const prev = gl.getRenderTarget()
   const before = new Set(gl.info.programs ?? [])
   let p: Promise<unknown>

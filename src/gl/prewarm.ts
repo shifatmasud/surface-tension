@@ -32,6 +32,10 @@ export const SLICE_MS = 10
  *  long after the visitor got there. A task now takes a share of the measured frame time instead: SLICE_MS at 60 fps
  *  (unchanged on a fast device), up to SLICE_MAX_MS where frames are slow (still under the 50 ms long-task line) */
 export const SLICE_MAX_MS = 40
+/** R6.92: true once a compile found no KHR_parallel_shader_compile (each link then blocks the main thread) */
+let serialLinks = false
+export const isSerialLinks = () => serialLinks
+const RUSH_SERIAL_MS = 120
 let frameMs = 16, lastRaf = 0, rafOn = false
 const tick = (t: number) => {
   if (lastRaf) frameMs += (Math.min(t - lastRaf, 1000) - frameMs) * 0.25
@@ -61,7 +65,9 @@ function run() {
     else if (r.value === NEXT_FRAME || (r.value === GPU_FRAME && !best.rush?.())) { const j = best; j.waiting = true; requestAnimationFrame(() => { j.waiting = false; post() }) }
     // R6.71b: a rushed job (a stage the visitor is in or within about a viewport of) runs to its end in this task: a short
     // hitch on the way in instead of an empty scene; everything else keeps its SLICE_MS share
-    else if (best.rush?.()) continue
+    // R6.92: where links are serial (no KHR_parallel_shader_compile) a rushed job may hold the task for RUSH_SERIAL_MS at
+    // most (a few programs), then it yields like any other job, so a jump down the page never becomes a multi-second freeze
+    else if (best.rush?.() && (!serialLinks || performance.now() - t0 < RUSH_SERIAL_MS)) continue
     if (performance.now() - t0 >= budget) break
   }
   if (jobs.some((j) => !j.waiting)) post()
@@ -116,6 +122,7 @@ export type CompileJob = {
 
 /** compile the programs of a job, one object (one material variant) per step */
 export function* compileSteps(gl: THREE.WebGLRenderer, job: CompileJob): Generator<unknown, void, unknown> {
+  serialLinks = !gl.extensions.has('KHR_parallel_shader_compile')
   const list: Drawable[] = []
   for (const r of job.roots) r.traverse((o) => { if (isDrawable(o)) list.push(o) })
   const passes = job.force ? [false, true] : [false]
@@ -125,8 +132,15 @@ export function* compileSteps(gl: THREE.WebGLRenderer, job: CompileJob): Generat
       const mats = job.override ? [job.override] : (Array.isArray(o.material) ? o.material : [o.material]).filter(Boolean) as THREE.Material[]
       const fresh = mats.filter((m) => { const k = variantKey(o, m); if (seen.has(k)) return false; seen.add(k); return true })
       if (!fresh.length) continue
+      const before = serialLinks ? new Set((gl.info as any).programs ?? []) : null
       compileOne(gl, o, fresh, job, forced)
       yield
+      // R6.92 (Shifat's Windows log: one 6.9 s task at boot on ANGLE-D3D11 / Intel UHD 600). Without
+      // KHR_parallel_shader_compile the GPU process compiles in order, and the FIRST blocking GL call (a link-status read,
+      // a readback, even a forced layout that syncs the canvas) waits for EVERY compile queued before it. Queuing a stage's
+      // 20–30 programs first and reading their links afterwards made that first read pay for all of them in one task.
+      // Here each program is linked (read) right after it is queued, so a task never waits on more than one program.
+      if (before) yield* linkSteps(gl, before)
     }
   }
 }

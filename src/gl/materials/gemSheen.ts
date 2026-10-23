@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { shared } from '../../state/props'
 import { causticUniforms, causticsChunk } from '../water/caustics'
 import { DIS_GLSL } from '../stages/dive/disintegrate' // R6.88 SINK
+import { WL_EDGE } from '../water/waterline'   // R6.93 WATERLINE: the lens waterline edge (the meniscus hides below it)
 
 /**
  * Thin-film interference, shared GLSL: the colour of light reflected by a film of thickness d (nm) and index nf
@@ -34,6 +35,8 @@ export function createGemSheen(opts: { strength?: number; warm?: number } = {}) 
     u_under: { value: 1 },           // 0 disables the underwater look (caustics, absorption, waterline)
     u_tp: { value: 1 },
     u_feather: { value: 1.75 },
+    u_air: { value: 1 },    // R6.93 WATERLINE: 1 = this draw's viewer is above the water (set per draw by HeroStage)
+    u_split: { value: -1 }, // R6.93 WATERLINE: -1 off, else the lens waterline's screen y while it crosses (main camera only)
     u_dis: { value: 0 },   // R6.88 SINK: the stone's particle dissolve (HeroStage shares its gemDisU here)
     u_dep: { value: new THREE.Vector2(0, 2) },   // W25 R6.42: shared with the stone's under-pass depth fade (HeroStage gemDep)     // W25 R6.41: silhouette coverage ramp (scene px), shared with the stone's (HeroStage gemFeather)              // CINEMATIC: three-point strength (key from the surface underwater, fill, rim)
     ...causticUniforms,
@@ -57,6 +60,7 @@ export function createGemSheen(opts: { strength?: number; warm?: number } = {}) 
       varying vec3 vN; varying vec3 vW; varying vec3 vO; varying vec3 vON; varying vec3 vOW;
       attribute vec3 aSilB; attribute vec3 aSilN0; attribute vec3 aSilN1; attribute vec3 aSilN2;
       varying vec3 vSilB; varying vec3 vSilN0; varying vec3 vSilN1; varying vec3 vSilN2;
+      varying vec4 vClipP; varying float vAsp;   // R6.93 WATERLINE: screen position (resolution-free) for the lens-waterline test
       void main() {
         vSilB = aSilB; mat3 w25M = mat3(modelMatrix); vSilN0 = w25M * aSilN0; vSilN1 = w25M * aSilN1; vSilN2 = w25M * aSilN2;
         vO = position;
@@ -66,10 +70,14 @@ export function createGemSheen(opts: { strength?: number; warm?: number } = {}) 
         vW = w.xyz;
         vN = normalize(mat3(modelMatrix) * normal);
         gl_Position = projectionMatrix * viewMatrix * w;
+        vClipP = gl_Position; vAsp = projectionMatrix[1][1] / max(projectionMatrix[0][0], 1e-6);
       }`,
     fragmentShader: /* glsl */ `
       uniform float u_time, u_strength, u_warm, u_surfaceY, u_under, u_tp, u_feather; uniform vec2 u_dep; uniform vec3 u_key, u_rim;
       uniform float u_dis;
+      uniform float u_air, u_split;
+      varying vec4 vClipP; varying float vAsp;
+      ${WL_EDGE}
       ${DIS_GLSL}
       varying vec3 vN; varying vec3 vW; varying vec3 vO; varying vec3 vON; varying vec3 vOW;
       varying vec3 vSilB; varying vec3 vSilN0; varying vec3 vSilN1; varying vec3 vSilN2;
@@ -133,7 +141,18 @@ export function createGemSheen(opts: { strength?: number; warm?: number } = {}) 
         // DIAG: (dz/w)² as a product: pow() of a negative base is undefined in GLSL (NaN on D3D/Metal fast-math), and dz
         // is negative on every facet above the waterline
         float wl = dz / 0.006;
-        col += vec3(0.9, 0.97, 1.0) * exp(-wl * wl) * 0.9 * u_under;
+        // R6.93 WATERLINE (Shifat 12:45/12:56: "water cut line should not be visible when in underwater, only on above
+        // water"): this bright line is the meniscus seen FROM THE AIR. It was drawn whatever side the viewer was on, so
+        // through the dive (the lens crossing, then the camera under) it showed as a white band across the crown seen from
+        // below. It now shows only where this pixel is seen from above the water: the viewer in air (u_air) and, while the
+        // lens waterline crosses the frame, above that line (the same edge the lake and the water world are cut along, so
+        // the band leaves exactly as the water covers it: no pop). Captures (mirror, under-pass) keep it as before.
+        float air = u_air;
+        if (u_split > -0.5) {
+          vec2 suv = vClipP.xy / max(vClipP.w, 1e-6) * 0.5 + 0.5;
+          air *= smoothstep(-0.004, 0.004, suv.y - (u_split + wlEdge(suv.x * vAsp, u_time)));
+        }
+        col += vec3(0.9, 0.97, 1.0) * exp(-wl * wl) * 0.9 * u_under * air;
         // W25 R6.41 (scorer-r636..r639: a 1-2 px grey-brown fringe OUTSIDE the 390 stone's blue outline): diagnosed on staging
         // (coverage off, SMAA off, CAS off: fringe stays; this shell hidden: fringe gone). The shell is drawn 0.4 % larger than
         // the stone with a hard, un-antialiased outline, so its grazing-angle rim/key light lands on the lake just past the

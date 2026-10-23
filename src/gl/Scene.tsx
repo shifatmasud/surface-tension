@@ -3,7 +3,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Environment, Lightformer } from '@react-three/drei'
 import { lazy, startTransition, Suspense, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
 import { props, shared } from '../state/props'
-import { settings, capDpr } from '../services/settings'
+import { markWeakGpu, settings, capDpr, WEAK_WHY } from '../services/settings'
 import { fboHelper, FS_VERT } from './core/fbo'
 import { sliced, counted, warmSteps, prewarm, type CompileJob } from './prewarm' // PERFGOV
 import { ScreenPaint } from './systems/ScreenPaint'
@@ -33,6 +33,7 @@ import { sys as sysState } from './stages/systems/state'
 import { journey } from './stages/journey/journeyState'
 import { Spring, Spring3 } from '../core/spring'
 import { GpuFrameTimer } from './systems/perfGovernor' // SHARP HOOK: the governor's GPU frame timer
+import { installShaderGuard, ShaderGuard } from './systems/shaderGuard'
 
 // PRELOAD: code-split per scene. The hero is in this chunk; each later stage is its own chunk, mounted and
 // shader-warmed when its block enters the ±1 window around the current block (LaterStages below).
@@ -578,40 +579,50 @@ export function Scene() {
         const ctx = gl.getContext()
         const isGL2 = typeof WebGL2RenderingContext !== 'undefined' && ctx instanceof WebGL2RenderingContext
         ;(window as any).__webgl2 = isGL2
-        console.info(`[surface-tension] renderer: ${isGL2 ? 'WebGL2' : 'WebGL1'} · tier ${settings.TIER} · dpr ${gl.getPixelRatio()} · ${settings.GPU}`)
+        console.info(`[surface-tension] renderer: ${isGL2 ? 'WebGL2' : 'WebGL1'} · tier ${settings.TIER}${settings.WEAK_GPU ? ` (light path: ${WEAK_WHY})` : ''} · dpr ${gl.getPixelRatio()} · parallel compile ${gl.extensions.has('KHR_parallel_shader_compile') ? 'yes' : 'no'} · ${settings.GPU}`)
         engine.canvas = gl.domElement
+        installShaderGuard(gl)   // R6.92
         // W25 R6.52 (a11y): the canvas is the picture of what the DOM already says (every section's words live in the DOM
         // slot and its sr-only live region), so assistive tech skips it rather than announcing an unlabeled canvas
         gl.domElement.setAttribute('aria-hidden', 'true'); gl.domElement.setAttribute('tabindex', '-1')
-        // W19 (eng P0-2 + visual P0-1): a lost context gets a restore on EVERY loss, not just the first one per session.
-        // lost → ask the driver for it back after 3 s (WEBGL_lose_context.restoreContext; most browsers restore on their
-        // own first); restored → reload once per 60 s window at the same scroll position (the stages' GPU objects are
-        // gone with the old context, a reload rebuilds every one of them); never restored in 12 s, or a second loss
-        // inside the window → the DOM-only page (html.no-gl), never a black canvas.
+        // R6.92 CONTEXT LOSS (Shifat's Windows desktop, Intel UHD 600 / Edge: lost → restored → reload → lost again inside
+        // 60 s → static page; after a few of those Chrome/Edge blocked WebGL for the whole browser). Both of his devices run
+        // the driver workaround exit_on_context_lost (Intel D3D11 and Adreno 506): every loss kills the GPU process, so a
+        // restore in place never comes back sound there and each loss counts toward the browser's 3D blocklist. The ladder
+        // therefore spends as few losses as possible and never restores in place:
+        //  1. a loss at tier mid/high → reload ONCE into the low tier (st-gpu-weak, 7 days: the phone render path, layout
+        //     stays desktop), at the same scroll position;
+        //  2. a loss at tier low (phones, weak desktops; often just a background tab reclaimed) → reload once, same tier;
+        //  3. a second loss within 10 minutes this session, at any tier → the designed DOM-only page (html.no-gl), never a
+        //     black canvas. Nothing in this code ever calls loseContext on the scene's canvas.
         const el = gl.domElement
+        const H = document.documentElement
         // back at the place the reader was when the context came back (one-shot)
         const back = Number(sessionStorage.getItem('st-gl-scroll') || 0); sessionStorage.removeItem('st-gl-scroll')
         if (back > 0) setTimeout(() => (window as any).__scroll?.scrollTo(back, { immediate: true }), 1800)
-        let lostT: ReturnType<typeof setTimeout> | undefined, deadT: ReturnType<typeof setTimeout> | undefined
-        const recent = () => Date.now() - Number(sessionStorage.getItem('st-gl-restored-at') || 0) < 60000
-        const giveUp = () => { document.documentElement.classList.remove('gl-lost'); document.documentElement.classList.add('no-gl') }
+        const rec = ((window as any).__glRecovery = { losses: 0, action: '', lastLossAt: Number(sessionStorage.getItem('st-gl-loss-at') || 0) })
+        const saveScroll = () => sessionStorage.setItem('st-gl-scroll', String(Math.round(((window as any).__props?.scroll as number) || window.scrollY || 0)))
         el.addEventListener('webglcontextlost', (e) => {
-          e.preventDefault(); console.warn('[surface-tension] WebGL context lost')
-          document.documentElement.classList.add('gl-lost')
-          if (recent()) { giveUp(); return }
-          lostT = setTimeout(() => { try { gl.getContext().getExtension('WEBGL_lose_context')?.restoreContext() } catch { /* not ours to restore */ } }, 3000)
-          deadT = setTimeout(giveUp, 12000)
-        }, false)
-        el.addEventListener('webglcontextrestored', () => {
-          clearTimeout(lostT); clearTimeout(deadT)
-          if (recent()) { giveUp(); return }
-          sessionStorage.setItem('st-gl-restored-at', String(Date.now()))
-          sessionStorage.setItem('st-gl-scroll', String(Math.round(((window as any).__props?.scroll as number) || window.scrollY || 0)))
-          location.reload()
+          e.preventDefault(); rec.losses++
+          H.classList.add('gl-lost')
+          if (rec.action) return   // already on its way (a reload or the static page)
+          const now = Date.now(), recent = now - rec.lastLossAt < 600000
+          sessionStorage.setItem('st-gl-loss-at', String(now))
+          if (recent) {
+            rec.action = 'static'
+            H.classList.remove('gl-lost'); H.classList.add('no-gl')
+            console.warn(`[surface-tension] WebGL context lost again (tier ${settings.TIER}): static page`)
+            return
+          }
+          if (settings.TIER !== 'low') { rec.action = 'reload-low'; markWeakGpu() } else rec.action = 'reload'
+          console.warn(`[surface-tension] WebGL context lost (tier ${settings.TIER}): reloading${rec.action === 'reload-low' ? ' on the light render path' : ''}`)
+          saveScroll()
+          setTimeout(() => location.reload(), 600)   // a beat for a crashed GPU process to come back
         }, false)
       }}
       style={{ position: 'fixed', inset: 0 }}
     >
+      <ShaderGuard />{/* R6.92: a program the driver refuses → named in the console, its objects drawn plain */}
       <GpuFrameTimer />{/* SHARP HOOK: times each frame's GPU work for the governor (systems/perfGovernor.ts) */}
       <Renderer />
       <NeighbourPass />

@@ -28,11 +28,15 @@
         var q = location.search, h = document.documentElement, no = /[?&]nogl/.test(q)
         if (!no && matchMedia('(prefers-reduced-motion: reduce)').matches && !/[?&]motion/.test(q)) no = true
         if (!no) { var c = document.createElement('canvas'), g = c.getContext('webgl2')
-          if (!g) no = true
+          // R6.92: a browser that refuses WebGL (Chrome after repeated GPU resets: "GL_RENDERER = Disabled"), a context born
+          // lost, or this session's earlier refusal (st-gl-dead, App.tsx) → the static page from the first paint
+          var dead = false; try { dead = !!sessionStorage.getItem('st-gl-dead') } catch (_) {}
+          if (!g || g.isContextLost() || (dead && !/[?&]forcegl/.test(q))) { no = true; window.__stgl = { ok: false, renderer: 'refused' } }
           else { var e = g.getExtension('WEBGL_debug_renderer_info'), r = e ? String(g.getParameter(e.UNMASKED_RENDERER_WEBGL)) : ''
+            var off = /Disabled/i.test(r) || !g.getParameter(g.VERSION); if (off) no = true
             if (/SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(r) && !/[?&]forcegl/.test(q)) no = true
             // R6.76 LOAD PATH: services/settings.ts reads this probe instead of creating a second WebGL2 context at boot
-            window.__stgl = { ok: !!g.getExtension('EXT_color_buffer_float') || !!g.getExtension('EXT_color_buffer_half_float'), renderer: e ? r : 'unknown' }
+            window.__stgl = { ok: !off && (!!g.getExtension('EXT_color_buffer_float') || !!g.getExtension('EXT_color_buffer_half_float')), renderer: e ? r : 'unknown' }
             var l = g.getExtension('WEBGL_lose_context'); if (l) l.loseContext() } }
         if (no) h.classList.add('no-gl')
       } catch (_) {} })()

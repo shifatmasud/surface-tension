@@ -92,14 +92,18 @@ export class FooterWorldEffect extends Effect {
         if (u_fk <= 0.0) return;
         float sy = vUv.y;                     // screen y (0 bottom .. 1 top), unshifted
         float e = fEdge(vUv.x);
-        if (sy >= e) return;
+        // R6.92b (Shifat 9:03 AM: the footer water's top edge read hard and jaggy, worst on the phone's 0.5–0.75 background):
+        // the curtain edge is drawn with analytic coverage over one drawn pixel (along its slope), not a hard step
+        float fw = max(fwidth(e - sy), 0.5 / resolution.y);
+        float fcov = clamp((e - sy) / fw + 0.5, 0.0, 1.0);
+        if (fcov <= 0.0) return;
         vec2 q = vec2(vUv.x * u_fasp, sy);      // footer space, units of screen height
       #if FOOT_MODE == 1
         // A: paper under moving pool light. Base and peaks stay inside the band where the footer's small grey text keeps
         // AA (silver-3 #5f646b on the darkest base pixel #e7ebee = 5.0:1)
         float l = clamp(fnet(q * 14.0, u_ft, 0.55) * 0.9 + fnet(q * 9.0 + vec2(3.1, 1.7), u_ft * 0.8 + 2.0, 0.55) * 0.5, 0.0, 1.0);
         vec3 base = vec3(0.906, 0.922, 0.933), hi = vec3(0.99, 0.994, 0.998);
-        outputColor = vec4(lin(footBar(mix(base, hi, l))), 1.0);
+        outputColor = vec4(mix(inputColor.rgb, lin(footBar(mix(base, hi, l))), fcov), 1.0);
       #else
         // B: the sunlit surface seen from just above it, receding to the curtain's line (its horizon)
         float d = max(e - sy, 0.0);                       // below the line, in screen heights
@@ -115,7 +119,7 @@ export class FooterWorldEffect extends Effect {
         // the meniscus: one crisp bright line where the curtain meets the surface (~2 css px), no band, no gradient
         float px = 1.0 / resolution.y;
         col = mix(col, vec3(1.0), (1.0 - smoothstep(1.2 * px, 2.6 * px, e - sy)) * 0.9);
-        outputColor = vec4(lin(footBar(col)), 1.0);
+        outputColor = vec4(mix(inputColor.rgb, lin(footBar(col)), fcov), 1.0);
       #endif
       }`, {
       blendFunction: BlendFunction.NORMAL,

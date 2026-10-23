@@ -5,7 +5,7 @@ import { ArrowUpRight, X } from '@phosphor-icons/react'
 import { overlay } from './overlayState'
 import { PROJECTS } from '../../content/site'
 import { inkWipe } from './inkWipe'
-import { labGL } from '../../gl/stages/lab/labGL'
+import { labGL, LAB_OVERSCAN } from '../../gl/stages/lab/labGL'
 import { browser } from '../../services/settings'
 import { HOUSE } from '../../core/house'
 import { morphGL, SB } from './morphGL'
@@ -77,6 +77,18 @@ export function ProjectOverlay() {
 
   const reduced = browser.reducedMotion
 
+  /** R6.94 (Shifat 2:24 PM, Galaxy M02s: the open card showed another moment and another crop than the closed one): the
+   *  open card shows the slide's OWN reel element — the one the GL slide is drawn from — moved into the card's media box.
+   *  One element on every tier: same file (the phones' -m encode included), same decoder, the very frame the slide was
+   *  on, no reload, no restart. It leaves with the dialog's DOM when the card closes and labGL takes it back. */
+  const borrow = (pid: string) => {
+    const r = labGL.reelOf(pid), md = media.current
+    if (!r || !md) return null
+    if (r.parentNode !== md) md.appendChild(r)
+    if (r.paused) r.play().catch(() => {})
+    return r
+  }
+
   const holdQA = (anims: Animation[]) => {
     const hold = (window as any).__morphHold as number | undefined   // QA: freeze the morph at a fraction 0..1
     if (hold == null) return
@@ -142,6 +154,7 @@ export function ProjectOverlay() {
     const p = PROJECTS.find((x) => x.id === id)!
     const pn = panel.current!, md = media.current!, gl = glass.current!
     const from = slideRect(id, overlay.from)
+    const reel = borrow(id)
     // MOCKUP (12:51Z blur fade, non-text only): the X is hidden until the glass has unfolded, then blur-wobbles in
     const xIn = (d: number) => { if (closeBtn.current) { closeBtn.current.style.opacity = '0'; blurFadeIn(closeBtn.current, d) } }
     const land = () => {
@@ -185,7 +198,9 @@ export function ProjectOverlay() {
     const FLY = 880   // TUNE (Shifat 16:41 PT): was 800; calmer flight, see morphGL
     blurIn(FLY * 0.9)
     gl.style.opacity = '0'
-    morphGL.fly({ ...from }, imgTo, p.poster, 1, FLY).then((m) => {
+    // R6.94: the flying plane is the reel itself, live (the slide's own overscan easing to the card's cover), not the
+    // poster still — the picture never stops or jumps between the slide and the card
+    morphGL.fly({ ...from }, imgTo, p.poster, 1, FLY, { video: reel, overscan: labGL.gl ? LAB_OVERSCAN : 1 }).then((m) => {
       gl.style.opacity = ''
       if (!m) { fallback(); return }
       const flatAt = FLY + SB.SETTLE
@@ -198,6 +213,7 @@ export function ProjectOverlay() {
   // (HOUSE.IN) and the panel settles from 40 px low at 97 % (its spring, stiffness 140 / damping 20, as a curve)
   useLayoutEffect(() => {
     if (!id || overlay.morph) return
+    borrow(id)
     outer.current?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 420, easing: HOUSE.CSS_IN })
     panel.current?.animate([{ transform: 'translate3d(0,40px,0) scale(0.97)' }, { transform: 'translate3d(0,0,0) scale(1)' }], { duration: 700, easing: 'cubic-bezier(0.25, 1.05, 0.4, 1)' })
   }, [id])
@@ -230,7 +246,7 @@ export function ProjectOverlay() {
       const mr = md.getBoundingClientRect()
       md.style.opacity = '0'
       const fr = { left: mr.left, top: mr.top, width: mr.width, height: mr.height, radius: 18 }
-      morphGL.fly(fr, { ...to }, p.poster, -1, 740).then((m) => {
+      morphGL.fly(fr, { ...to }, p.poster, -1, 740, { video: labGL.reelOf(cur), overscan: labGL.gl ? LAB_OVERSCAN : 1 }).then((m) => {
         if (!m) { fly(fr, { ...to }, p.poster, T_CLOSE * 0.8, EASE_CLOSE).then(() => { pn.style.visibility = 'hidden'; finish() }); return }
         pn.style.visibility = 'hidden'
         m.flat.then(() => { finish(); requestAnimationFrame(m.hide) })
@@ -294,7 +310,8 @@ export function ProjectOverlay() {
             <div className="overlay__glass" ref={glass} aria-hidden="true" />
             <button ref={closeBtn} className="pill overlay__close" onClick={() => overlay.close()} aria-label="Close project"><X size={16} weight="bold" /></button>
             <div className="overlay__media" ref={media}>
-              <video ref={vid} src={p.media} poster={p.poster} autoPlay muted loop playsInline aria-hidden="true" />
+              {!labGL.reelOf(p.id) && <video ref={vid} src={p.media} poster={p.poster} autoPlay muted loop playsInline aria-hidden="true"
+                onLoadedMetadata={(e) => { const t = labGL.timeOf(p.id); if (t > 0) { try { e.currentTarget.currentTime = t % Math.max(0.1, e.currentTarget.duration || 6) } catch { /* not seekable yet */ } } }} />}   {/* R6.92b fallback (no GL slide): continues the card's own frame; R6.94: with a GL slide its own reel is borrowed (see borrow) */}
             </div>
             <div className="overlay__body">
               <span className="eyebrow overlay__in ov-mask"><span className="ov-rise">{shown && <><Odometer value={Number(p.no)} digits={2} delay={0.1} /> · <Odometer value={Number(p.year)} digits={4} delay={0.15} /></>}{!shown && <>{p.no} · {p.year}</>} · {p.role}</span></span>

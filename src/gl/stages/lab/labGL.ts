@@ -58,6 +58,13 @@ void main(){
   gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.0);
 }`
 
+/** R6.94: the slide's overscan (the picture is drawn 4 % larger than cover). The card morph starts from the same
+ *  framing and eases it to the open card's plain cover, so there is no zoom jump at the hand-off. */
+export const LAB_OVERSCAN = 0.96
+/** R6.94: the moment each poster was taken from its reel (poster = that exact frame). A reel starts there, so the slide's
+ *  poster → video hand-off and the open card both continue the same moment instead of jumping back to frame 0. */
+const POSTER_T: Record<string, number> = { water: 1.0, geo: 2.0, jelly: 2.5 }
+
 const FRAG = /* glsl */ `
 ${DIVE_COMMON}
 ${FLUID_GLSL}
@@ -74,7 +81,7 @@ vec2 coverUV(vec2 st){
   float ca = u_size.x / u_size.y, ma = u_mapSize.x / max(u_mapSize.y, 1.0);
   vec2 uv = st - 0.5;
   if (ca > ma) uv.y *= ma / ca; else uv.x *= ca / ma;
-  return uv * 0.96 + 0.5;                       // a little overscan, so the fluid never drags the edge in
+  return uv * ${LAB_OVERSCAN.toFixed(2)} + 0.5;   // a little overscan, so the fluid never drags the edge in (R6.94: shared with the morph)
 }
 void main(){
   // card px, origin top-left, y down (the splats are written in the same frame)
@@ -138,7 +145,7 @@ void main(){
 type Geo = { baseX: number; relY: number; w: number; h: number }
 type Card = {
   id: string; el: HTMLElement; item: UfxItem; mat: THREE.ShaderMaterial; video?: HTMLVideoElement; vtex?: THREE.VideoTexture
-  poster?: THREE.Texture; vt?: number; getHtml?: (() => THREE.Texture | null) | null
+  poster?: THREE.Texture; vt?: number; grace?: number; getHtml?: (() => THREE.Texture | null) | null
   geo: Geo; phi: number; fluid: SlideFluid; seed: number; css: string; pressT: number; pressS: Spring
 }
 
@@ -379,7 +386,9 @@ export const labGL = {
       // W19 (visual P0-1, the black card after a card closes): "playing" also needs a FRESH decoded frame (the
       // video-frame callback that also feeds three's upload); a stalled reel falls back to its poster, never a black plate
       const fresh = RVFC ? performance.now() - (card.vt ?? -1e9) < 2500 : card.video.currentTime > 0
-      const playing = !card.video.paused && card.video.readyState >= 2 && fresh
+      // R6.94: a reel coming home from the open card is paused for a moment by the browser (it left the dialog's DOM); it
+      // still holds the exact frame it was showing, so it keeps that frame instead of dropping back to the poster
+      const playing = (!card.video.paused || performance.now() < (card.grace ?? 0)) && card.video.readyState >= 2 && fresh
       if (card.vtex && playing) { u.u_map.value = card.vtex; u.u_vid.value = 1; u.u_mapSize.value.set(card.video.videoWidth, card.video.videoHeight) }
       else if (card.poster?.image && u.u_map.value !== card.poster) { u.u_map.value = card.poster; u.u_vid.value = 0; u.u_mapSize.value.set((card.poster.image as any).width, (card.poster.image as any).height) }
     }
@@ -400,6 +409,9 @@ export const labGL = {
     // PERF HOOK (Shifat 10:21Z: lower texture res on phones): phones play a 640×360 encode of the reel (-m.mp4)
     v.src = settings.TIER === 'low' ? p.media.replace(/\.mp4$/, '-m.mp4') : p.media; v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'none'; v.crossOrigin = 'anonymous'
     v.setAttribute('aria-hidden', 'true')
+    // R6.94: start on the poster's own frame (see POSTER_T); the open card borrows this very element (reelOf)
+    v.poster = p.poster
+    v.addEventListener('loadedmetadata', () => { const t0 = POSTER_T[p.id] ?? 0; if (v.currentTime === 0 && t0 > 0 && t0 < (v.duration || 0)) { try { v.currentTime = t0 } catch { /* not seekable yet */ } } }, { once: true })
     card.video = v
     if (RVFC) { const cb = () => { card.vt = performance.now(); (v as any).requestVideoFrameCallback(cb) }; (v as any).requestVideoFrameCallback(cb) }
     card.vtex = new THREE.VideoTexture(v); card.vtex.colorSpace = THREE.SRGBColorSpace
@@ -411,6 +423,13 @@ export const labGL = {
     this.cards = []; this.track = null; this.primed = false
   },
   /** where the slide is drawn right now, in CSS px (the projected bounds of its curved panel), for the slide→card morph */
+  /** R6.92b (Shifat 9:47 AM "project cards have double media"): where the card's reel is, so the opened card continues
+   *  the same frame instead of restarting the clip from its first frame (which read as a different video) */
+  /** R6.94 (Shifat 2:24 PM, phone screenshots: the open card showed another moment and another crop): the card's own
+   *  reel element, which the open card shows itself — one element, one decoder, one frame, on every tier — instead of a
+   *  second video loading another file from scratch. Null without GL (the DOM card has no reel). */
+  reelOf(id: string): HTMLVideoElement | null { if (!this.gl) return null; const c = this.cards.find((x) => x.id === id); return c?.video ?? null },
+  timeOf(id: string) { const c = this.cards.find((x) => x.id === id); return c?.video && c.video.readyState >= 1 ? c.video.currentTime : -1 },
   rectOf(id: string) {
     const c = this.cards.find((x) => x.id === id)
     if (!c) return null
@@ -435,8 +454,17 @@ export const labGL = {
   /** W19: the detail card closed — put this card back on its poster and make its reel prove a fresh frame again */
   restore(id: string) {
     const c = this.cards.find((x) => x.id === id); if (!c) return
-    this.hidden.delete(id); c.vt = undefined; c.fluid.clear()
+    this.hidden.delete(id); c.fluid.clear()
     const u = c.mat?.uniforms
+    // R6.94: the reel was on screen in the open card the whole time, so it comes home on its current frame (no poster
+    // flash); only a reel that never showed a frame goes back to the poster and has to prove a fresh one (W19)
+    if (c.video && c.vtex && c.video.readyState >= 2 && c.vt != null && performance.now() - c.vt < 2500) {
+      c.grace = performance.now() + 700
+      if (c.video.paused) c.video.play().catch(() => {})
+      if (u) { u.u_map.value = c.vtex; u.u_vid.value = 1; u.u_mapSize.value.set(c.video.videoWidth, c.video.videoHeight) }
+      return
+    }
+    c.vt = undefined
     if (u && c.poster?.image) { u.u_map.value = c.poster; u.u_vid.value = 0; u.u_mapSize.value.set((c.poster.image as any).width, (c.poster.image as any).height) }
   },
   /** kept for the DOM card's hover / focus handlers: the slides no longer lift or tilt (Shifat: no over-animation) */
