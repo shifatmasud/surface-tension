@@ -68,7 +68,9 @@ export function JourneyStage(): JSX.Element {
   // STICKERS HOOK: drag / peel / keyboard on the CTA wall's stickers (stickerInteract.ts), bound to the real camera
   useEffect(() => { S.cta.attach(mainCam); return () => S.cta.detach() }, [S, mainCam])
   // R6.87 SPLIT RESOLUTION: the crewmate that breaks out is a hero subject (drawn at the canvas density, post/heroPass.ts)
-  useEffect(() => { const a = heroPass.add(S.crewOut.root), b = S.crewScreen ? heroPass.add(S.crewScreen) : () => {}; return () => { a(); b() } }, [S])
+  useEffect(() => { const a = heroPass.add(S.crewOut.root), b = S.crewScreen ? heroPass.add(S.crewScreen) : () => {}
+    const c = heroPass.add(S.cta.stickers) // R6.89: the CTA wall's stickers are heroes too (Shifat "same hero dpr")
+    return () => { a(); b(); c() } }, [S])
   useEffect(() => {
     S.cta.typeRoot.position.copy(JOURNEY_ORIGIN)
     const body = S.crewOut.root
@@ -321,6 +323,35 @@ export function JourneyStage(): JSX.Element {
         journey.crew.set(O.crew.x + JOURNEY_ORIGIN.x, O.crew.y, O.crew.z)
         journey.crewScale = O.crewScale
       }
+      // R6.89 FOOTER (Shifat 3:43 AM "When reaching footer the [crewmate] model & [big CTA] text must not animate mask out";
+      // 3:57 AM option C): as the curtain lifts over the footer, the big type and the crewmate glide up together and settle
+      // fully visible above it, easing to ~85 % size, instead of riding off the top (the crewmate used to be cut there) or
+      // rolling out. The post chain shifts the whole picture up by the lift; this moves the two of them against that shift
+      // so their on-screen path is a straight glide from where they hold to where they settle. Pure function of scroll.
+      {
+        const fh = journey.footH, lift = Math.max(0, journey.lift || 0), H = Math.max(1, props.height)
+        const ft = fh > 0 && g > 0.999 ? Math.min(1, lift / fh) : 0
+        if (ft > 0) {
+          const tanH = Math.tan((O.fov * Math.PI) / 360), cz = O.camPos.z, cy = O.camPos.y
+          const hAt = (z: number) => 2 * Math.max(0.01, cz - z) * tanH                 // world units per screen height at depth z
+          const fr = (y: number, z: number) => 0.5 - (y - cy) / hAt(z)                // screen fraction from the top
+          const A = S.cta.typeAnchor()
+          const top0 = fr(A.top, A.z), feetY = L.crewY - CREW_CENTER_Y * L.crewScale, bot0 = fr(feetY, L.crewZ)
+          // R6.89: the heroes settle above the CTA button, which lifts off the footer with the page
+          const edge = 1 - fh / H, bot1 = edge - Math.max(0.06, ((journey.pillRes || 0) + 6) / H), span = Math.max(0.05, bot0 - top0)
+          const s = Math.min(0.85, (bot1 - (H > props.width ? 0.12 : 0.095)) / span), top1 = bot1 - s * span   // R6.89: clear air under the header too
+          const lf = lift / H, sc = 1 + ft * (s - 1)
+          // a point at screen fraction y0 (curtain down) is shown at y0 + ft (m(y0) − y0); the chain then lifts it by lf
+          const dFrac = (y0: number) => ft * (top1 + s * (y0 - top0) - y0) + lf
+          const ty0 = fr(A.y, A.z)
+          // the stickers ride the curtain and lift on away past the top (the lower pair would otherwise end under the type)
+          S.cta.setFoot(-dFrac(ty0) * hAt(A.z), sc, ft, ft * 0.8 * hAt(WALL_Z))   // R6.89: far enough that no sticker edge is left at the top (1440 check)
+          const cy0 = fr(O.crew.y, O.crew.z)
+          O.crew.y -= dFrac(cy0) * hAt(O.crew.z)
+          O.crewScale *= sc
+          journey.crew.set(O.crew.x + JOURNEY_ORIGIN.x, O.crew.y, O.crew.z); journey.crewScale = O.crewScale
+        } else S.cta.setFoot(0, 1, 0)
+      }
       S.rimU.u_rim.value = 0.55 * ss(0.3, 0.9, g)
       S.cta.update(time, cta, O.camPos, p > 0.55)
     }
@@ -388,9 +419,9 @@ export function JourneyStage(): JSX.Element {
       if (split) S.crewIn.root.visible = true
       if (split && S.crewL) {
         const ph = screenPx(S, state.camera as THREE.PerspectiveCamera, W, H)
-        const hd = (props.textDpr || 1) * (nb.active ? nb.scale : 1)
+        const hd = (props.heroDpr || props.textDpr || 1) * (nb.active ? nb.scale : 1)   // R6.89: hero density
         let ch = Math.min(H * 1.2, ph) * hd, cw = ch * (S.sw / S.sh)
-        const lim = Math.max(W, H) * 1.25 * (props.textDpr || 1)
+        const lim = Math.max(W, H) * 1.25 * (props.heroDpr || props.textDpr || 1)
         if (Math.max(cw, ch) > lim) { const k = lim / Math.max(cw, ch); cw *= k; ch *= k }
         S.crewL.render(gl, S.inner, S.icam, S.crewIn.root, S.rt, S.one, cw, ch)
         ;(S.screenMat.uniforms.u_crewScale.value as THREE.Vector2).copy(S.crewL.scale)

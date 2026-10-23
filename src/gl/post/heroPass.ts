@@ -104,9 +104,14 @@ class HeroPass {
 
   private ensure(gl: THREE.WebGLRenderer) {
     const v = gl.getDrawingBufferSize(this.v2)
-    const w = Math.max(1, Math.round(v.x)), h = Math.max(1, Math.round(v.y))
+    // R6.89 (Shifat 4:09–4:10 AM): the heroes have their own density (props.heroDpr: phones 1.0) under the canvas's (the
+    // text's: phones 1.5); the composite samples this target by screen uv, so it upsamples onto the canvas
+    const k = Math.min(1, (props.heroDpr || gl.getPixelRatio()) / Math.max(1e-3, gl.getPixelRatio()))
+    const w = Math.max(1, Math.round(v.x * k)), h = Math.max(1, Math.round(v.y * k))
     if (!this.rt) {
-      this.rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, depthBuffer: true, stencilBuffer: false, samples: LOW_END_GPU || settings.TIER === 'low' ? 0 : 4, generateMipmaps: false })
+      this.rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, depthBuffer: true, stencilBuffer: false, samples: (LOW_END_GPU || settings.TIER === 'low') && (props.heroDpr || 2) > 1.01 ? 0 : 4, generateMipmaps: false })
+      // R6.89: at the 1.0 phone hero density the silhouettes (the crewmate's rim, the stone's girdle) stepped and read as a
+      // thin fringe once upsampled onto the 1.5 canvas; 4x MSAA on this small target (resolved on-chip on tile GPUs) smooths them
       this.rt.texture.minFilter = this.rt.texture.magFilter = THREE.LinearFilter
     } else if (this.rt.width !== w || this.rt.height !== h) this.rt.setSize(w, h)
     this.stats.w = w; this.stats.h = h
@@ -285,8 +290,13 @@ void main(){
     // the box grown by the trail's reach (its smear pulls hero pixels up to ~10 % of the screen) — in canvas px
     // the box already carries the trail's reach (measure): exactly the pixels that were cleared and drawn this frame
     const W = this.rt!.width, H = this.rt!.height
-    const pr = gl.getPixelRatio()
-    const x = Math.max(0, B.x), y = Math.max(0, B.y), x1 = Math.min(W, B.x + B.w), y1 = Math.min(H, B.y + B.h)
+    const pr = gl.getPixelRatio() * (this.rt!.width / Math.max(1, gl.getDrawingBufferSize(this.v2).x)) // R6.89: target px → css px
+    // R6.89: under the footer curtain the composite shows the hero target lifted by u_fk (heroAt), so the drawn box is the
+    // measured box lifted by the same rows; it was clipped at the unlifted box, which sliced the CTA crewmate's head off
+    // as the footer came up (Shifat: "must not animate mask out")
+    const fkPx = Math.max(0, (mat.uniforms.u_fk?.value as number) || 0) * H
+    const x = Math.max(0, B.x), y = Math.max(0, B.y + fkPx), x1 = Math.min(W, B.x + B.w), y1 = Math.min(H, B.y + B.h + fkPx)
+    if (x1 <= x || y1 <= y) { gl.autoClear = auto; gl.setRenderTarget(prev); return }
     gl.setScissorTest(true); gl.setScissor(x / pr, y / pr, (x1 - x) / pr, (y1 - y) / pr)
     gl.render(this.qscene, this.qcam)
     gl.setScissorTest(false)

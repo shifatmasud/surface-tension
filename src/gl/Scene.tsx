@@ -60,14 +60,16 @@ type Sizing = { gl: THREE.WebGLRenderer; w: number; h: number; setDpr: (d: numbe
 function applySizing(z: Sizing): boolean { // SHARP HOOK: returns whether anything changed
   const { gl, w, h } = z
   const dpr = quality.dprFor(w, h), td = Math.max(dpr, quality.textDprFor(w, h)), pd = quality.dprFor(w, h, true)
-  const key = `${w}x${h}|${dpr.toFixed(4)}|${td.toFixed(4)}|${pd.toFixed(4)}`
+  const hd = quality.heroDprFor(w, h) // R6.89: the hero pass's own density (phones 1.0, desktop native)
+  const key = `${w}x${h}|${dpr.toFixed(4)}|${td.toFixed(4)}|${pd.toFixed(4)}|${hd.toFixed(4)}`
   if (key === z.last.key) return false
   z.last.key = key
-  props.dpr = dpr; props.textDpr = td
+  props.dpr = dpr; props.textDpr = td; props.heroDpr = Math.min(td, hd)
   if (Math.abs(gl.getPixelRatio() - td) > 1e-3) z.setDpr(td) // R3F's store resizes the canvas synchronously (once)
   if (Math.abs(gl.getPixelRatio() - td) > 1e-3) gl.setPixelRatio(td) // (a store that already held td: no-op above)
   props.renderW = Math.floor(w * dpr); props.renderH = Math.floor(h * dpr)
-  props.paintDpr = pd; z.sys.paint.resize(Math.floor(w * pd), Math.floor(h * pd)) // the trail sim ignores rest (and no-ops on an unchanged size)
+  props.paintDpr = settings.TIER === 'low' ? Math.min(1, pd) : pd;   // R6.89: the phone trail never above 1.0
+  z.sys.paint.resize(Math.floor(w * pd), Math.floor(h * pd)) // the trail sim ignores rest (and no-ops on an unchanged size)
   z.sys.chain.setSize(w, h)
   shared.u_resolution.value.set(props.renderW, props.renderH)
   const wh = `${w}x${h}`

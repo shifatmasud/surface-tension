@@ -109,7 +109,7 @@ attribute vec4 aSt;      // x, y (wall), size, tilt
 attribute vec2 aCell;    // atlas cell
 attribute vec4 aProg;    // slap progress 0..1, lifted-corner amount, seed, stacking rank (STICKERS LANE)
 attribute vec4 aInt;     // (Shifat 15:29Z) drag lift 0..1, peel 0..1, grabbed corner direction (sticker space)
-uniform float u_z, u_shadow;
+uniform float u_z, u_shadow, u_away;
 uniform vec3 u_light;
 varying vec2 vUv; varying vec3 vN; varying vec3 vW; varying float vA; varying float vLift; varying float vCurl;
 void main(){
@@ -148,6 +148,8 @@ void main(){
   if (u_shadow > 0.5) { float hgt = lp.z + 0.03; wp.xy += (u_light.xy / -u_light.z) * hgt; wp.z = u_z - 0.022 + aProg.w * 0.002; vLift = hgt; }
   else vLift = lift;
   vN = normalize(vec3(-sa * 0.0 + (ca + sa) * 0.7 * lift * 2.0, (sa - ca) * 0.7 * lift * 2.0, 1.0));
+  wp.y += u_away;   // R6.89: the stickers lift away as the footer comes up (option C)
+  wp.x += sign(aSt.x) * u_away * 1.1;   // … and out to their own side, so none crosses the type on its way off
   vUv = (aCell + (q + 0.5)) / vec2(3.0, 2.0);
   vA = step(0.001, s);
   vW = wp;
@@ -235,7 +237,7 @@ void main(){
 
 const LINE1 = 'Let’s make'
 const LEAD = 'it'                                          // static; only the word after it rolls
-const WORDS = ['ripple.', 'move.', 'play.', 'real.']
+const WORDS = ['ripple', 'move', 'play', 'real']   // R6.89 (Shifat Oct 23 3:45 AM "remove . from big text")
 
 function glyphAtlas(font: string, spacingEm: number) {
   const FS = 112, PAD = 26
@@ -291,10 +293,28 @@ export function buildCta(portrait: boolean) {
   sGeo.setAttribute('aSt', aSt); sGeo.setAttribute('aCell', aCell); sGeo.setAttribute('aProg', aProg); sGeo.setAttribute('aInt', aInt); sGeo.instanceCount = N
   const base = new Float32Array(N * 4)   // STICKERS HOOK: the laid-out x, y, size, tilt (aSt = base + the visitor's moves)
   const atlas = stickerAtlas(LOGO_PATHS)
-  const sU = { u_atlas: { value: atlas }, u_z: { value: WALL_Z + 0.03 }, u_light: { value: light }, u_cam: { value: new THREE.Vector3() }, u_time: { value: 0 } }
+  const sU = { u_atlas: { value: atlas }, u_away: { value: 0 }, u_z: { value: WALL_Z + 0.03 }, u_light: { value: light }, u_cam: { value: new THREE.Vector3() }, u_time: { value: 0 } }
   const sMat = new THREE.ShaderMaterial({ vertexShader: ST_VERT, fragmentShader: ST_FRAG, toneMapped: false, fog: false, side: THREE.DoubleSide, uniforms: { ...sU, u_shadow: { value: 0 } } })
   const sShadowMat = new THREE.ShaderMaterial({ vertexShader: ST_VERT, fragmentShader: ST_FRAG, toneMapped: false, fog: false, transparent: true, depthWrite: false, uniforms: { ...sU, u_shadow: { value: 1 } } })
   const stickers = new THREE.Mesh(sGeo, sMat); stickers.frustumCulled = false; stickers.renderOrder = -4
+  // R6.89 (Shifat Oct 23 3:43 AM "each stickers need same hero dpr. They need full sharpness like hero"): the stickers are
+  // hero subjects (JourneyStage registers them with post/heroPass.ts). Their vertices are placed in the shader, so the
+  // pass is told their screen rectangle: each sheet's laid-out square (size × 1.25 for tilt, peel and drag lift), projected
+  const hv = new THREE.Vector3()
+  stickers.userData.heroRect = (cam: THREE.Camera) => {
+    if (!group.visible) return null
+    stickers.updateWorldMatrix(true, false)
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9
+    for (let i = 0; i < N; i++) {
+      const cx = aSt.getX(i) + Math.sign(aSt.getX(i)) * sU.u_away.value * 1.1, cy = aSt.getY(i) + sU.u_away.value, r = aSt.getZ(i) * 0.75
+      for (let k = 0; k < 4; k++) {
+        hv.set(cx + (k & 1 ? r : -r), cy + (k & 2 ? r : -r), sU.u_z.value + (k & 1 ? 0.3 * aSt.getZ(i) : 0)).applyMatrix4(stickers.matrixWorld).project(cam)
+        if (hv.z > 1) return [-1, -1, 1, 1]
+        x0 = Math.min(x0, hv.x); x1 = Math.max(x1, hv.x); y0 = Math.min(y0, hv.y); y1 = Math.max(y1, hv.y)
+      }
+    }
+    return x1 > x0 ? [x0, y0, x1, y1] : null
+  }
   const stickerShadows = new THREE.Mesh(sGeo, sShadowMat); stickerShadows.frustumCulled = false; stickerShadows.renderOrder = -5
   // type + its shadow
   const tU = { u_atlas: { value: null as THREE.Texture | null }, u_time: { value: 0 }, u_em: { value: 1 }, u_gap: { value: 0.9 }, u_still: { value: browser.reducedMotion ? 1 : 0 }, u_enter: { value: browser.reducedMotion ? 1 : 0 }, u_off: { value: new THREE.Vector2() }, u_c: { value: new THREE.Vector2() }, u_desc: { value: 0.55 } }
@@ -425,12 +445,17 @@ export function buildCta(portrait: boolean) {
     // W21 (scorer-r614: the same ghost at 1440 — the cast shadow trails the odometer, so it can show the previous word
     // behind the new one): off on every screen, as Shifat had it removed on phones
     typeShadow.visible = false
+    // R6.89: the odometer's clock. While the footer is coming up the word cycle holds (a roll already under way finishes),
+    // so the type stands still above the footer; it runs on again when the curtain is down
+    { const dt = lastT < 0 ? 0 : Math.max(0, Math.min(0.1, time - lastT)); lastT = time
+      const lt = typeT % 3.4, rolling = lt > 2.1 && lt < 3.0
+      if (footT <= 0 || rolling) typeT += dt }
     if (showType) {
-      tU.u_time.value = time; tU.u_em.value = lay.em
+      tU.u_time.value = typeT; tU.u_em.value = lay.em * footS
       // TEXTROLL: in with the wall's arrival (a = journey.cta), out with the curtain (journey.ctaOut); reduced motion: in place
       const ein = Math.min(1, Math.max(0, (a - 0.42) / 0.46)), eout = Math.min(1, Math.max(0, journey.ctaOut))
       tU.u_enter.value = browser.reducedMotion ? (eout >= 1 ? 2 : 1) : ein + (ein >= 1 ? eout : 0)
-      tU.u_c.value.set(lay.C.x, typeY)
+      tU.u_c.value.set(lay.C.x, typeY + footDy)
       tMat.uniforms.u_z.value = lay.textZ
       // the soft shadow: the type projected along the light onto the wall
       const h = lay.textZ - WALL_Z
@@ -439,9 +464,14 @@ export function buildCta(portrait: boolean) {
   }
   /** the type's box (tablet-local, at its depth): both lines, a margin for the roll and the trail */
   const typeRect = () => {
-    const cy = typeY, half = (widthEm * 0.5 + 0.25) * lay.em
-    return { x0: lay.C.x - half, x1: lay.C.x + half, y0: cy - (tU.u_gap.value + 0.6) * lay.em, y1: cy + 1.05 * lay.em, z: lay.textZ }
+    const em = lay.em * footS, cy = typeY + footDy, half = (widthEm * 0.5 + 0.25) * em
+    return { x0: lay.C.x - half, x1: lay.C.x + half, y0: cy - (tU.u_gap.value + 0.6) * em, y1: cy + 1.05 * em, z: lay.textZ }
   }
+  /** R6.89 (option C): as the footer comes up the type glides (dy, world units) and eases to its settled size (s); t = 0..1 */
+  let footDy = 0, footS = 1, footT = 0, typeT = 0, lastT = -1
+  const setFoot = (dy: number, s: number, ft: number, away = 0) => { footDy = dy; footS = s; footT = ft; sU.u_away.value = away }
+  /** the type's anchor (first line's slot origin) and its em, before the footer's glide (the stage plans the glide from them) */
+  const typeAnchor = () => ({ y: typeY, em: lay.em, top: typeY + 1.05 * lay.em, z: lay.textZ })
   // STICKERS HOOK: drag / peel / keyboard (stickerInteract.ts), bound to the real camera by the stage
   let ix: StickerInteraction | null = null
   const attach = (camera: THREE.Camera) => {
@@ -449,5 +479,5 @@ export function buildCta(portrait: boolean) {
     ix = createStickerInteraction({ camera, group, base, aSt, aInt, aProg, lay, typeRect, labels: LOGOS.map((L) => L.label), shapes: LOGOS.map((L) => L.shape), z: () => sU.u_z.value })
   }
   const detach = () => { ix?.dispose(); ix = null }
-  return { group, typeRoot, type, typeRect, layout, update, lay, attach, detach, get dirty() { return dirty }, set dirty(v: boolean) { dirty = v }, wall }
+  return { group, typeRoot, type, stickers, typeRect, typeAnchor, setFoot, layout, update, lay, attach, detach, get dirty() { return dirty }, set dirty(v: boolean) { dirty = v }, wall }
 }

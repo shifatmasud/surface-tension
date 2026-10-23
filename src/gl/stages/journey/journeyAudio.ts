@@ -26,7 +26,9 @@ const knockSound = (hard: boolean) => K.knock(bus(), hard) // soft wood + glass 
 
 /* ---- the glass shatter: LOCKED by Shifat (11:40Z). The R6.55 code below is byte-for-byte unchanged, and it keeps its own
    sound: it plays through the original bright 2.6 s room (audio.legacyReverb), not the new dark one ---- */
-function out(g: AudioNode) { g.connect(audio.master); g.connect(audio.legacyReverb) }
+// R6.89: the shatter's voices go to audio.shatterBus (desktop: a unity gain into the master, so the same sound; phones: a
+// lower peak, no sub, softer highs — Shifat "Glass shatter sounds clip distorted in my phone speaker"); nothing else changed
+function out(g: AudioNode) { g.connect(audio.shatterBus); g.connect(audio.legacyReverb) }
 function env(g: GainNode, t: number, peak: number, a: number, r: number) {
   g.gain.setValueAtTime(0.0001, t)
   g.gain.exponentialRampToValueAtTime(peak, t + a)
@@ -47,7 +49,7 @@ function shatterSound() {
   const ctx = audio.ctx!, t = ctx.currentTime
   const o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'sine'
   o.frequency.setValueAtTime(95, t); o.frequency.exponentialRampToValueAtTime(34, t + 0.35)
-  env(g, t, 0.16, 0.004, 0.5); o.connect(g); g.connect(audio.master); o.start(t); o.stop(t + 0.6)
+  env(g, t, 0.16, 0.004, 0.5); o.connect(g); g.connect(audio.shatterBus); o.start(t); o.stop(t + 0.6)
   const crack = noise(ctx, 0.06), chp = ctx.createBiquadFilter(), cg = ctx.createGain()
   chp.type = 'highpass'; chp.frequency.value = 1800; crack.connect(chp); chp.connect(cg); env(cg, t, 0.16, 0.001, 0.05); out(cg); crack.start(t)
   const body = noise(ctx, 1.4), bp = ctx.createBiquadFilter(), bg = ctx.createGain()
@@ -93,3 +95,8 @@ export function journeyAudio(p: number) {
   return current
 }
 export function resetJourneyAudio() { current = -1; lastP = -1 }
+
+/** R6.89 test hook (?audiotest only): the journey's real cues, for the offline render in services/audio.ts */
+if (typeof window !== 'undefined' && /[?&]audiotest/.test(location.search)) {
+  ;(window as any).__jaTest = { shatter: () => shatterSound(), knock: (h: boolean) => knockSound(h), reveal: () => K.jReveal(bus()), forest: () => K.jForest(bus()), splash: () => audio.splash(), swell: () => audio.swell(true) }
+}

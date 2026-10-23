@@ -117,7 +117,7 @@ html.no-gl .a11y-work ul { justify-content: center; }
    WebGL frame itself (gl/post/footerWorld.ts) and the cursor trail bends it; it is uncovered by the same edge the
    curtain lifts with (--k, set by Contact.tsx), so nothing of it shows or takes a tap before the curtain clears it.
    Text: untouched (same type, size, colour, roll timing). */
-.site-footer--world { z-index: 3; background: transparent; clip-path: inset(max(0px, calc(100% - var(--k, 0px))) 0 0 0); }
+.site-footer--world { z-index: 3; background: transparent; clip-path: inset(max(0px, calc(100% - var(--k, 0px) + var(--kd, 0px))) 0 0 0); }   /* R6.89: --kd, the water line's dip (footerWorld.ts) */
 .site-footer--world .overscroll__bar { position: relative; }
 /* Shifat 13:24Z "Make the scroll progress fill super lime green glowy" + "In footer": electric lime fill on an ink track
    (lime on the light grey track was 1.2:1; on ink it is 14:1), a layered soft neon glow that grows with the fill */
@@ -146,3 +146,16 @@ html[data-bg='dark'] .contact .big-btn:focus-visible { outline-color: #fafafa; }
 /* R6.80 (Shifat Oct 22 "scroll hard to loop to top", rubber band): the footer is the end of the page; the loop is a
    pull past it (services/loopPull.ts), not a runway. Reduced motion keeps the runway (native scroll fills the bar). */
 @media (prefers-reduced-motion: no-preference) { :root { --loop-runway: 0px; } }
+
+/* R6.89 GIFT STICKER (dom/gift/giftSticker.ts): a vinyl sticker on the footer that gathers out of hot-pink embers at the very end
+   of the scroll and opens the gift. The button is the sticker's own square (the hit area); its canvas overhangs it for the
+   embers. Hidden (and out of the tab order) until it has gathered; the footer's clip hides it with the rest. */
+.gift-sticker { position: absolute; right: calc(var(--pad-x) + 4px); bottom: calc(var(--s6, 48px) + 64px); width: 92px; height: 92px; padding: 0; margin: 0; border: 0; border-radius: 26px;
+  background: transparent; cursor: pointer; visibility: hidden; -webkit-tap-highlight-color: transparent; z-index: 2; transition: transform .5s var(--ease); }
+.gift-sticker.is-on { visibility: visible; }
+.gift-sticker__cv { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+@media (hover: hover) { .gift-sticker.is-on:hover { transform: translateY(-3px) rotate(-2deg) scale(1.04); } }
+.gift-sticker:focus { outline: none; }
+.gift-sticker:focus-visible { outline: 2px solid #ff2e93; outline-offset: 6px; }   /* R6.89: the sticker's own hot pink */
+@media (max-width: 760px) { .gift-sticker { width: 76px; height: 76px; border-radius: 22px; right: calc(var(--pad-x) + 2px); bottom: calc(var(--s5, 32px) + 96px); } }
+html.no-gl .gift-sticker { visibility: visible; }

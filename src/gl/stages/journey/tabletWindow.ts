@@ -65,6 +65,7 @@ uniform vec2 u_rtScale;   // used fraction of the allocation
 uniform vec2 u_texel;
 uniform vec2 u_win;       // window half extents
 uniform float u_time, u_on, u_sweep, u_fill, u_live, u_sheen, u_rot;
+uniform float u_heroA;
 uniform sampler2D u_crew; uniform vec2 u_crewScale; // R6.87: the crewmate at the canvas density (crewLayer.ts)
 varying vec2 vUv; varying vec3 vWP; varying vec3 vWN;
 float sdBox(vec2 p, vec2 b, float r){ vec2 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r; }
@@ -125,6 +126,8 @@ void main(){
   c += vec3(0.010, 0.030, 0.034) * 0.35 * (1.0 - inS) * (0.5 + 0.5 * pow(1.0 - ndv, 2.0)) * glass; // iPad: the bezel stays near-black (a faint fill only)
 #ifdef CREW_ONLY
   gl_FragColor = vec4(c, cr.a * inS);
+#elif defined(HERO_TWIN)
+  gl_FragColor = vec4(c * u_heroA, u_heroA);   // R6.89: the glass at hero density, premultiplied, fading to the low-res glass
 #else
   gl_FragColor = vec4(c, 1.0);
 #endif
@@ -170,6 +173,9 @@ export class TabletWindow {
   stats = { w: 0, h: 0, ms: 0, renders: 0, skipped: 0, rect: [0, 0, 0, 0] as number[], drawn: false }
 
   private screen: THREE.Mesh
+  /** R6.89: the glass's hero-density twin (see the constructor) */
+  twin: THREE.Mesh | null = null
+  private twinMat: THREE.ShaderMaterial | null = null
   /** the tablet's own (painted) screen material: still owned and disposed by its maker; we read its scroll uniforms */
   private src: THREE.ShaderMaterial
 
@@ -196,6 +202,7 @@ export class TabletWindow {
         u_rtScale: { value: new THREE.Vector2(1, 1) }, u_texel: { value: new THREE.Vector2(1 / 512, 1 / 512) },
         u_win: { value: new THREE.Vector2(WIN_HW, WIN_HH) },
         u_time: { value: 0 }, u_on: { value: 0 }, u_sweep: { value: -1 }, u_fill: { value: 0 }, u_live: { value: 0 }, u_sheen: { value: 1 }, u_rot: { value: 0 },
+        u_heroA: { value: 1 },
       },
       vertexShader: GLASS_VS, fragmentShader: GLASS_FS, toneMapped: false,
     })
@@ -214,6 +221,19 @@ export class TabletWindow {
       const ov = this.overlay, cl = this.crewL, R = this.material.uniforms.u_rect.value as THREE.Vector4
       ov.userData.heroRect = (cam: THREE.Camera) => cl.rectOn(ov, cam, (u, v, o) => o.set(R.x + u * (R.z - R.x), R.y + v * (R.w - R.y), 0))
       this.offHero = heroPass.add(this.overlay)
+      // R6.89 (Shifat Oct 23 3:56 AM "treat tab dpr same as hero too"): the glass itself (its thin black bezel and the
+      // display's edge, which read jagged at the background's 0.5–0.75) has a twin in the hero pass: same geometry, same
+      // uniforms, drawn at the hero density over the low-res glass, just under the crewmate's twin. Once the display
+      // covers the whole frame (no bezel left on screen) the twin fades out over a few % of the push, so the frame that
+      // reaches the stage switch is the low-res glass exactly as in R6.88d: the zero-cut hand-off is untouched.
+      this.twinMat = new THREE.ShaderMaterial({ uniforms: this.material.uniforms, vertexShader: GLASS_VS, fragmentShader: GLASS_FS, toneMapped: false, defines: { HERO_TWIN: '' },
+        transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2,
+        blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneMinusSrcAlphaFactor })
+      this.twin = new THREE.Mesh(this.screen.geometry, this.twinMat); this.twin.frustumCulled = false; this.twin.visible = false
+      this.twin.layers.mask = this.screen.layers.mask; this.twin.renderOrder = this.screen.renderOrder - 0.5
+      this.screen.add(this.twin)
+      const offTwin = heroPass.add(this.twin), offOv = this.offHero
+      this.offHero = () => { offOv?.(); offTwin() }
     }
 
     // ---- the inner world: the journey's own space — R6.87 SINGLE SKY: the dome, the stars, the glints, the rocks and the
@@ -435,7 +455,7 @@ export class TabletWindow {
     const e = this.e.copy(camP.position).applyMatrix4(this.m)
     if (rot) e.set(-e.y, e.x, e.z)
     // (the corners below are rotated the same way BEFORE the eye is taken off: a rotation about the glass normal)
-    if (e.z < 0.02) { this.stats.drawn = false; if (this.overlay) this.overlay.visible = false; return }
+    if (e.z < 0.02) { this.stats.drawn = false; if (this.overlay) this.overlay.visible = false; if (this.twin) this.twin.visible = false; return }
     // ---- the viewport's footprint on the glass (V) and the part of the window that is on screen (R)
     let vx0 = 1e9, vy0 = 1e9, vx1 = -1e9, vy1 = -1e9, ok = true
     for (let i = 0; i < 4; i++) {
@@ -446,6 +466,14 @@ export class TabletWindow {
       const t = -e.z / d.z
       const px = e.x + d.x * t, py = e.y + d.y * t
       vx0 = Math.min(vx0, px); vx1 = Math.max(vx1, px); vy0 = Math.min(vy0, py); vy1 = Math.max(vy1, py)
+    }
+    // R6.89: the hero twin of the glass shows while any of the bezel is on screen, fading out once the display covers
+    // the frame by 0 → 4 % of its height (a pure function of the pose, so scrolling back brings it back the same way)
+    if (this.twin) {
+      const cover = ok ? Math.min(WX - Math.max(Math.abs(vx0), Math.abs(vx1)), WY - Math.max(Math.abs(vy0), Math.abs(vy1))) / WY : -1
+      const a = (1 - ss(0.0, 0.04, cover)) * (h > 0.9 ? 0 : 1)
+      this.material.uniforms.u_heroA.value = a
+      this.twin.visible = a > 0.002
     }
     if (!ok) { vx0 = -WX; vy0 = -WY; vx1 = WX; vy1 = WY }
     const m = 0.02 * (1 - h) // a margin for the springs between this frame and the drawn one (none once it is the frame)
@@ -521,7 +549,7 @@ export class TabletWindow {
     gl.setRenderTarget(prev)
     if (split && this.crewL) {
       // the window's on-screen rectangle at the canvas density (aspect = the background target's), capped at the canvas
-      const hd = props.textDpr || dpr
+      const hd = props.heroDpr || props.textDpr || dpr   // R6.89: the crewmate is a hero (phones 1.0)
       let cw = (x1 - x0) * pxPerUnit * hd * (nb.active ? nb.scale : 1), ch = (y1 - y0) * pxPerUnit * hd * (nb.active ? nb.scale : 1)
       const lim = Math.max(props.width, props.height) * hd * 1.05, big = Math.max(cw, ch)
       if (big > lim) { cw *= lim / big; ch *= lim / big }
@@ -546,6 +574,7 @@ export class TabletWindow {
     this.src.removeEventListener('dispose', this.onSrcDispose)
     this.rt.dispose(); this.material.dispose()
     if (this.overlay) { this.offHero(); this.overlay.parent?.remove(this.overlay); this.crewMat?.dispose(); this.crewL?.dispose() }
+    if (this.twin) { this.twin.parent?.remove(this.twin); this.twinMat?.dispose(); this.twin = null }
     this.scene.traverse((o: any) => { if (o.geometry && !isSharedSkyGeometry(o.geometry)) o.geometry.dispose() }) // R6.87: the sky's buffers are shared with the journey
     this.skyMat.dispose(); this.starMat.dispose(); this.glintMat.dispose(); this.extras.dispose()
     this.crewMats.body.dispose(); this.crewMats.visor.dispose()

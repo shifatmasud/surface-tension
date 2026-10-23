@@ -14,7 +14,7 @@ import { settings } from '../../services/settings'
 import { journey } from '../../gl/stages/journey/journeyState'
 import './contact.css'
 import { Logo } from '../../assets/logo/Logo'
-import { giftTrigger, giftKey } from '../gift/gift' // R6.83 GIFT: the footer logo opens the gift box too
+import { mountGiftSticker } from '../gift/giftSticker' // R6.89: the gift opens from a sticker at the end of the scroll (no more logo double-click)
 import { ProjectLinks } from '../a11y/ProjectLinks'
 import { noOrphan } from '../a11y/noOrphans'
 import { lineRoll, type LineRoll } from '../ui/maskedRoll'
@@ -65,7 +65,7 @@ export function Contact() {
       vignette: 0.0, bloom: 0.18, bloomThreshold: 0.97, contrast: 1.0, saturation: 1.04, exposure: 1.0, paintOffsetRatio: 0.6,
     })
     const canvasEl = document.getElementById('canvas')
-    let lastK = -1, fired = false, lastExtra = -1
+    let lastK = -1, fired = false, lastExtra = -1, pillVh = -1, pillGap = -1, pillH = 0, pillCur = 0
     const ctaEl = ref.current?.querySelector<HTMLElement>('.contact__cta') ?? null
     // TEXTROLL: the CTA label rolls up into its pill after the headline (scroll-driven, reversible)
     const btnEl = ref.current?.querySelector<HTMLElement>('.big-btn__label')
@@ -76,7 +76,8 @@ export function Contact() {
         // W18: the CTA type is drawn in GL on the wall (ctaScene.ts, the odometer); the DOM heading stays for AT
         if (settings.USE_GL) document.documentElement.classList.add('cta-gl')
         loopPull.init(() => props.scroll >= scroll.limit - 2)
-        if (btnEl && settings.USE_GL) btnRoll = lineRoll(btnEl, { split: false, pad: 0.25 })
+        // R6.89 (Shifat 5:25 AM): the button's label no longer rolls in; it is simply there (its hover roll stays)
+        void btnEl
       },
       dispose() { btnRoll?.destroy(); btnRoll = null; journey.ctaOut = 0; footRoll(0) },
       update(dt = 0.016) {
@@ -93,6 +94,7 @@ export function Contact() {
         // travels up with the scroll and uncovers the fixed footer beneath
         // W19 (Shifat 19:06Z footer at half height): the footer's own height, not a full viewport
         const fh = footerH(vh)
+        journey.footH = fh   // R6.89: the CTA heroes settle above it (JourneyStage)
         const k0 = Math.max(0, vh - (top + range.height)), k = Math.round(Math.min(k0, fh + 2))
         // (W21 tried a soft mask on the curtain's lower edge: it read as a grey gradient band, against the no-gradient rule; the edge stays hard)
         // FOOTER MOCKUP: the canvas no longer slides; the curtain lifts inside the frame (gl/post/footerWorld.ts reads
@@ -108,15 +110,33 @@ export function Contact() {
         // footer's height, but the section's DOM kept scrolling, so the pill slid up over the held picture. It now holds
         // with the curtain: same place under the crewmate's feet as at the CTA hold, riding the curtain's edge
         const extra = Math.max(0, Math.round(k0 - k))
-        if (ctaEl && extra !== lastExtra) { lastExtra = extra; ctaEl.style.transform = extra > 0 ? `translateX(-50%) translate3d(0, ${extra}px, 0)` : '' }
+        // R6.89 (Shifat 5:25 AM "reveal footer"; "The CTA button has no in or out animation"): the button is part of the page:
+        // its DOM scrolls up 1:1 with the curtain's edge as the footer is uncovered, then holds with it; never fading or rolling
+        // As the footer is uncovered it eases down a little toward the curtain's edge (to ~50 px above it, clear of the water line's slosh), so the crewmate and
+        // the type keep room above it (a scroll-tied glide, no fade, no scale)
+        let pillDown = 0
+        if (ctaEl && k > 0 && settings.USE_GL) {
+          if (vh !== pillVh || pillGap < 0) { const r = ctaEl.getBoundingClientRect(); pillVh = vh; pillGap = (vh - k) - (r.bottom - pillCur); pillH = r.height }
+          pillDown = Math.round((k / Math.max(1, fh)) * Math.max(0, pillGap - 50))
+          // the room it takes above the curtain's edge, for the crewmate and the type settling above it (JourneyStage)
+          journey.pillRes = pillGap - pillDown + pillH + 18
+        } else if (k <= 0) pillGap = -1
+        pillCur = pillDown
+        const pillY = extra + pillDown
+        if (ctaEl && pillY !== lastExtra) { lastExtra = pillY; ctaEl.style.transform = pillY !== 0 ? `translateX(-50%) translate3d(0, ${pillY}px, 0)` : '' }
+
         // once the footer is fully uncovered, keep scrolling: the flat bar fills and floats you back to the surface
         // W19: the bar fills over the second half of the footer's reveal and wraps as it lands (no empty band above a half-height footer)
         // TEXTROLL: the CTA lines (GL, ctaScene) leave rolling up as the curtain lifts; the footer's lines
         // roll up into place as it is uncovered (both scroll-driven, so scrolling back reverses them)
-        journey.ctaOut = clamp(k0 / (0.32 * fh))
+        // R6.89 (Shifat Oct 23 3:43 AM "When reaching footer the [crewmate] model & [big CTA] text must not animate mask out"):
+        // the CTA lines no longer roll out; ctaOut stays 0 (ctaScene keeps reading it, so the old behaviour is one line back)
+        journey.ctaOut = 0
         // (the pill stays on screen above the footer, so its label stays: it only rolls in, never leaves an empty button)
-        btnRoll?.set(clamp((journey.cta - 0.62) / 0.34))
         footRoll(clamp((k0 - 0.08 * fh) / (0.62 * fh)))
+        // R6.89 GIFT STICKER: the surprise at the very end of the scroll (the footer fully uncovered); it gathers once each
+        // time you arrive, and is put away again when you scroll back up off the end
+        if (giftBtn.ctl) { const end = k0 >= fh - 2; if (end) giftBtn.ctl.set(true); else if (k0 < fh * 0.85) giftBtn.ctl.set(false) }
         // W19 (Shifat 19:49Z): the footer is fully in view at k0 = fh; it then HOLDS for the runway while the bar fills, and wraps at the end
         // R6.80 (Shifat Oct 22 "scroll hard to loop to top", 04:55 "Rubber band is enough"; services/loopPull.ts): the
         // footer is the page's end. Scrolling on past it only stretches the bar and it springs back; a hard, sustained
@@ -142,7 +162,7 @@ export function Contact() {
       <section id="contact" className="section contact" ref={ref} aria-labelledby="contact-title">
         <div className="sticky contact__inner">
           <div className="contact__grid">
-            <h2 className="contact__title" id="contact-title"><span className="contact__line" ref={l1}>Let’s make</span><span className="contact__line" ref={l2}>it ripple.</span></h2>
+            <h2 className="contact__title" id="contact-title"><span className="contact__line" ref={l1}>Let’s make</span><span className="contact__line" ref={l2}>it ripple</span></h2>
             <div className="contact__row">
               <div className="contact__cta">
                 <a className="big-btn" ref={btnRef} href={SITE.email ? `mailto:${SITE.email}` : SITE.x} target={SITE.email ? undefined : '_blank'} rel="noreferrer" aria-label={SITE.email ? 'Write to me' : 'Say hi on X'} data-cursor onPointerEnter={(e) => { if (e.pointerType === 'mouse') audio.tick() }}
@@ -177,6 +197,8 @@ export function Contact() {
 }
 
 const footerBar = { el: null as HTMLDivElement | null }
+/** R6.89: the gift sticker's button and its controller (dom/gift/giftSticker.ts) */
+const giftBtn = { el: null as HTMLElement | null, ctl: null as ReturnType<typeof mountGiftSticker> | null }
 /** TEXTROLL: the footer's text blocks, each rolled per line (lineRoll), staggered left to right / top to bottom */
 const footRolls: LineRoll[] = []
 let footP = -1
@@ -194,7 +216,8 @@ export function Footer() {
     const root = document.querySelector<HTMLElement>('.site-footer'); if (!root) return
     for (const el of Array.from(root.querySelectorAll<HTMLElement>('[data-roll]'))) footRolls.push(lineRoll(el, { split: el.dataset.roll !== 'whole', pad: 0.22 }))
     const p = footP; footP = -1; footRoll(Math.max(0, p))
-    return () => { footRolls.splice(0).forEach((r) => r.destroy()); footP = -1 }
+    if (giftBtn.el) giftBtn.ctl = mountGiftSticker(giftBtn.el as HTMLButtonElement)
+    return () => { footRolls.splice(0).forEach((r) => r.destroy()); footP = -1; giftBtn.ctl?.destroy(); giftBtn.ctl = null }
   }, [])
   return createPortal(
     <footer className={FOOT_MODE ? `site-footer site-footer--world site-footer--w${FOOT_MODE}` : 'site-footer'} aria-label="Footer"
@@ -210,7 +233,7 @@ export function Footer() {
         scroll.scrollTo(y, { immediate: true })
       }}>
       <div className="site-footer__top">
-        <p className="site-footer__name" data-roll="marked"><span data-roll-line=""><span className="site-footer__lockup" role="button" tabIndex={0} aria-label={SITE.name} aria-haspopup="dialog" data-cursor onDoubleClick={giftTrigger} onKeyDown={giftKey}><span className="site-footer__mark" aria-hidden="true"><Logo size="100%" /></span><span aria-hidden="true">Shifat</span></span></span><span data-roll-line=""><span>{SITE.role}.</span></span></p>
+        <p className="site-footer__name" data-roll="marked"><span data-roll-line=""><span className="site-footer__lockup"><span className="site-footer__mark" aria-hidden="true"><Logo size="100%" /></span><span aria-hidden="true">Shifat</span></span></span><span data-roll-line=""><span>{SITE.role}.</span></span></p>
         <nav className="site-footer__links" aria-label="Elsewhere" data-roll="marked">
           <a href={SITE.github} target="_blank" rel="noreferrer" aria-label="GitHub" data-cursor data-roll-line="inline"><GithubLogo size={16} /> GitHub</a>
           <a href={SITE.x} target="_blank" rel="noreferrer" aria-label="X / Twitter" data-cursor data-roll-line="inline"><XLogo size={16} /> X / Twitter</a>
@@ -221,5 +244,7 @@ export function Footer() {
         <span data-roll-line="inline">© <Odometer value={new Date().getFullYear()} digits={4} /> {SITE.name}. Surface Tension.</span>
         {/* R6.81 (Shifat Oct 22 05:12/05:18, option A for both sites): the "Back to the surface" text link is gone; the rubber band is the way back */}
       </div>
+      {/* R6.89 GIFT STICKER: gathers out of hot-pink embers at the very end of the scroll; opens the gift scene */}
+      <button type="button" className="gift-sticker" aria-label="Open gift" aria-haspopup="dialog" data-cursor ref={(e) => { giftBtn.el = e }} />
     </footer>, document.body)
 }

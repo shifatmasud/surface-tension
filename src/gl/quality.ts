@@ -122,7 +122,10 @@ export const LOW_END_GPU = /Adreno \(TM\) (3\d\d|4\d\d|50\d)\b|Mali-(4\d\d|T[678
 export const SPLIT = settings.USE_GL && !q.has('nosplit')
 const LOW_BG_CAP = 0.75
 const BG_FLOOR = SPLIT && LOW_END_GPU ? 0.5 : 0.6
-const PHONE_HERO_DPR = 1.5  // Shifat 3:15 AM Oct 23: "In phone make it 1.5 for hero. 2 is too much"
+const PHONE_HERO_DPR = 1  // R6.89 (Shifat 4:09 AM Oct 23): phone heroes at 1.0 (was 1.5 since 3:15 AM; 2 before)
+/** R6.89 (Shifat 4:10 AM Oct 23 "keep the TEXT at 1.5 while heroes go to 1.0"): the phone canvas (the GPU text layer) has
+ *  its own density now; the hero pass renders into its own target at PHONE_HERO_DPR and is composited up onto it */
+const PHONE_TEXT_DPR = 1.5
 
 /** PERFGOV: set bits in a small history mask */
 function bits(x: number) { let n = 0; while (x) { n += x & 1; x >>>= 1 } return n }
@@ -199,7 +202,7 @@ class Quality {
   textDprFor(w: number, h: number, noRest = false) {
     const n = this.nativeFor(w, h)
     if (tier !== 'low') return n
-    if (SPLIT) return this.heroDprFor(w, h) // R6.87: the canvas (text included) runs at the hero density
+    if (SPLIT) return Math.min(n, PHONE_TEXT_DPR) // R6.89: the canvas (the text) at 1.5 on phones; the heroes at their own density
     if (this.rest && !noRest) return this.textCeil(w, h)
     // W27 R6.65: the text rung drops to 1.5x from level 1 on (the same absolute level as before the ladder grew: it was
     // "the last two of three"), and NEVER lower — the new 0.85 / 0.72 / 0.6 scene steps keep the text at 1.5x, so

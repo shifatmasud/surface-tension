@@ -79,7 +79,9 @@ const FILL = new THREE.ShaderMaterial({
  * paint's behaviour is resolution-dependent (push and curl are in texels, the brush velocity in paint px), so the paint
  * keeps the reference's own size, independent of the render DPR, and a DPR change never resets it. */
 function referenceRenderSize(vw: number, vh: number) {
-  const dpr = Math.min(1.5, window.devicePixelRatio || 1) || 1
+  // R6.89 (Shifat Oct 23 4:13 AM "Cursor trail dpr should be 1 too"): on phones the trail's own field is sized at 1.0x
+  // (was the reference's 1.5x); its shaders, look and motion are untouched. Desktop keeps the reference's 1.5x.
+  const dpr = Math.min(settings.TIER === 'low' ? 1 : 1.5, window.devicePixelRatio || 1) || 1
   let w = vw * dpr, h = vh * dpr
   const MAX = 2560 * 1440
   if (w * h > MAX) { const a = w / h; h = Math.sqrt(MAX / a); w = Math.ceil(h * a); h = Math.ceil(h) }

@@ -26,6 +26,43 @@ const sinkK = (p: number) => { const t = clamp((p - 0.04) / 0.38); return t * t 
 const invSS = (y: number) => { let lo = 0, hi = 1; for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (m * m * (3 - 2 * m) < y) lo = m; else hi = m } return (lo + hi) / 2 }
 /** the systems progress where the glass's picture starts converging on the journey's frame (TabletWindow: h = ss(0.8, 1, k),
  *  k = ss(PORTAL0, 1, push), push = ss(0.56, 1, sys)) — GLIDE_PRE runs from here to the switch */
+/**
+ * R6.89 SCROLL BUDGET (Shifat Oct 23 3:43 AM: "Shade ds … need more scroll zone. The ds section feels too fast" and "Crewmate
+ * tablet in ocean should need more scroll to reach. Its too fast"; both +50 %, confirmed 3:46 AM). Every phase of the
+ * systems section was tuned on R6.88d's 310vh section, so the section's scroll is warped back onto those 310vh:
+ *   - the section arriving (the first 0.93 screens): 1:1, unchanged;
+ *   - the Shade DS ring (sys 0 → 0.56) and the parts' dissolve + the sink to the tablet waiting in the deep (push 0 → 0.42):
+ *     1.5× the scroll (the speed eases 1 → 2/3 → 1 over 0.2 screens at each end, so no step in pace is felt);
+ *   - the diamond behind the tablet and the zero-cut portal push (push 0.42 → 1): 1:1, the same scroll as R6.88d.
+ * x: px from the section's top entering the bottom of the screen; H: the section's height; vh: the screen height.
+ * Returns R6.88d's rawS (0..1). Reduced motion (an unpinned 100vh section) keeps the plain fraction.
+ */
+const SYS_OLD_VH = 3.1                                  // R6.88d: 310vh
+const W_X0 = 0.93, W_X1 = 0.93 + 0.7 * SYS_OLD_VH * (0.56 + 0.44 * 0.4466)   // old vh units: the ring starts / the tablet is reached (push 0.42)
+const W_R = 0.2                                         // the speed's ease at each end (screens of new scroll)
+function sysWarp(x: number, H: number, vh: number) {
+  const hn = H / Math.max(1, vh)
+  if (hn < 1.5) return clamp(x / Math.max(1, H))
+  const xn = clamp(x / Math.max(1, vh), 0, hn)
+  // slow factor K, solved so the whole section maps exactly onto the old 310vh: hn = W_X0 + K (W_X1 - W_X0) + (3.1 - W_X1)
+  const K = Math.max(1, (hn - W_X0 - (SYS_OLD_VH - W_X1)) / (W_X1 - W_X0))
+  const b1 = W_X0, b2 = W_X0 + K * (W_X1 - W_X0)          // the boundaries in new units (the ideal piecewise map)
+  // the piecewise-linear map, with each corner rounded by a speed ramp centred on it (a centred ramp leaves the map exact
+  // outside it: the integral of the ramp equals the two straight halves)
+  const v = 1 / K
+  const seg = (a: number) => (a <= b1 ? a : a <= b2 ? b1 + (a - b1) * v : W_X1 + (a - b2))
+  const corner = (a: number, c: number, v0: number, v1: number) => {
+    // inside [c - R/2, c + R/2] the speed eases v0 → v1 (smoothstep); returns the correction to the straight map
+    const h = W_R / 2, t = clamp((a - (c - h)) / W_R)
+    if (t <= 0 || t >= 1) return 0
+    const S = (u: number) => u * u * u - 0.5 * u * u * u * u   // ∫ smoothstep = u³ − u⁴/2
+    const smooth = (v0 * t + (v1 - v0) * S(t)) * W_R            // distance covered by the ramp so far
+    const straight = a <= c ? v0 * (a - (c - h)) : v0 * h + v1 * (a - c)
+    return smooth - straight
+  }
+  const xo = seg(xn) + corner(xn, b1, 1, v) + corner(xn, b2, v, 1)
+  return clamp(xo / SYS_OLD_VH)
+}
 const SYS_H = 0.56 + 0.44 * invSS(PORTAL0 + (1 - PORTAL0) * invSS(0.8))
 const RM = browser.reducedMotion
 /** QA: the scroll position at which the dive reaches progress u (0 … U_LAB, the dive section only) */
@@ -145,7 +182,7 @@ export function Dive() {
         const rawL = lab ? clamp((props.scroll - lab.docTop + props.height) / Math.max(1, lab.height)) : 0
         // v3 (Shifat 11:56Z): the Systems section is the same water, deeper — the dive runs on through it (u 1 → U_MAX)
         const sysR = sections.list.find((x) => x.name === 'systems')?.range
-        const rawS = sysR ? clamp((props.scroll - sysR.docTop + props.height) / Math.max(1, sysR.height)) : 0
+        const rawS = sysR ? sysWarp(props.scroll - sysR.docTop + props.height, sysR.height, props.height) : 0
         dive.u = rawS > 0 ? U_END + (U_MAX - U_END) * rawS : rawL > 0 ? U_LAB + (U_END - U_LAB) * rawL : raw * U_LAB
         dive.sys = clamp((rawS - 0.3) / 0.7)
         dive.push = ss(0.56, 1.0, dive.sys) // POLISH-2: starts as the parts finish forming (morph ends at 0.56), so the tablet's approach gets more scroll
@@ -156,15 +193,19 @@ export function Dive() {
         // R6.88b (Shifat 10:41 PM: the tablet waits in the deep): the parts dissolve into falling points (0 → 0.3); the
         // camera sinks SINK_M through darkening water to the tablet waiting there (0.04 → 0.42); the diamond comes down to
         // dead centre behind it (0.3 → 0.48) and dissolves the same way (0.46 → 0.68); then the portal push (PORTAL0 → 1)
-        dive.dis = ss(0.0, 0.3, dive.push)
+        dive.dis = ss(0.0, 0.38, dive.push)   // R6.89 GENTLE: the parts' dissolve runs on through the descent (was 0 → 0.3)
         dive.sink = dive.camSink = SINK_M * sinkK(dive.push)
-        dive.gemC = ss(0.3, 0.48, dive.push)
+        // R6.89 (Shifat 5:25 AM "The diamonds can stay at shade ds section & stop moving onwards"): the diamond stays parked
+        // in the Shade DS section; it no longer comes down behind the tablet nor dissolves there (the camera sinks away from it)
+        dive.gemC = 0
         dive.lock = ss(PORTAL0 - 0.06, PORTAL0 + 0.1, dive.push) // the lens leaves its springs as the portal begins (CameraRig)
-        dive.gemDis = clamp((dive.push - 0.46) / 0.22)
+        dive.gemDis = 0   // R6.89: parked (see gemC)
         // R6.88 PORTAL: the glide into the sky starts inside the glass as it converges (the push where the display's picture
         // starts converging on the journey's frame, TabletWindow h > 0), linear in scroll (spaceSky.ts GLIDE_PRE)
         GLIDE_PRE.t = clamp((dive.sys - SYS_H) / (1 - SYS_H))
-        if (sysR) GLIDE_PRE.span = (1 - SYS_H) * 0.7 * sysR.height / Math.max(1, props.height)
+        // R6.89: the portal's stretch keeps its R6.88d scroll length (sysWarp's last segment runs 1:1), so the span is read off
+        // that section height, not the longer one
+        if (sysR) GLIDE_PRE.span = (1 - SYS_H) * 0.7 * (sysR.height > props.height * 1.5 ? SYS_OLD_VH * props.height : sysR.height) / Math.max(1, props.height)
         dive.abyss = ss(0.96, 1.2, dive.u)
         { const base = 1 + 0.7 * ss(1.02, 1.2, dive.u), c = dive.gemC * dive.gemC * (3 - 2 * dive.gemC)
           dive.gemScale = base + (Math.max(base, dive.gemBig) - base) * c } // R6.88: larger behind the tablet, so it shows around it

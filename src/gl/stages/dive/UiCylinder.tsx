@@ -16,6 +16,7 @@ import { gemRef } from '../hero/HeroStage'
 import { prewarm, runToEnd } from '../../prewarm' // PERFGOV
 import { pmremFromSceneSteps } from '../../core/pmremSteps' // R6.77
 import { crewGeometrySteps } from '../journey/crewmate' // PERFGOV
+import { heroPass } from '../../post/heroPass' // R6.89: the tablet is a hero subject
 import { TabletWindow, IPAD_GLASS, IPAD_T, WIN_HW, WIN_HH } from '../journey/tabletWindow'; import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js' // TABLET HOOK: the live 3D window (journey/tabletWindow.ts)
 /** QA: ?atom holds the sequence at the atom, ?drum at the drum; window.__morph (0..1) pins it */
 const KEEP_EYE = new THREE.Vector3(0, 0, -1e3), KEEP_F = new THREE.Vector3(0, 0, 1), KEEP_V = new THREE.Vector3() // POLISH-2: the main lens, for the ring's keep-out
@@ -78,7 +79,7 @@ function deepFogPatch(m: THREE.Material, u: Record<string, THREE.IUniform>, dis 
       gl_FragColor.rgb = mix(gl_FragColor.rgb, deepWaterC(dv / dd) * gl_FragColor.a, deepFogC(dd) * u_amb * PART_FOG);
     }` + (dis ? `
     if (u_disK > 0.0) {
-      float disR = disRaw(u_disK, disFUi((u_toDrum * vec4(vDW, 1.0)).xyz));
+      float disR = disRawUi(u_disK, disFUi((u_toDrum * vec4(vDW, 1.0)).xyz));
       if (disR >= 0.0) discard;
       gl_FragColor.rgb += disEmber(disR) * gl_FragColor.a;
     }` : ''))
@@ -429,7 +430,7 @@ function* buildCylSteps(gl: THREE.WebGLRenderer, u: Record<string, THREE.IUnifor
   const glow = new Map<THREE.Material, THREE.Color>([[M.black, new THREE.Color(0.42, 0.5, 0.6)], [M.white, new THREE.Color(1.05, 1.08, 1.12)], [M.silver, new THREE.Color(0.8, 0.88, 1.0)], [M.glass, new THREE.Color(0.55, 0.9, 1.0)]])
   const srcs: DisSource[] = []
   items.forEach((it, i) => it.g.children.forEach((c) => { const mm = c as THREE.Mesh; const col = mm.isMesh ? glow.get(mm.material as THREE.Material) : undefined; if (col) { mm.updateMatrix(); srcs.push({ geo: mm.geometry, matrix: mm.matrix.clone(), part: i, color: col }) } }))
-  const disUi = new Disintegrate(srcs, DIS_COUNTS.ui, { seed: 11, size: 0.022, grav: 2.6, spread: 0.55 })
+  const disUi = new Disintegrate(srcs, DIS_COUNTS.ui, { seed: 11, size: 0.022, grav: 1.5, spread: 0.5 }) // R6.89 GENTLE: a softer fall (was grav 2.6, spread 0.55)
   yield
   const gemGeo = brilliantGeometry(1)
   const disGem = new Disintegrate([{ geo: gemGeo, matrix: new THREE.Matrix4(), part: 0, color: new THREE.Color(0.42, 0.66, 1.45) }], DIS_COUNTS.gem, { gem: true, seed: 5, size: 0.034, grav: 1.4, spread: 1.6 })
@@ -493,6 +494,11 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
   const st = useMemo(() => built.items.map(() => ({ h: 0, press: 0, turn: 0, turnT: 0 })), [built])
   const kbState = useRef({ off: 0, map: null as null | Record<string, number>, focused: false, on: null as null | boolean, presses: 0, token: 0, level: 0 }) // W20 keyboard proxies
   useEffect(() => { built.items.forEach((it, i) => it.g.traverse((o) => { o.userData.part = i })) }, [built])
+  // R6.89 (Shifat Oct 23 3:56 AM "treat tab dpr same as hero too"): the tablet's body (the slab, its edge and buttons) and its
+  // small dark details are hero subjects, drawn at the hero density (1.5 on phones, native on desktop) like the stone and
+  // the crewmate; the glass has its own hero twin (TabletWindow). Depth-tested against the scene, so the diamond behind it
+  // and the parts' points around it keep their order.
+  useEffect(() => { const a = heroPass.add(built.tablet.children[0]), b = heroPass.add(built.tablet.children[2]); return () => { a(); b() } }, [built])
   const cursorHover = (on: boolean) => {
     document.querySelector('.cursor')?.classList.toggle('is-hover', on)
     document.documentElement.style.cursor = on ? 'pointer' : ''
@@ -548,6 +554,10 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
       tb.rotation.set(Math.sin(tt * 0.7) * 0.02 * bob, Math.PI + Math.sin(tt * 0.5) * 0.025 * bob, (up ? Math.PI / 2 : 0) + Math.sin(tt * 0.6) * 0.012 * bob)
       tu.u_time.value = props.time; tu.u_portrait.value = props.height > props.width * 1.05 ? 1 : 0; tu.u_fill.value = ss(PORTAL0, 1.0, dive.push); tu.u_on.value = ss(0.2, 0.42, dive.push); tu.u_sweep.value = -0.6 + 2.4 * ss(0.35, 0.65, dive.push)
       ;(tb.userData.tw as TabletWindow | undefined)?.update(state.camera, dive.push) // TABLET HOOK: render the 3D picture through the glass from this pass's camera
+      // R6.89: the slab and its details are heroes (drawn after the scene, depth-tested against it). Once the glass owns the
+      // frame (the hand-off: drawn last with no depth test, so it writes no depth) nothing of the slab can show anyway, and
+      // the hero pass must not draw the slab's metal over it
+      { const own = ((tb.userData.tw as TabletWindow | undefined)?.handoff.h ?? 0) > 0.9; tb.children[0].visible = tb.children[2].visible = !own }
     }
     const t = props.time, dt = Math.min(props.dt, 0.05)
     s.rotation.y = t * 0.035 + dive.sys * 1.9 + kbState.current.off + DRUM_OFF // W20: + the keyboard turn (a focused part comes to the front)
@@ -561,11 +571,19 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
     // they settle and the particles dissolve; it ends as the drum. Scroll-driven, so scrolling up runs it backward.
     const qm = (window as any).__morph
     // W19 (Shifat 19:3xZ: the particle → 3D UI formation was right in R4): POLISH's "no appear" freeze at morph = 1 reverted
-    const morph = typeof qm === 'number' ? qm : HOLD >= 0 ? HOLD : ss(0.06, 0.56, dive.sys)
+    const morphIn = typeof qm === 'number' ? qm : HOLD >= 0 ? HOLD : ss(0.06, 0.56, dive.sys)
+    // R6.89 (Shifat Oct 23 4:38 AM "Shade DS scene UI particle morph out must have same look & feel of particles to UI morph
+    // in"): the morph-OUT is the morph-IN played backward — the same beads, sim, stagger and arcs — tied to the push's
+    // dissolve scroll (dive.dis, the gentler +50% stretch of item 4). The parts' real materials fade back into the beads as
+    // they lift off the faces and stream back onto the atom's orbits; the separate disintegrate look is the diamond's alone
+    const outK = typeof qm === 'number' ? 0 : dive.dis
+    const morph = morphIn * (1 - outK)
     const pf = ss(0.62, 0.96, morph)
     const atom = built.atom
-    atom.points.visible = pf < 0.995
-    if (atom.points.visible) atom.mat.uniforms.u_on.value = 1 - pf
+    // after the morph-out the beads are back on their orbits; they thin out as the camera sinks on toward the tablet
+    const beadsGone = outK > 0 ? ss(0.4, 0.56, dive.push) : 0
+    atom.points.visible = pf < 0.995 && beadsGone < 0.999
+    if (atom.points.visible) atom.mat.uniforms.u_on.value = (1 - pf) * (1 - beadsGone)
     // R6.88 (Shifat 10:31–10:32 PM: the stone INSIDE the atom): the beads write depth while they are solid, so the near
     // ones hide the sharp stone where they pass in front of it (the hero pass depth-tests against the scene's depth)
     { const dw = 1 - pf > 0.6; if (atom.mat.depthWrite !== dw) atom.mat.depthWrite = dw }
@@ -575,18 +593,18 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
     // R6.88 SINK (Shifat 10:05 PM: "Ui fall as particle morphed disintegration"): no opacity fade on the push any more —
     // the parts are eaten by the dissolve front and fall away as points (disintegrate.ts); gone by dive.dis = 1
     const fv = pf
-    s.visible = fv > 0.002 && dive.dis < 0.9995
+    s.visible = fv > 0.002
     if (Math.abs(fv - built.fade.v) > 1e-3) { built.fade.v = fv; for (const f of built.fades) f.m.opacity = f.base * fv }
     atom.mat.uniforms.u_amb.value = dive.abyss
     // R6.88 SINK: the dissolve's uniforms. The front lives in DRUM space (the spin group's frame, the ring's breath taken
     // out), so it stays on the parts as they turn; the points read the same frame, so a fragment and its points agree
     {
       const du = built.disUi, dg = built.disGem
-      DIS_U.u_disK.value = dive.dis
+      DIS_U.u_disK.value = 0   // R6.89: the parts no longer take the dissolve front (they morph back into the atom's beads)
       const pxs = (props.height * props.dpr) / (2 * Math.tan((((state.camera as THREE.PerspectiveCamera).fov ?? 40) * Math.PI) / 360))
-      du.set(dive.dis, pxs, t); dg.set(dive.gemDis, pxs, t)
+      du.set(0, pxs, t); dg.set(dive.gemDis, pxs, t)
       du.mat.uniforms.u_amb.value = dive.abyss
-      if (dive.dis > 0 && dive.dis < 1) {
+      if (false && dive.dis > 0 && dive.dis < 1) {   // R6.89: the parts' disintegrate is off (see outK)
         s.updateMatrix(); r.updateMatrixWorld()
         DIS_SCL.makeScale(1 / ringK, 1, 1 / ringK)
         DIS_TOF.copy(s.matrix).invert().premultiply(DIS_SCL)              // root → drum
@@ -746,7 +764,9 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
         if (sys.level !== kb.level && M.slider !== undefined) { kb.level = sys.level; (built.items[M.slider].g.userData.act as any).vT = Math.min(0.95, Math.max(0.05, sys.level)) }
       }
     }
-    if (atom.points.visible) {
+    // R6.89: the sim keeps stepping while the drum stands formed (beads invisible), so the morph-out starts from beads that
+    // sit on the parts' faces as they are now, not where the drum was when the morph-in ended
+    if (atom.points.visible || (morph > 0.5 && s.visible)) {
       // the morph targets follow the drum as it turns (part matrices in the atom's space = the root's)
       s.updateMatrix()
       const PM = atom.partMatrices
@@ -754,7 +774,7 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
       // a bead keeps one world size on every screen: device px per metre at 1 m = buffer height / (2 tan(vfov / 2))
       const vf = (state.camera as THREE.PerspectiveCamera).fov ?? 40
       const px = 0.034 * (props.height * props.dpr) / (2 * Math.tan((vf * Math.PI) / 360))
-      if (!nb.active) atom.step(t, props.dt, pw * (1 - morph), px, morph)
+      if (!nb.active) atom.step(t, props.dt, outK > 0 ? 0 : pw * (1 - morph), px, morph)   // R6.89: the morph-out keeps the morph-in's orbits (the mirror)
     }
   }, root)
 

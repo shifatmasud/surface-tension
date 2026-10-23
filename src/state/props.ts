@@ -29,6 +29,8 @@ export const props = {
   /** Shifat 14:01Z: the canvas runs at the device's own density (cap 3) for the text layer; the 3D scene and the post
    *  chain render at `dpr` (the governor's 0.75–1.25 ladder) and are upscaled once in the final pass */
   textDpr: 1,
+  /** R6.89: the hero pass's density (post/heroPass.ts): phones 1.0, desktop native; never above textDpr */
+  heroDpr: 1,
   useMobileLayout: window.innerWidth <= 812,
   // scroll (Lenis is the source)
   paintDpr: 1,

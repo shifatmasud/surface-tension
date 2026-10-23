@@ -158,6 +158,8 @@ export class FooterWorldEffect extends Effect {
     return ((cy * t + by) * t + ay) * t
   }
   private vel = 0
+  private kd = -1
+  private footEl: HTMLElement | null = null
   update(_r: THREE.WebGLRenderer, _i: THREE.WebGLRenderTarget, dt = 0.016) {
     const u = this.uniforms
     const h = Math.max(1, props.height)
@@ -168,6 +170,14 @@ export class FooterWorldEffect extends Effect {
     const v = Math.min(1, Math.abs(props.scrollDelta || 0) / 40)
     this.vel += (v - this.vel) * Math.min(1, dt * 4)
     u.get('u_fvel')!.value = this.reduced ? 0 : this.vel
+    // R6.89 (Shifat 5:25 AM "reveal footer … the CTA and footer must never overlap or paint over each other"): the curtain's
+    // lower edge is the sloshing water line, which dips below the straight line the footer's DOM is uncovered by; the DOM is
+    // uncovered that much later (--kd: the line's deepest dip right now), so none of its text ever paints over the page
+    {
+      const fk = Math.max(0, journey.lift || 0) / h, s = Math.min(1, fk / 0.06), sm = s * s * (3 - 2 * s)
+      const kd = FOOT_MODE === 2 ? Math.ceil(0.019 * (0.9 + 1.6 * (this.reduced ? 0 : this.vel)) * sm * h) + 1 : 0
+      if (kd !== this.kd) { this.kd = kd; (this.footEl ??= document.querySelector<HTMLElement>('.site-footer'))?.style.setProperty('--kd', `${kd}px`) }
+    }
     // the glow bar: rect + fill
     if ((journey.lift || 0) > 0 && this.barDirty) this.measureBar()
     const f = Math.min(1, Math.max(0, props.overscroll || 0))

@@ -27,6 +27,10 @@ float disN(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
              mix(mix(disH(i + vec3(0,0,1)), disH(i + vec3(1,0,1)), f.x), mix(disH(i + vec3(0,1,1)), disH(i + vec3(1,1,1)), f.x), f.y), f.z); }
 /** < 0: still solid (-0.07..0 = the ember line), >= 0: gone, its points are out (0..1 their life) */
 float disRaw(float k, float f){ return (k * 1.06 - 0.06 - 0.6 * f) / 0.4; }
+/** R6.89 (Shifat Oct 23 3:43 AM "Shade ds 3d ui pieces need gentle particle morph out. Now they are too fast"): the Shade DS
+ *  parts' own front. Each fragment lives longer (0.45 of the range, was 0.38) and the front still sweeps the whole part
+ *  set from k 0 to 1; the mesh (UiCylinder) and its points read this same function, so nothing pops between the two */
+float disRawUi(float k, float f){ return (k * 1.1 - 0.1 - 0.5 * f) / 0.5; }
 /** the Shade DS drum: a noise front sweeping top → bottom (drum space: y up, rows at +1.3 / 0 / -1.3) */
 float disFUi(vec3 q){ return clamp(0.62 * disN(q * 1.7 + 3.1) + 0.38 * clamp(0.5 - q.y / 3.4, 0.0, 1.0), 0.0, 1.0); }
 /** the diamond (object space, radius 1): noise, crown first */
@@ -55,17 +59,35 @@ void main(){
 #else
   float f = disFUi((u_toF * vec4(p0, 1.0)).xyz);
 #endif
+#ifdef GEM
   float raw = disRaw(u_k, f);
+#else
+  float raw = disRawUi(u_k, f);
+#endif
   float e = clamp(raw, 0.0, 1.0);
   // drift: out off the surface, a random turn, a slow underwater swirl, then the fall (world down)
   vec3 rd = normalize(aR.xyz * 2.0 - 1.0 + vec3(1e-3));
+#ifdef GEM
   float out1 = (1.0 - exp(-3.2 * e)) * u_spread * (0.35 + 0.9 * aR.w);
   vec3 p = p0 + (n * 0.55 + rd * 0.75) * out1;
   p += vec3(sin(u_time * 0.7 + aR.x * 40.0), cos(u_time * 0.6 + aR.y * 40.0), sin(u_time * 0.5 + aR.z * 40.0)) * 0.12 * e;
   p.y -= u_grav * e * e * (0.55 + 0.9 * aR.y);
+#else
+  // R6.89 GENTLE: the parts' points drift rather than burst. The push off the surface eases out over the whole life (was
+  // ~90 % spent in the first third), the underwater swirl is a little wider and slower, and the fall is a soft settle
+  // (e^2.4, lower gravity) instead of a drop
+  float out1 = (1.0 - exp(-1.4 * e)) / (1.0 - exp(-1.4)) * u_spread * (0.35 + 0.9 * aR.w);
+  vec3 p = p0 + (n * 0.5 + rd * 0.7) * out1;
+  p += vec3(sin(u_time * 0.45 + aR.x * 40.0), cos(u_time * 0.4 + aR.y * 40.0), sin(u_time * 0.35 + aR.z * 40.0)) * 0.16 * e;
+  p.y -= u_grav * pow(e, 2.4) * (0.55 + 0.9 * aR.y);
+#endif
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
   float born = smoothstep(0.0, 0.05, raw);
+#ifdef GEM
   vA = born * (1.0 - smoothstep(0.45, 1.0, e)) * step(raw, 1.0);
+#else
+  vA = born * (1.0 - smoothstep(0.3, 1.0, e)) * step(raw, 1.0);   // R6.89: a long, soft fade
+#endif
   // the colour cools from the ember lime to the part's own light as it drifts
   vC = mix(vec3(0.64, 1.0, 0.07) * 1.8, aC, smoothstep(0.0, 0.3, e)) * (1.0 + 0.6 * smoothstep(0.93, 1.0, aR.w) * sin(u_time * 9.0 + aR.x * 60.0));
   gl_PointSize = vA > 0.002 ? max(1.0, u_px * u_size * (0.55 + 0.9 * aR.z) * (1.0 - 0.35 * e) / max(0.3, -mv.z)) : 0.0;
