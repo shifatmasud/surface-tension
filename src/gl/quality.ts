@@ -122,7 +122,7 @@ export const LOW_END_GPU = /Adreno \(TM\) (3\d\d|4\d\d|50\d)\b|Mali-(4\d\d|T[678
 export const SPLIT = settings.USE_GL && !q.has('nosplit')
 const LOW_BG_CAP = 0.75
 const BG_FLOOR = SPLIT && LOW_END_GPU ? 0.5 : 0.6
-const PHONE_HERO_DPR = 2
+const PHONE_HERO_DPR = 1.5  // Shifat 3:15 AM Oct 23: "In phone make it 1.5 for hero. 2 is too much"
 
 /** PERFGOV: set bits in a small history mask */
 function bits(x: number) { let n = 0; while (x) { n += x & 1; x >>>= 1 } return n }
