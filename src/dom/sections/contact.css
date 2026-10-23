@@ -151,10 +151,12 @@ html[data-bg='dark'] .contact .big-btn:focus-visible { outline-color: #fafafa; }
    of the scroll and opens the gift. The button is the sticker's own square (the hit area); its canvas overhangs it for the
    embers. Hidden (and out of the tab order) until it has gathered; the footer's clip hides it with the rest. */
 .gift-sticker { position: absolute; right: calc(var(--pad-x) + 4px); bottom: calc(var(--s6, 48px) + 64px); width: 92px; height: 92px; padding: 0; margin: 0; border: 0; border-radius: 26px;
-  background: transparent; cursor: pointer; visibility: hidden; -webkit-tap-highlight-color: transparent; z-index: 2; transition: transform .5s var(--ease); }
+  background: transparent; cursor: grab; visibility: hidden; -webkit-tap-highlight-color: transparent; z-index: 2;
+  touch-action: pinch-zoom; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; transform-origin: 50% 50%; }   /* R6.91: peel + drag like the wall's stickers (giftSticker.ts drives the transform) */
+.gift-sticker:active { cursor: grabbing; }
+.gift-sticker.is-gone { visibility: hidden; pointer-events: none; }   /* R6.91: peeled off (it gathers again) */
 .gift-sticker.is-on { visibility: visible; }
 .gift-sticker__cv { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; }
-@media (hover: hover) { .gift-sticker.is-on:hover { transform: translateY(-3px) rotate(-2deg) scale(1.04); } }
 .gift-sticker:focus { outline: none; }
 .gift-sticker:focus-visible { outline: 2px solid #ff2e93; outline-offset: 6px; }   /* R6.89: the sticker's own hot pink */
 @media (max-width: 760px) { .gift-sticker { width: 76px; height: 76px; border-radius: 22px; right: calc(var(--pad-x) + 2px); bottom: calc(var(--s5, 32px) + 96px); } }
