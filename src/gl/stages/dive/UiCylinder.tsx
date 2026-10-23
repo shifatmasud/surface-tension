@@ -2,19 +2,24 @@ import * as THREE from 'three'
 import { useEffect, useMemo, useRef } from 'react'
 import { useThree } from '@react-three/fiber'
 import { props } from '../../../state/props'
+import { browser } from '../../../services/settings'
 import { portrait } from '../../../core/frame'
 import { nb, useStageFrame } from '../../systems/neighbour' // NEIGHBOUR HOOK
 import { input } from '../../../services/input'
 import { SYSUI_LAYER } from '../hero/HeroStage'
-import { dive, SYS_C, TAB_F, sysLift } from './diveState'
+import { dive, SYS_C, TAB_F, sysLift, DIVE_LAYER, TAB_DEEP, PORTAL0, tabletUpright } from './diveState'
 import { sys, type ControlId } from '../systems/state' // W20: the Shade DS keyboard proxies (dom/sections/Systems.tsx)
 import { AtomField } from './Atom'
+import { Disintegrate, DIS_COUNTS, DIS_GLSL, type DisSource } from './disintegrate' // R6.88 SINK: one particle-morph for the parts and the diamond
+import { brilliantGeometry } from '../hero/diamond'
+import { gemRef } from '../hero/HeroStage'
 import { prewarm, runToEnd } from '../../prewarm' // PERFGOV
 import { pmremFromSceneSteps } from '../../core/pmremSteps' // R6.77
 import { crewGeometrySteps } from '../journey/crewmate' // PERFGOV
-import { TabletWindow, IPAD_GLASS, IPAD_T, WIN_HW, WIN_HH } from '../journey/tabletWindow'; import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'; import { tabletPose } from '../../world/handoff' // TABLET HOOK: the live 3D window (journey/tabletWindow.ts) + the tablet's pose (world/handoff.ts)
+import { TabletWindow, IPAD_GLASS, IPAD_T, WIN_HW, WIN_HH } from '../journey/tabletWindow'; import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js' // TABLET HOOK: the live 3D window (journey/tabletWindow.ts)
 /** QA: ?atom holds the sequence at the atom, ?drum at the drum; window.__morph (0..1) pins it */
 const KEEP_EYE = new THREE.Vector3(0, 0, -1e3), KEEP_F = new THREE.Vector3(0, 0, 1), KEEP_V = new THREE.Vector3() // POLISH-2: the main lens, for the ring's keep-out
+const DIS_SCL = new THREE.Matrix4(), DIS_TOF = new THREE.Matrix4() // R6.88 SINK scratch
 const STONE_D = new THREE.Vector3() // W20: the eye→stone direction (phones' stone keep-out)
 const BAND_P = new THREE.Vector3() // W21: a part's world point, for the wide-screen text band keep-out
 let BAND_TOP = 0, BAND_AT = 0
@@ -35,6 +40,9 @@ const QS = typeof location !== 'undefined' ? location.search : ''
 // QA: ?drumlift=<m> tries another phone drum lift
 const DRUM_LIFT = (() => { const m = /[?&]drumlift=([\d.]+)/.exec(QS); return m ? +m[1] : 0 })()
 const HOLD = /[?&]atom/.test(QS) ? 0 : /[?&]drum/.test(QS) ? 1 : -1
+// QA (R6.88): ?drumoff=<rad> turns the drum by a fixed angle, to put a chosen part in front of the stone
+const ORBIT_TILT = 0.6
+const DRUM_OFF = (() => { const m = /[?&]drumoff=(-?[\d.]+)/.exec(QS); return m ? +m[1] : 0 })()
 
 /**
  * v3 Systems (Shifat 11:41Z–12:00Z): the stone at the axis of a vertical CYLINDER of solid 3D Shade DS parts —
@@ -47,29 +55,38 @@ const HOLD = /[?&]atom/.test(QS) ? 0 : /[?&]drum/.test(QS) ? 1 : -1
  * Same pieces on every tier.
  */
 const FOG_GLSL = /* glsl */ `
-uniform float u_amb, u_abyss;
+uniform float u_amb, u_abyss, u_sinkK;
 varying vec3 vDW;
 vec3 deepWaterC(vec3 dir){
   float up = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
   vec3 c = mix(vec3(0.002, 0.012, 0.028), vec3(0.008, 0.055, 0.105), smoothstep(0.0, 0.55, up));
   c = mix(c, vec3(0.030, 0.150, 0.230), smoothstep(0.5, 1.0, up));
   c += vec3(0.020, 0.110, 0.150) * pow(up, 6.0);
-  return c * (1.0 - 0.3 * u_abyss);
+  return c * (1.0 - 0.3 * u_abyss) * (1.0 - 0.72 * u_sinkK);
 }
 float deepFogC(float dist){ float d = mix(0.028, 0.052, u_abyss) * dist; return 1.0 - exp(-d * d); }
 `
-function deepFogPatch(m: THREE.Material, u: Record<string, THREE.IUniform>) {
+/** R6.88 SINK: the parts' dissolve (disintegrate.ts): k 0..1 and world → drum space (the front sweeps the drum, not the screen) */
+export const DIS_U = { u_disK: { value: 0 }, u_toDrum: { value: new THREE.Matrix4() } }
+function deepFogPatch(m: THREE.Material, u: Record<string, THREE.IUniform>, dis = true) {
   m.onBeforeCompile = (sh) => {
-    sh.uniforms.u_amb = u.u_amb; sh.uniforms.u_abyss = u.u_abyss
+    sh.uniforms.u_amb = u.u_amb; sh.uniforms.u_abyss = u.u_abyss; sh.uniforms.u_sinkK = u.u_sinkK
+    if (dis) { sh.uniforms.u_disK = DIS_U.u_disK; sh.uniforms.u_toDrum = DIS_U.u_toDrum }
     sh.vertexShader = 'varying vec3 vDW;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n  vDW = (modelMatrix * vec4(transformed, 1.0)).xyz;')
-    sh.fragmentShader = '#define PART_FOG 0.6\n' + FOG_GLSL + sh.fragmentShader.replace('#include <fog_fragment>', `{
+    sh.fragmentShader = '#define PART_FOG 0.6\n' + FOG_GLSL + (dis ? 'uniform float u_disK; uniform mat4 u_toDrum;\n' + DIS_GLSL : '') + sh.fragmentShader.replace('#include <fog_fragment>', `{
       vec3 dv = vDW - cameraPosition; float dd = length(dv);
       gl_FragColor.rgb = mix(gl_FragColor.rgb, deepWaterC(dv / dd) * gl_FragColor.a, deepFogC(dd) * u_amb * PART_FOG);
-    }`)
+    }` + (dis ? `
+    if (u_disK > 0.0) {
+      float disR = disRaw(u_disK, disFUi((u_toDrum * vec4(vDW, 1.0)).xyz));
+      if (disR >= 0.0) discard;
+      gl_FragColor.rgb += disEmber(disR) * gl_FragColor.a;
+    }` : ''))
   }
-  m.customProgramCacheKey = () => 'deepfogpart'
+  m.customProgramCacheKey = () => (dis ? 'deepfogpart2' : 'deepfogtab')
   return m
 }
+let fogU: Record<string, THREE.IUniform> | null = null // R6.88: the tablet's own (non-dissolving) patch reads the same fog
 
 type Mats = ReturnType<typeof makeMats>
 /**
@@ -119,6 +136,7 @@ function makeMats(u: Record<string, THREE.IUniform>, env: THREE.Texture) {
     white: new THREE.MeshPhysicalMaterial({ color: '#ffffff', roughness: 0.14, clearcoat: 1, clearcoatRoughness: 0.04, iridescence: 0.5, ...film, envMapIntensity: 1.25, emissive: '#ffffff', emissiveIntensity: 0.07 }),
     silver: new THREE.MeshPhysicalMaterial({ color: '#eef0f3', metalness: 1, roughness: 0.08, iridescence: 0.9, iridescenceIOR: 1.7, iridescenceThicknessRange: [240, 820], envMapIntensity: 2.2 }),
   }
+  fogU = u
   Object.values(m).forEach((x) => { x.envMap = env; deepFogPatch(x, u) })
   return m
 }
@@ -334,7 +352,7 @@ function makeTablet(M: Mats) {
   bump.rotateY(Math.PI); bump.translate(GW - 0.105, GH - 0.105, front - T + 0.0001); parts.push(bump)
   const metal = M.silver.clone()                                              // its own: the drum's fade must not touch it
   metal.color.set('#2e2f33'); metal.roughness = 0.34; metal.metalness = 1; metal.iridescence = 0; metal.envMapIntensity = 1.9
-  metal.onBeforeCompile = M.silver.onBeforeCompile; metal.customProgramCacheKey = M.silver.customProgramCacheKey
+  deepFogPatch(metal, fogU!, false) // R6.88: the tablet never dissolves (its own patch, no dissolve)
   const body = new THREE.Mesh(mergeGeometries(parts.map((p) => (p.index ? p.toNonIndexed() : p))), metal)
   // the cover glass: the same 1.5 × 1.0 UV frame (so the display, the portal rect and the shader are pixel-identical), its
   // outline cut to the slab's rounded corners and its thin uniform bezel
@@ -353,7 +371,7 @@ function makeTablet(M: Mats) {
   const bz = front - T - 0.0026
   dot(0.022, GW - 0.135, GH - 0.075, bz, true); dot(0.022, GW - 0.075, GH - 0.135, bz, true); dot(0.009, GW - 0.075, GH - 0.075, bz, true) // wide + ultra-wide-sized lenses, the LiDAR
   const dmat = new THREE.MeshPhysicalMaterial({ color: '#06070a', roughness: 0.12, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 1.4, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
-  dmat.envMap = M.silver.envMap; dmat.onBeforeCompile = M.silver.onBeforeCompile; dmat.customProgramCacheKey = M.silver.customProgramCacheKey
+  dmat.envMap = M.silver.envMap; deepFogPatch(dmat, fogU!, false)
   const details = new THREE.Mesh(mergeGeometries(dk.map((p) => (p.index ? p.toNonIndexed() : p))), dmat)
   g.add(body, screen, details)                                                // children[1] stays the glass (TabletWindow's hook)
   g.traverse((o) => { o.layers.set(SYSUI_LAYER); o.renderOrder = 11 })
@@ -406,7 +424,18 @@ function* buildCylSteps(gl: THREE.WebGLRenderer, u: Record<string, THREE.IUnifor
   const fades: { m: THREE.Material & { opacity: number }; base: number }[] = []
   const seen = new Set<THREE.Material>()
   for (const it of items) it.g.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.Material & { opacity: number }; if (m && !seen.has(m)) { seen.add(m); fades.push({ m, base: m.opacity }) } })
-  return { M, items, key, rim, hemi, envRT, tablet, atom, fades, fade: { v: -1 } }
+  // R6.88 SINK: the parts' points (every slab, disc and ring of every part; the text labels go with the front only) and
+  // the diamond's (its own facets, object space), sampled once here, behind the preloader
+  const glow = new Map<THREE.Material, THREE.Color>([[M.black, new THREE.Color(0.42, 0.5, 0.6)], [M.white, new THREE.Color(1.05, 1.08, 1.12)], [M.silver, new THREE.Color(0.8, 0.88, 1.0)], [M.glass, new THREE.Color(0.55, 0.9, 1.0)]])
+  const srcs: DisSource[] = []
+  items.forEach((it, i) => it.g.children.forEach((c) => { const mm = c as THREE.Mesh; const col = mm.isMesh ? glow.get(mm.material as THREE.Material) : undefined; if (col) { mm.updateMatrix(); srcs.push({ geo: mm.geometry, matrix: mm.matrix.clone(), part: i, color: col }) } }))
+  const disUi = new Disintegrate(srcs, DIS_COUNTS.ui, { seed: 11, size: 0.022, grav: 2.6, spread: 0.55 })
+  yield
+  const gemGeo = brilliantGeometry(1)
+  const disGem = new Disintegrate([{ geo: gemGeo, matrix: new THREE.Matrix4(), part: 0, color: new THREE.Color(0.42, 0.66, 1.45) }], DIS_COUNTS.gem, { gem: true, seed: 5, size: 0.034, grav: 1.4, spread: 1.6 })
+  gemGeo.dispose()
+  disUi.points.layers.set(DIVE_LAYER); disGem.points.layers.set(DIVE_LAYER)
+  return { M, items, key, rim, hemi, envRT, tablet, atom, fades, fade: { v: -1 }, disUi, disGem }
 }
 type CylBuilt = ReturnType<typeof buildCylSteps> extends Generator<unknown, infer R, unknown> ? R : never
 let prebuilt: { u: Record<string, THREE.IUniform>; gl: THREE.WebGLRenderer; b: CylBuilt } | null = null
@@ -434,7 +463,7 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
   }), [built])
   useEffect(() => {
     camera.layers.enable(SYSUI_LAYER)
-    return () => { Object.values(built.M).forEach((m) => m.dispose()); built.envRT.dispose(); (built.tablet.userData.mat as THREE.Material).dispose(); built.tablet.children.forEach((c, i) => { if (i !== 1) ((c as THREE.Mesh).material as THREE.Material).dispose() }); built.atom.dispose() }
+    return () => { Object.values(built.M).forEach((m) => m.dispose()); built.envRT.dispose(); (built.tablet.userData.mat as THREE.Material).dispose(); built.tablet.children.forEach((c, i) => { if (i !== 1) ((c as THREE.Mesh).material as THREE.Material).dispose() }); built.atom.dispose(); built.disUi.dispose(); built.disGem.dispose() }
   }, [camera, built])
 
   // W17: the parts answer the pointer — hover lifts a part out of the ring toward you, a tap plays it (toggle flips,
@@ -497,19 +526,31 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
     // phones: a tighter ring so no part crops at the screen edge as it turns
     // Scene 3 entry: as the camera pushes into the stone the ring opens outward to let it through
     const pw = dive.push * dive.push * (3 - 2 * dive.push)
-    const R = (3.0 - 0.75 * portrait()) * (1 + 1.25 * pw)
+    // R6.88 SINK: the parts no longer open out of the lens's way (they dissolve and the camera sinks with the tablet): a
+    // gentle breath outward only, so the falling points read as the drum coming apart where it stood
+    const ringK = 1 + 0.3 * pw
+    const R = (3.0 - 0.75 * portrait()) * ringK
     // SCENE 3 FOCUS HAND-OFF (Shifat 13:24Z): the drum has dissolved, the stone drifts aside and down into the fog, and
     // the tablet rises out of the deep in front of it, bobbing; the stone's caustic sweeps across its glass. The camera
     // then pushes into its screen (Dive.tsx) until the stars fill the frame.
+    // R6.88b DEEP TABLET (Shifat 10:41 PM: "Tablets should be by default in the deep underwater scene. Not spawned in the
+    // Shade DS scene"): the tablet is no part of the drum. It waits from the start SINK_M below it (TAB_DEEP, world),
+    // facing back up the dive, a slow float only; phones hold it upright. The camera comes down to it and then pushes
+    // through its glass (Dive.tsx); it never moves to the camera. (Parented to the root for its lights only: the root is a
+    // pure translation, taken out here, so the tablet's place is world-fixed.)
     const tb = built.tablet, tu = (tb.userData.mat as THREE.ShaderMaterial).uniforms
-    tb.visible = dive.push > 0.001
+    if (!nb.active) (window as any).__mainCam = state.camera // QA: the settled camera (fbf captures wait for it)
+    tb.visible = dive.push > 0.02
     if (tb.visible) {
-      tabletPose(dive.push, tb) // TABLET HOOK: the tablet's pose (rise + bob; with the fixed lens, its travel to the camera — WORLD-MAP §5)
-      tu.u_time.value = props.time; tu.u_portrait.value = props.height > props.width * 1.05 ? 1 : 0; tu.u_fill.value = ss(0.6, 1.0, dive.push); tu.u_on.value = ss(0.15, 0.6, dive.push); tu.u_sweep.value = -0.6 + 2.4 * ss(0.3, 0.75, dive.push)
+      const up = tabletUpright(), tt = browser.reducedMotion ? 0 : props.time, bob = 1 - ss(0.5, PORTAL0, dive.push)
+      tb.userData.upright = up
+      tb.position.set(TAB_DEEP.x - r.position.x, TAB_DEEP.y - r.position.y + Math.sin(tt * 0.9) * 0.04 * bob, TAB_DEEP.z - r.position.z)
+      tb.rotation.set(Math.sin(tt * 0.7) * 0.02 * bob, Math.PI + Math.sin(tt * 0.5) * 0.025 * bob, (up ? Math.PI / 2 : 0) + Math.sin(tt * 0.6) * 0.012 * bob)
+      tu.u_time.value = props.time; tu.u_portrait.value = props.height > props.width * 1.05 ? 1 : 0; tu.u_fill.value = ss(PORTAL0, 1.0, dive.push); tu.u_on.value = ss(0.2, 0.42, dive.push); tu.u_sweep.value = -0.6 + 2.4 * ss(0.35, 0.65, dive.push)
       ;(tb.userData.tw as TabletWindow | undefined)?.update(state.camera, dive.push) // TABLET HOOK: render the 3D picture through the glass from this pass's camera
     }
     const t = props.time, dt = Math.min(props.dt, 0.05)
-    s.rotation.y = t * 0.035 + dive.sys * 1.9 + kbState.current.off // W20: + the keyboard turn (a focused part comes to the front)
+    s.rotation.y = t * 0.035 + dive.sys * 1.9 + kbState.current.off + DRUM_OFF // W20: + the keyboard turn (a focused part comes to the front)
     // W20 (root 22:43Z + 22:55Z: on phones a dark panel sat behind the 'DS' of the title, then just on the 'SYSTEMS'
     // eyebrow; text over busy 3D, r22): phones lift the DRUM (the spin group) so its bottom row keeps ~24 px of clear air
     // above the eyebrow as it turns. Only the drum moves: the particle atom stays centred on the stone (its morph targets
@@ -525,13 +566,40 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
     const atom = built.atom
     atom.points.visible = pf < 0.995
     if (atom.points.visible) atom.mat.uniforms.u_on.value = 1 - pf
+    // R6.88 (Shifat 10:31–10:32 PM: the stone INSIDE the atom): the beads write depth while they are solid, so the near
+    // ones hide the sharp stone where they pass in front of it (the hero pass depth-tests against the scene's depth)
+    { const dw = 1 - pf > 0.6; if (atom.mat.depthWrite !== dw) atom.mat.depthWrite = dw }
     s.visible = pf > 0.002
     // and as the camera pushes into the stone the drum dissolves around it (nothing ever crosses the lens)
     // W20: phones dissolve the drum a little earlier on the push, so a part opening past the lens never crosses the lede
-    const fv = pf * (1 - ss(0.2 - 0.05 * portrait(), 0.65 - 0.15 * portrait(), pw))   // W21: wide screens dissolve a little earlier on the push (phones unchanged: 0.15 → 0.5)
-    s.visible = fv > 0.002
+    // R6.88 SINK (Shifat 10:05 PM: "Ui fall as particle morphed disintegration"): no opacity fade on the push any more —
+    // the parts are eaten by the dissolve front and fall away as points (disintegrate.ts); gone by dive.dis = 1
+    const fv = pf
+    s.visible = fv > 0.002 && dive.dis < 0.9995
     if (Math.abs(fv - built.fade.v) > 1e-3) { built.fade.v = fv; for (const f of built.fades) f.m.opacity = f.base * fv }
     atom.mat.uniforms.u_amb.value = dive.abyss
+    // R6.88 SINK: the dissolve's uniforms. The front lives in DRUM space (the spin group's frame, the ring's breath taken
+    // out), so it stays on the parts as they turn; the points read the same frame, so a fragment and its points agree
+    {
+      const du = built.disUi, dg = built.disGem
+      DIS_U.u_disK.value = dive.dis
+      const pxs = (props.height * props.dpr) / (2 * Math.tan((((state.camera as THREE.PerspectiveCamera).fov ?? 40) * Math.PI) / 360))
+      du.set(dive.dis, pxs, t); dg.set(dive.gemDis, pxs, t)
+      du.mat.uniforms.u_amb.value = dive.abyss
+      if (dive.dis > 0 && dive.dis < 1) {
+        s.updateMatrix(); r.updateMatrixWorld()
+        DIS_SCL.makeScale(1 / ringK, 1, 1 / ringK)
+        DIS_TOF.copy(s.matrix).invert().premultiply(DIS_SCL)              // root → drum
+        du.mat.uniforms.u_toF.value.copy(DIS_TOF)
+        DIS_U.u_toDrum.value.copy(r.matrixWorld).invert().premultiply(DIS_TOF) // world → drum
+        for (let i = 0; i < built.items.length; i++) { const g = built.items[i].g; g.updateMatrix(); du.M[i].multiplyMatrices(s.matrix, g.matrix) }
+      }
+      const gm = gemRef.m
+      if (dg.points.visible && gm) {
+        gm.updateWorldMatrix(true, false); r.updateMatrixWorld()
+        dg.M[0].copy(r.matrixWorld).invert().multiply(gm.matrixWorld)    // the diamond, in the root's space
+      }
+    }
     // pointer → part (the main pass only)
     if (!nb.active && (ia.moved || ia.tap) && pf > 0.9) {
       ia.moved = false
@@ -588,7 +656,10 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
       let kx = 0, ky = 0, kz = 0
       // (W20 00:0xZ: wide screens too — the 1440 'Aa' panel sat over the stone. Parts are placed from the root, which wide
       // screens lift by 1 m, so the part's world point uses r.position)
-      const kw = 1 - ss(0.2, 0.5, pw)
+      // R6.88 (Shifat 10:31–10:32 PM: "The stone should feel like inside of particle atom not in front" — in the Shade DS ring
+      // the near parts pass IN FRONT of the stone, the far ones behind it; the hero pass now depth-tests the sharp stone
+      // against them): the stone keep-out is off
+      const kw = 0 * (1 - ss(0.2, 0.5, pw))
       if (kw > 0.001) {
         const ry = s.rotation.y, cr = Math.cos(ry), sr = Math.sin(ry)
         const lx0 = Math.sin(it.a) * rr + sideX, lz0 = Math.cos(it.a) * rr + sideZ, ly0 = iy + dodge + s.position.y
@@ -622,6 +693,10 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
           ky += pushPx * mpp * bw
         }
       }
+      // R6.88 ATOM (Shifat 10:31–10:32 PM: the stone INSIDE the ring, near parts passing in front of it): on phones the ring's
+      // near side runs 0.6 m lower and its far side 0.6 m higher (a tilted orbit), so the near parts cross the stone's face
+      // instead of passing above it; the hero pass hides the stone wherever they are in front. Eases out as the push begins.
+      ky += ORBIT_TILT * Math.cos(it.a + s.rotation.y) * portrait() * (1 - ss(0.2, 0.5, pw))
       it.g.position.set(Math.sin(it.a) * rr + sideX + kx, iy + dodge + ky + Math.sin(t * 0.6 + it.ph) * 0.05, Math.cos(it.a) * rr + sideZ + kz)
       // each part turns halfway toward the lens from its place on the drum (no edge-on slivers at the sides)
       let off = Math.PI - (it.a + s.rotation.y); off = Math.atan2(Math.sin(off), Math.cos(off))
@@ -692,6 +767,8 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
       <primitive object={built.hemi} />
       <primitive object={built.tablet} />
       <primitive object={built.atom.points} />
+      <primitive object={built.disUi.points} />
+      <primitive object={built.disGem.points} />
       <group ref={spin}>
         {built.items.map((it, i) => <primitive key={i} object={it.g} />)}
       </group>

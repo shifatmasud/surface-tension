@@ -15,6 +15,7 @@ import { browser } from '../../services/settings'
 import { blurFadeIn, blurFadeOut } from '../../services/blurFade'
 import './gift.css'
 import { giftSound } from './giftSound'
+import { CSS3DRenderer, CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer.js' // R6.88b CRISP TYPE
 
 const CASE_URL = 'https://surface-tension-case-study.pages.dev/'
 const PINK = new THREE.Color('#ff2e93')
@@ -272,20 +273,31 @@ const FONT = `'Inter Variable', 'Inter', system-ui, sans-serif`
 function setTrack(g: CanvasRenderingContext2D, px: number) { if ('letterSpacing' in g) (g as any).letterSpacing = `${px}px` }
 
 function cardFront(pw: number) {
-  const ph = Math.round(pw * CH / CW), s = pw / CW
-  return canvasTex(pw, ph, (g) => {
-    g.fillStyle = '#f7f7f4'; g.fillRect(0, 0, pw, ph)
-    const pad = PAD * s
-    g.fillStyle = INK; g.textBaseline = 'alphabetic'
-    const fs = 0.118 * s
-    g.font = `400 ${fs}px ${FONT}`; setTrack(g, -0.035 * fs)
-    g.fillText('Surface', pad - fs * 0.04, pad + fs * 0.78)
-    g.fillText('Tension', pad - fs * 0.04, pad + fs * 1.8)
-    const fs2 = 0.048 * s
-    g.font = `400 ${fs2}px ${FONT}`; setTrack(g, -0.01 * fs2); g.fillStyle = '#54585e'
-    g.fillText('The case study', pad, pad + fs * 1.8 + fs2 * 1.9)
-    g.save(); const m = 0.07 * s; g.translate(pw - pad - m, pad); g.scale(m / 200, m / 200); g.fillStyle = INK; g.fill(MARK); g.restore()
-  })
+  // R6.88b CRISP TYPE (Shifat 11:01 PM: "Gift cards on both sites should have hi res crisp texts"): the words, the mark and
+  // the button are real vector type now (cardType, laid on the card face in 3D by the CSS3D layer, at the device's full
+  // pixel density whatever the GL canvas's density); the texture is the bare card stock
+  const ph = Math.round(pw * CH / CW)
+  return canvasTex(pw, ph, (g) => { g.fillStyle = '#f7f7f4'; g.fillRect(0, 0, pw, ph) })
+}
+const MARK_D = 'M100 0H200L100 100H0Z M100 100H200L100 200H0Z'
+/** R6.88b: the card's front type as SVG (K css px per card unit), the SAME layout the canvas used to draw: Surface /
+ *  Tension, "The case study", the mark, and the "View case study" button (with its hover state as a separate layer) */
+function cardType(K: number) {
+  const pw = CW * K, ph = CH * K, pad = PAD * K, fs = 0.118 * K, fs2 = 0.048 * K, m = 0.07 * K
+  const bw = BTN_W * K, bh = BTN_H * K, bl = PAD * K, bt = ph - (PAD + BTN_H) * K, r = bh / 2, bfs = 0.034 * K
+  const cr = bh * 0.38, cx = bw - bh / 2, cy = bh / 2, a = cr * 0.36, lw = Math.max(2, bh * 0.045)
+  const arrow = `M${cx - a} ${cy + a}L${cx + a} ${cy - a}M${cx - a * 0.55} ${cy - a}L${cx + a} ${cy - a}L${cx + a} ${cy + a * 0.55}`
+  const btn = (hover: boolean) => `<g class="gift__btn${hover ? ' gift__btn--h' : ''}" transform="translate(${bl} ${bt})"${hover ? ' opacity="0"' : ''}>
+  <rect width="${bw}" height="${bh}" rx="${r}" fill="${INK}"/>
+  <text x="${r * 0.95}" y="${bh / 2 + bfs * 0.04}" font-size="${bfs}" letter-spacing="${(-0.02 * bfs).toFixed(3)}" fill="#ffffff" dominant-baseline="middle">View case study</text>
+  <circle cx="${cx}" cy="${cy}" r="${cr}" fill="${hover ? '#ff2e93' : '#fafafa'}"/>
+  <path d="${arrow}" fill="none" stroke="${hover ? '#ffffff' : INK}" stroke-width="${lw}" stroke-linecap="round" stroke-linejoin="round"/></g>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${pw}" height="${ph}" viewBox="0 0 ${pw} ${ph}" aria-hidden="true" style="display:block;font-family:${FONT.replace(/"/g, "'")};font-weight:400;text-rendering:geometricPrecision">
+  <text x="${pad - fs * 0.04}" y="${pad + fs * 0.78}" font-size="${fs}" letter-spacing="${(-0.035 * fs).toFixed(3)}" fill="${INK}">Surface</text>
+  <text x="${pad - fs * 0.04}" y="${pad + fs * 1.8}" font-size="${fs}" letter-spacing="${(-0.035 * fs).toFixed(3)}" fill="${INK}">Tension</text>
+  <text x="${pad}" y="${pad + fs * 1.8 + fs2 * 1.9}" font-size="${fs2}" letter-spacing="${(-0.01 * fs2).toFixed(3)}" fill="#54585e">The case study</text>
+  <path d="${MARK_D}" fill="${INK}" transform="translate(${pw - pad - m} ${pad}) scale(${m / 200})"/>
+  <g class="gift__btns" opacity="0">${btn(false)}${btn(true)}</g></svg>`
 }
 function cardBack(pw: number) {
   const ph = Math.round(pw * CH / CW), s = pw / CW
@@ -567,6 +579,8 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
     return { close: async () => { canvas.remove(); sr.remove(); hit.remove(); cta.remove(); closeBtn.remove() } }
   }
   renderer.setClearColor(0x000000, 0)
+  const css = new CSS3DRenderer(); css.domElement.className = 'gift__type'; css.domElement.setAttribute('aria-hidden', 'true') // R6.88b CRISP TYPE
+  css.setSize(innerWidth, innerHeight); root.insertBefore(css.domElement, sr)
   renderer.toneMapping = TONE; renderer.toneMappingExposure = TONE === THREE.ACESFilmicToneMapping ? 1.12 : 1.0
   renderer.outputColorSpace = THREE.SRGBColorSpace
   renderer.setPixelRatio(dpr); renderer.setSize(innerWidth, innerHeight, false)
@@ -657,6 +671,32 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
   const bx = -CW / 2 + PAD + BTN_W / 2, by = -CH / 2 + PAD + BTN_H / 2
   btn.position.set(bx, by, 0.0072); btnH.position.set(bx, by, 0.0076)
   cardRoll.add(body, front, back, btn, btnH)
+  // R6.88b CRISP TYPE: the card's words + button as real vector type on the card face (CSS3D: the same camera, the same
+  // card matrix, rasterised by the browser at the device's full density, so it stays crisp even when the GL canvas runs at
+  // DPR 0.6–1 on a budget phone). Its back face is hidden (backface-visibility), it fades in as the card forms.
+  btn.visible = false; btnH.visible = false
+  const TYPE_K = 400
+  const typeEl = document.createElement('div'); typeEl.className = 'gift__face'
+  typeEl.style.cssText = `width:${CW * TYPE_K}px;height:${CH * TYPE_K}px;backface-visibility:hidden;-webkit-backface-visibility:hidden;pointer-events:none;opacity:0`
+  typeEl.innerHTML = cardType(TYPE_K)
+  const typeBtns = typeEl.querySelector('.gift__btns') as SVGGElement, typeHover = typeEl.querySelector('.gift__btn--h') as SVGGElement
+  const typeObj = new CSS3DObject(typeEl); typeObj.scale.setScalar(1 / TYPE_K); typeObj.position.z = 0.0074
+  cardRoll.add(typeObj)
+  let typeO = -1, typeB = -1, typeH = -1
+  const tN = new THREE.Vector3(), tP = new THREE.Vector3(), tV = new THREE.Vector3()
+  const draw = () => {
+    renderer.render(scene, camera)
+    // the type follows the card's own reveal (it forms centre-out; the words sit in its outer part) and the button's fade;
+    // it shows on the FRONT face only, easing out as the card turns edge-on (the browser's backface rule is not relied on)
+    cardRoll.updateWorldMatrix(true, false)
+    const facing = tN.set(0, 0, 1).transformDirection(cardRoll.matrixWorld).dot(tV.copy(camera.position).sub(tP.setFromMatrixPosition(cardRoll.matrixWorld)).normalize())
+    typeObj.visible = facing > 0.06
+    const o = Math.round(clamp01((U.uForm.value - 0.62) / 0.34) * clamp01((facing - 0.06) / 0.14) * 100) / 100, b = Math.round(btnMat.opacity * 100) / 100, h = Math.round(btnMatH.opacity / Math.max(1e-3, btnMat.opacity) * 100) / 100
+    if (o !== typeO) { typeO = o; typeEl.style.opacity = String(o) }
+    if (b !== typeB) { typeB = b; typeBtns.setAttribute('opacity', String(b)) }
+    if (h !== typeH) { typeH = h; typeHover.setAttribute('opacity', String(Math.min(1, h))) }
+    css.render(scene, camera)
+  }
 
   // lights: the env does most of it; a key, a cool rim and a fill tinted by the page
   // film lighting: a warm key from high left, a cool rim from behind right, a low fill in the page's own colour
@@ -753,7 +793,7 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
     list[(i + (e.shiftKey ? -1 : 1) + list.length) % list.length].focus()
   }
   root.addEventListener('keydown', onKey)
-  const onResize = () => { renderer.setSize(innerWidth, innerHeight, false); frame() }
+  const onResize = () => { renderer.setSize(innerWidth, innerHeight, false); css.setSize(innerWidth, innerHeight); frame() }
   addEventListener('resize', onResize)
 
   // ---------- frame ----------
@@ -873,14 +913,14 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
 
   const QA = /[?&]giftqa/.test(location.search)
   let qaT = 0
-  const step = (n: number) => { for (let i = 0; i < n; i++) { qaT += 1 / 30; update(qaT, 1 / 30) } renderer.render(scene, camera); return qaT }
+  const step = (n: number) => { for (let i = 0; i < n; i++) { qaT += 1 / 30; update(qaT, 1 / 30) } draw(); return qaT }
   const tick = (now: number) => {
     raf = 0
     if (!alive || QA) return
     const dt = Math.min(0.05, Math.max(0, (now - last) / 1000)); last = now
     if (!document.hidden) {
       update((now - t0) / 1000, dt)
-      renderer.render(scene, camera)
+      draw()
       // phones: step the density down on slow frames (never below 0.6), never up
       if (++frames > 40) {
         ema = ema * 0.93 + dt * 1000 * 0.07
@@ -898,19 +938,19 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
     dustAll.forEach((d) => { d.visible = true }); cardTilt.visible = true
     try { await renderer.compileAsync(scene, camera) } catch { /* sync compile on first render */ }
     if (!alive) return
-    update(0, 0); cardTilt.visible = true; renderer.render(scene, camera)
+    update(0, 0); cardTilt.visible = true; draw()
     dustAll.forEach((d) => { d.visible = false }); cardTilt.visible = reduced
     await new Promise((r) => requestAnimationFrame(r))
     if (!alive) return
     t0 = performance.now(); last = t0; ready = true
     root.classList.add('gift--ready')
     blurFadeIn(closeBtn, reduced ? 0 : 500)
-    if (reduced) { cta.tabIndex = 0; update(10, 0); renderer.render(scene, camera); update(10, 0); cta.focus({ preventScroll: true }) }
+    if (reduced) { cta.tabIndex = 0; update(10, 0); draw(); update(10, 0); cta.focus({ preventScroll: true }) }
     else { hit.style.visibility = 'visible'; hitShown = true; hit.focus({ preventScroll: true }); raf = requestAnimationFrame(tick) }
   }
   prep()
   // reduced motion: one still frame, redrawn on resize only
-  const onResizeStill = () => { if (reduced && ready) { update(10, 0); renderer.render(scene, camera) } }
+  const onResizeStill = () => { if (reduced && ready) { update(10, 0); draw() } }
   addEventListener('resize', onResizeStill)
 
   // test hooks for the QA rig
@@ -936,7 +976,7 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
       envRT?.dispose()
       renderer.dispose(); renderer.forceContextLoss()
       delete (window as any).__giftStage
-      canvas.remove(); sr.remove(); hit.remove(); cta.remove(); closeBtn.remove()
+      canvas.remove(); css.domElement.remove(); sr.remove(); hit.remove(); cta.remove(); closeBtn.remove()
     },
   }
 }

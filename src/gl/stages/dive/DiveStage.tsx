@@ -9,7 +9,7 @@ import { portrait } from '../../../core/frame'
 import { engine } from '../../engine'
 import { GEM_LAYER } from '../hero/HeroStage'
 import { brilliantGeometry } from '../hero/diamond'
-import { dive, diveRays, DIVE_LAYER, TOOL_POS, floorH, PORT } from './diveState'
+import { dive, diveRays, DIVE_LAYER, TOOL_POS, floorH, PORT, SINK_M } from './diveState'
 import { Floaters } from './floaters' // FLOATERS HOOK
 import { Bubbles } from '../../fx/bubbles' // FX HOOK (CINEMATIC)
 import { browser } from '../../../services/settings'
@@ -126,6 +126,7 @@ function makeDiveUniforms() {
     u_star: { value: 0 },
     u_amb: { value: 0 },
     u_abyss: { value: 0 },
+    u_sinkK: { value: 0 }, // R6.88 SINK
     u_res: shared.u_resolution,
     u_bn: shared.u_blueNoise,
     u_caus: { value: QA.noCaus ? 0 : 1 },
@@ -295,6 +296,7 @@ export function DiveStage() {
     u.u_star.value = dive.star
     u.u_amb.value = ss(-9, -22, camY)
     u.u_abyss.value = dive.abyss
+    u.u_sinkK.value = Math.min(1, dive.camSink / SINK_M) // R6.88 SINK: the water darkens as the tablet takes us down
     const rs = nb.active ? nb.scale : 1 // NEIGHBOUR HOOK: point sizes follow the neighbour's smaller target
     mats.silt.uniforms.u_pxScale.value = props.renderH * rs / (2 * Math.tan((camera.fov * Math.PI) / 360))
     mats.stars.uniforms.u_dpr.value = props.dpr * rs

@@ -19,10 +19,14 @@ import { buildFireflies, buildCanopy } from './nightFx'
 import { buildTunnel, buildTunnelLights } from './tunnel'
 import { buildTunnelBlur } from './tunnelBlur' // TUNNEL DRAMA: half-res zoom blur
 import { buildCta, WALL_Z } from './ctaScene'
-import { skyMaterial, starMaterial, glintStarMaterial, screenMaterial, backdropMaterial, SUN_DIR } from './shaders'
+import { screenMaterial, backdropMaterial, SUN_DIR } from './shaders'
+import { buildSpaceSky, SkyExtras, SPACE_LIGHT, starPrFor, isSharedSkyGeometry, JOURNEY_LENS, glideOffset } from './spaceSky' // R6.87 SINGLE SKY
 import { buildShatterGeometry, shatterMaterial, buildGlints } from './shatter'
 import { inner, outer, T, type Inner, type Outer } from './timeline'
 import { journeyAudio, resetJourneyAudio } from './journeyAudio'
+import { heroPass } from '../../post/heroPass' // R6.87 SPLIT
+import { SPLIT } from '../../quality'
+import { CrewLayer } from './crewLayer'
 import { audio } from '../../../services/audio' // W29 R6.74: mute the primed cue calls
 
 /** Where the stage lives in the main world (the pool owns the origin). */
@@ -63,6 +67,8 @@ export function JourneyStage(): JSX.Element {
   const { camera: mainCam } = useThree()
   // STICKERS HOOK: drag / peel / keyboard on the CTA wall's stickers (stickerInteract.ts), bound to the real camera
   useEffect(() => { S.cta.attach(mainCam); return () => S.cta.detach() }, [S, mainCam])
+  // R6.87 SPLIT RESOLUTION: the crewmate that breaks out is a hero subject (drawn at the canvas density, post/heroPass.ts)
+  useEffect(() => { const a = heroPass.add(S.crewOut.root), b = S.crewScreen ? heroPass.add(S.crewScreen) : () => {}; return () => { a(); b() } }, [S])
   useEffect(() => {
     S.cta.typeRoot.position.copy(JOURNEY_ORIGIN)
     const body = S.crewOut.root
@@ -166,7 +172,11 @@ export function JourneyStage(): JSX.Element {
     const I = inner(p, S.I, portrait)
     S.crewIn.root.visible = I.visible
     S.crewIn.update({ pos: I.crew, yaw: I.yaw, pitch: I.pitch, roll: I.roll, walk: I.walk, phase: I.phase, float: I.float, squash: I.squash, scale: 1 }, dt, time, snap)
-    S.icam.position.copy(I.cam); S.icam.lookAt(I.look)
+    S.icam.position.copy(I.cam)
+    // R6.87 GENTLE DIVE: the push carries on into the sky through the hand-off (spaceSky.ts glideOffset; 0 once inside)
+    if (p <= 0.0001) S.icam.position.add(glideOffset(portrait, W, H, S.tmp))
+    S.icam.lookAt(I.look)
+    ;(window as any).__jI = S.icam // QA (R6.88b switch probe)
     // ultrawide: the screen covers the viewport, so its top and bottom crop away; widen the inner lens by the same
     // amount so the 16:10 composition (feet, horizon, lead room) survives at 21:9
     const wideK = portrait ? 1 : Math.max(1, (W / H) / 1.6)
@@ -179,6 +189,10 @@ export function JourneyStage(): JSX.Element {
     S.starMat.uniforms.u_opacity.value = I.stars; S.starMat.uniforms.u_time.value = time
     S.glintMat.uniforms.u_opacity.value = I.stars; S.glintMat.uniforms.u_time.value = time
     S.stars.visible = I.stars > 0.001
+    // R6.87 SINGLE SKY: the rocks + dust the glass showed, where it showed them, on the same clock; they leave with space
+    // (gone before the tunnel opens at 0.12)
+    S.skyExtras.layout(portrait, W, H)
+    S.skyExtras.update(time, I.stars * (1 - ss(0.07, 0.115, p)), rtPerCss(S, W, H) * Math.min(Math.max(props.dpr || 1, 0.6), 2))
     S.forest.visible = I.atmos > 0.2
     // forest air: grass sway, the sun fan behind the tree line, mist veils and pollen once we are near the ground
     const land = ss(0.42, 0.52, p)
@@ -247,10 +261,10 @@ export function JourneyStage(): JSX.Element {
     // light + haze follow the atmosphere: violet/teal rim in space → warm sun and green bounce in the forest
     const a = I.atmos
     S.hemi.color.copy(S.c.hSpace).lerp(S.c.hSky, a); S.hemi.groundColor.copy(S.c.gSpace).lerp(S.c.gForest, a)
-    S.hemi.intensity = mix(0.7, 0.8, a)
-    S.sun.color.copy(S.c.kSpace).lerp(S.c.kSun, a); S.sun.intensity = mix(2.6, 1.7, a)
+    S.hemi.intensity = mix(SPACE_LIGHT.hemi, 0.8, a)
+    S.sun.color.copy(S.c.kSpace).lerp(S.c.kSun, a); S.sun.intensity = mix(SPACE_LIGHT.keyI, 1.7, a)
     S.sun.position.set(mix(5, 3, a), mix(6, 3, a), 6)
-    S.rim.color.copy(S.c.rSpace).lerp(S.c.rSun, a); S.rim.intensity = mix(3.4, 3.0, a)
+    S.rim.color.copy(S.c.rSpace).lerp(S.c.rSun, a); S.rim.intensity = mix(SPACE_LIGHT.rimI, 3.0, a)
     S.rim.position.set(mix(-6, SUN_DIR.x * 10, a), mix(3, 1.2, a), mix(-7, SUN_DIR.z * 10, a))
     const fog = S.inner.fog as THREE.Fog
     fog.color.copy(S.c.fogDusk).lerp(S.c.fogDay, ss(0.55, 1, a))
@@ -261,8 +275,8 @@ export function JourneyStage(): JSX.Element {
     const venv = a > 0.5 ? S.envs.forest : S.envs.page
     if (S.innerMats.visor.envMap !== venv) S.innerMats.visor.envMap = venv
     // the visor catches a little more sky as it lands
-    S.innerMats.visor.envMapIntensity = mix(3.0, 1.2, a)
-    S.innerMats.body.envMapIntensity = mix(1.0, 0.25, a)
+    S.innerMats.visor.envMapIntensity = mix(SPACE_LIGHT.visorEnv, 1.2, a)
+    S.innerMats.body.envMapIntensity = mix(SPACE_LIGHT.bodyEnv, 0.25, a)
 
     // ---- outer world (local to the tablet)
     const aspect = W / H
@@ -367,7 +381,22 @@ export function JourneyStage(): JSX.Element {
       const prev = gl.getRenderTarget()
       gl.setRenderTarget(S.rt)
       gl.clear()
+      // R6.87 SPLIT: until the glass cracks the crewmate is drawn at the canvas density (crewLayer.ts), not in this target
+      const split = !!S.crewL && S.crewIn.root.visible && p < T.HIT1 - 0.0015
+      if (split) S.crewIn.root.visible = false
       gl.render(S.inner, S.icam)
+      if (split) S.crewIn.root.visible = true
+      if (split && S.crewL) {
+        const ph = screenPx(S, state.camera as THREE.PerspectiveCamera, W, H)
+        const hd = (props.textDpr || 1) * (nb.active ? nb.scale : 1)
+        let ch = Math.min(H * 1.2, ph) * hd, cw = ch * (S.sw / S.sh)
+        const lim = Math.max(W, H) * 1.25 * (props.textDpr || 1)
+        if (Math.max(cw, ch) > lim) { const k = lim / Math.max(cw, ch); cw *= k; ch *= k }
+        S.crewL.render(gl, S.inner, S.icam, S.crewIn.root, S.rt, S.one, cw, ch)
+        ;(S.screenMat.uniforms.u_crewScale.value as THREE.Vector2).copy(S.crewL.scale)
+        gl.setRenderTarget(S.rt)
+      }
+      if (S.crewScreen) S.crewScreen.visible = split
       // TUNNEL DRAMA: the half-res zoom blur of that picture, only while the tunnel wants it (tunnelBlur.ts)
       if (S.tunnelFx.zoom > 0.005) {
         const bu = S.tunnelBlur.material.uniforms
@@ -385,6 +414,23 @@ export function JourneyStage(): JSX.Element {
   )
 }
 
+/** R6.87: the screen's height on screen (CSS px), from its corners through the real camera */
+const _sp = new THREE.Vector3()
+function screenPx(S: Built, cam: THREE.PerspectiveCamera, W: number, H: number) {
+  S.screen.updateWorldMatrix(true, false)
+  let y0 = 1e9, y1 = -1e9
+  for (let i = 0; i < 4; i++) {
+    _sp.set((i & 1 ? 0.5 : -0.5) * S.sw, (i & 2 ? 0.5 : -0.5) * S.sh, 0).applyMatrix4(S.screen.matrixWorld).project(cam)
+    if (_sp.z > 1) return H * 1.2
+    y0 = Math.min(y0, _sp.y); y1 = Math.max(y1, _sp.y)
+  }
+  return Math.max(16, (y1 - y0) * 0.5 * H)
+}
+/** R6.87: the inner target's pixels per CSS px of the screen as it covers the viewport (the glass's dust uses the same rule) */
+function rtPerCss(S: Built, W: number, H: number) {
+  const fillH = Math.min(S.sh / JOURNEY_LENS.crop, S.sw / (JOURNEY_LENS.crop * (W / Math.max(1, H))))
+  return S.rt.height * (fillH / S.sh) / Math.max(1, H)
+}
 /** every material under an object (the crewmate's depth pre-pass toggles their colour writes) */
 function crewMatsOf(root: THREE.Object3D) {
   const out = new Set<THREE.Material>()
@@ -455,60 +501,11 @@ export function* buildSteps(gl: THREE.WebGLRenderer, portrait: boolean, low: boo
   innerScene.fog = new THREE.Fog('#e9c9a8', 40, 230)
   const icam = new THREE.PerspectiveCamera(42, sw / sh, 0.1, 2000)
   const bcam = icam.clone()
-  const skyMat = skyMaterial()
-  const sky = new THREE.Mesh(new THREE.SphereGeometry(900, 48, 24), skyMat)
-  sky.renderOrder = -10; sky.frustumCulled = false
-  // stars: a real night sky — thousands of points on a steep brightness curve (most at the edge of seeing, a few
-  // bright), concentrated along the Milky Way band, coloured by temperature; plus a handful of bright stars with
-  // soft diffraction glints (their own points)
-  let seed = 3; const r = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
-  const MWN = new THREE.Vector3(0.55, 0.83, 0).normalize() // the band's pole: it crosses the space shots on a diagonal
-  const mwA = new THREE.Vector3(0, 0, -1), mwB = new THREE.Vector3().crossVectors(MWN, mwA).normalize()
-  const N = 6500 // PERF HOOK (eng #5): one star count on every tier; phones pay in point size (starPr), not in stars
-  const sp = new Float32Array(N * 3), ss_ = new Float32Array(N), sc = new Float32Array(N * 3)
-  const temp = [new THREE.Color('#9fbfff'), new THREE.Color('#cadaff'), new THREE.Color('#f4f6ff'), new THREE.Color('#fff4e3'), new THREE.Color('#ffd9a8'), new THREE.Color('#ffb98a')]
-  const tw = [0.08, 0.2, 0.36, 0.2, 0.11, 0.05]
-  const pickT = () => { let x = r(), i = 0; while (i < tw.length - 1 && x > tw[i]) { x -= tw[i]; i++ } return temp[i] }
-  const v = new THREE.Vector3()
-  for (let i = 0; i < N; i++) {
-    if (r() < 0.42) {
-      // in the band: a point on the great circle, scattered by a gaussian in galactic latitude
-      const lon = r() * Math.PI * 2, g = (r() + r() + r() - 1.5) * 0.32
-      v.copy(mwA).multiplyScalar(Math.cos(lon)).addScaledVector(mwB, Math.sin(lon)).multiplyScalar(Math.cos(g)).addScaledVector(MWN, Math.sin(g)).normalize()
-    } else {
-      const u = r() * 2 - 1, th = r() * Math.PI * 2, s = Math.sqrt(1 - u * u)
-      v.set(Math.cos(th) * s, u, Math.sin(th) * s)
-    }
-    sp.set([v.x * 600, v.y * 600, v.z * 600], i * 3)
-    const m = Math.pow(r(), 5.5) // steep: most stars faint
-    ss_[i] = 0.9 + m * 2.1 + r() * 0.35
-    const c = pickT(), b = 0.1 + m * 0.95
-    sc.set([c.r * b, c.g * b, c.b * b], i * 3)
-  }
-  const sg = new THREE.BufferGeometry()
-  sg.setAttribute('position', new THREE.BufferAttribute(sp, 3)); sg.setAttribute('aSize', new THREE.BufferAttribute(ss_, 1)); sg.setAttribute('aColor', new THREE.BufferAttribute(sc, 3))
-  const starPr = Math.min(props.dpr, 2) * (rt.width / 1024)
-  const starMat = starMaterial(starPr)
-  const stars = new THREE.Points(sg, starMat); stars.frustumCulled = false; stars.renderOrder = -9
-  // the bright few, placed in the part of the sky the space shots look at (behind and around the crewmate, not on it)
-  const GN = 12 // PERF HOOK (eng #5): the same bright stars on every tier
-  const gp = new Float32Array(GN * 3), gs = new Float32Array(GN), gc = new Float32Array(GN * 3), ga = new Float32Array(GN)
-  for (let i = 0; i < GN; i++) {
-    const az = -Math.PI / 2 + (r() - 0.5) * 2.6, el = (r() - 0.35) * 1.0
-    v.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az)).normalize()
-    if (i === 0) v.set(-0.42, 0.3, -0.86).normalize() // the brightest sits high in the empty sky, away from the crewmate
-    if (i === 1) v.set(0.5, 0.24, -0.83).normalize()
-    gp.set([v.x * 580, v.y * 580, v.z * 580], i * 3)
-    gs[i] = (i < 2 ? 44 : 22 + r() * 16)
-    const c = temp[[0, 1, 2, 2, 3, 4][Math.floor(r() * 6)]], b = i < 2 ? 1.0 : 0.55 + r() * 0.35
-    gc.set([c.r * b, c.g * b, c.b * b], i * 3)
-    ga[i] = r() * Math.PI
-  }
-  const gg = new THREE.BufferGeometry()
-  gg.setAttribute('position', new THREE.BufferAttribute(gp, 3)); gg.setAttribute('aSize', new THREE.BufferAttribute(gs, 1)); gg.setAttribute('aColor', new THREE.BufferAttribute(gc, 3)); gg.setAttribute('aAngle', new THREE.BufferAttribute(ga, 1))
-  const glintMat = glintStarMaterial(starPr)
-  const glintStars = new THREE.Points(gg, glintMat); glintStars.frustumCulled = false; glintStars.renderOrder = -8
-  stars.add(glintStars)
+  // R6.87 SINGLE SKY: the dome, the 6500 stars + band, the 12 glints (the very buffers the dive tablet's glass draws), and
+  // the sky's rocks + dust, from spaceSky.ts — one sky, seen through the glass and then flown into
+  const SK = buildSpaceSky(starPrFor(rt.width, props.dpr))
+  const { sky, skyMat, stars, starMat, glintMat } = SK
+  const skyExtras = new SkyExtras()
   yield // PERFGOV
 
   // Lambert: matte foliage with no grazing sheen against the low sun (and cheaper on phones)
@@ -552,7 +549,7 @@ export function* buildSteps(gl: THREE.WebGLRenderer, portrait: boolean, low: boo
   const rim = new THREE.DirectionalLight('#5fe3ff', 2.4); rim.position.set(-6, 3, -7)  // rim: cool in space, the low sun in the forest
   // lights ride with the crewmate so the key is always composed the same way
   const lightRig = new THREE.Group(); lightRig.add(sun, rim, sun.target, rim.target)
-  innerScene.add(sky, stars, fan.mesh, forest, shadow, crewIn.root, hemi, lightRig)
+  innerScene.add(sky, stars, skyExtras.rocks, skyExtras.dust, fan.mesh, forest, shadow, crewIn.root, hemi, lightRig)
   const fireflies = buildFireflies(260), canopy = buildCanopy()
   yield // PERFGOV
   const tunnel = buildTunnel()
@@ -577,6 +574,23 @@ export function* buildSteps(gl: THREE.WebGLRenderer, portrait: boolean, low: boo
   screenMat.side = THREE.DoubleSide
   const screen = new THREE.Mesh(new THREE.PlaneGeometry(sw, sh, segX, segY), screenMat)
   screen.position.z = SCREEN_Z; screen.frustumCulled = false
+  // R6.87 SPLIT RESOLUTION: the inner target holds the space/forest only; the crewmate is drawn into its own target at the
+  // canvas density (crewLayer.ts) and this twin of the screen (same geometry, same uniforms, CREW_ONLY) lays it over the
+  // low-res screen in the hero pass. (From the first crack on, the crewmate goes back into the inner target: the cracks
+  // and the frost are drawn over it there.)
+  const crewL = SPLIT ? new CrewLayer() : null
+  let crewMat: THREE.ShaderMaterial | null = null, crewScreen: THREE.Mesh | null = null
+  if (crewL) {
+    CrewLayer.depthFor(rt)
+    screenMat.uniforms.u_crew.value = crewL.rt.texture
+    crewMat = new THREE.ShaderMaterial({ uniforms: screenMat.uniforms, vertexShader: screenMat.vertexShader, fragmentShader: screenMat.fragmentShader, defines: { CREW_ONLY: '' },
+      extensions: { derivatives: true } as any, fog: false, side: THREE.DoubleSide, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 })
+    crewScreen = new THREE.Mesh(screen.geometry, crewMat); crewScreen.frustumCulled = false; crewScreen.visible = false
+    screen.add(crewScreen)
+    // the hero pass touches only the crewmate's part of the screen (the screen's uv → its local plane)
+    const cs = crewScreen
+    cs.userData.heroRect = (cam: THREE.Camera) => crewL.rectOn(cs, cam, (u, v, o) => o.set((u - 0.5) * sw, (v - 0.5) * sh, 0))
+  }
   const outerMats = crewMaterials(envs.page)
   outerMats.body.envMapIntensity = 1.0
   outerMats.visor.envMapIntensity = 2.6
@@ -610,8 +624,8 @@ export function* buildSteps(gl: THREE.WebGLRenderer, portrait: boolean, low: boo
   outerMats.body.customProgramCacheKey = () => 'crew-rim'
 
   const c = {
-    hSpace: new THREE.Color('#7a5cff'), hSky: new THREE.Color('#8a9cc0'), gSpace: new THREE.Color('#071a22'), gForest: new THREE.Color('#2f7a30'),
-    kSpace: new THREE.Color('#ffd2c4'), kSun: new THREE.Color('#ffe6cc'), rSpace: new THREE.Color('#5fd8ff'), rSun: new THREE.Color('#ffb062'), fogDusk: new THREE.Color('#3a2a4a'), fogDay: new THREE.Color('#a9c3bd'),
+    hSpace: new THREE.Color(SPACE_LIGHT.hemiSky), hSky: new THREE.Color('#8a9cc0'), gSpace: new THREE.Color(SPACE_LIGHT.hemiGround), gForest: new THREE.Color('#2f7a30'),
+    kSpace: new THREE.Color(SPACE_LIGHT.key), kSun: new THREE.Color('#ffe6cc'), rSpace: new THREE.Color(SPACE_LIGHT.rim), rSun: new THREE.Color('#ffb062'), fogDusk: new THREE.Color('#3a2a4a'), fogDay: new THREE.Color('#a9c3bd'),
   }
   const I: Inner = { crew: new THREE.Vector3(), yaw: 0, pitch: 0, roll: 0, walk: 0, phase: 0, float: 0, squash: 0, visible: true, cam: new THREE.Vector3(), look: new THREE.Vector3(), fov: 40, atmos: 0, stars: 1, shadow: 0 }
   const IB: Inner = { ...I, crew: new THREE.Vector3(), cam: new THREE.Vector3(), look: new THREE.Vector3() }
@@ -619,13 +633,13 @@ export function* buildSteps(gl: THREE.WebGLRenderer, portrait: boolean, low: boo
 
   const keep = new Set<THREE.BufferGeometry>([crewIn.body.geometry, crewIn.visor.geometry, (crewIn.legL.children[0] as THREE.Mesh).geometry])
   const dispose = () => {
-    rt.dispose(); Object.values(envs).forEach((t) => t.dispose())
-    ;[innerScene, outerG].forEach((root) => root.traverse((o: any) => { if (o.geometry && !keep.has(o.geometry)) o.geometry.dispose?.(); if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m: any) => m.dispose()) }))
+    rt.dispose(); Object.values(envs).forEach((t) => t.dispose()); crewL?.dispose()
+    ;[innerScene, outerG].forEach((root) => root.traverse((o: any) => { if (o.geometry && !keep.has(o.geometry) && !isSharedSkyGeometry(o.geometry)) o.geometry.dispose?.(); if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m: any) => m.dispose()) }))
   }
   return {
-    sw, sh, rt, envs, inner: innerScene, fireflies, canopy, tunnel, tunnelLights, tunnelBlur, rush: 0, tunnelFx: { zoom: 0, chroma: 0, flash: 0, cx: 0.5, cy: 0.5 }, grass, foliage, fan, mist, motes, treeRim, icam, bcam, sky, skyMat, stars, starMat, glintMat, forest, crewIn, innerMats, shadow, shadowMat, hemi, sun, rim, lightRig,
+    sw, sh, rt, envs, inner: innerScene, skyExtras, crewL, crewScreen, screen, fireflies, canopy, tunnel, tunnelLights, tunnelBlur, rush: 0, tunnelFx: { zoom: 0, chroma: 0, flash: 0, cx: 0.5, cy: 0.5 }, grass, foliage, fan, mist, motes, treeRim, icam, bcam, sky, skyMat, stars, starMat, glintMat, forest, crewIn, innerMats, shadow, shadowMat, hemi, sun, rim, lightRig,
     outer: outerG, cta, rimU, ctaKey: '', par: new THREE.Vector2(), backdrop, backdropMat, screenMat, crewOut, shards, shardMat, shardKey: '', tier, glints, c, I, IB, O, lastP: -1,
-    tmp: new THREE.Vector3(), tmp2: new THREE.Vector3(), o3: new THREE.Object3D(), dispose,
+    tmp: new THREE.Vector3(), tmp2: new THREE.Vector3(), o3: new THREE.Object3D(), one: new THREE.Vector2(1, 1), dispose,
   }
 }
 export type { Built }

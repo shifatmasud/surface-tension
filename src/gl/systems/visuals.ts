@@ -106,7 +106,8 @@ class Visuals {
     out.pos.copy(pos); out.target.copy(tgt); out.fov = fov
     // looks ease toward the blend (no hard cuts between sections)
     // a new block owner snaps (its first frames are only a sliver at the bottom of the card)
-    const lam = 7, snap = clip.enabled && clip.ownerKey !== this.ownerKey
+    // R6.87 GENTLE DIVE: across the push hand-off (one picture on both sides) the look eases instead of snapping
+    const lam = 7, snap = clip.enabled && clip.ownerKey !== this.ownerKey && !clip.cut
     this.ownerKey = clip.ownerKey
     for (const k of keys) {
       const v = (acc as any)[k]

@@ -200,7 +200,7 @@ function NeighbourPass() {
   }), [])
   useFrame(() => {
     const chain = engine.chain
-    if (!nb.enabled || !chain || !clip.enabled || !clip.boundary || clip.still < 0 || !props.introDone || props.overlayOpen) {
+    if (!nb.enabled || !chain || !clip.enabled || !clip.boundary || clip.cut || clip.still < 0 || !props.introDone || props.overlayOpen) { // R6.87: no outgoing render on the push hand-off
       if (nb.block >= 0) nb.reset()
       return
     }

@@ -85,7 +85,7 @@ function current(dropped: boolean): number {
   // so the beat waits for the stone to settle; the descent stays wordless a moment longer
   if (R.systems && s >= R.systems.top - vh) {
     const pinned = R.systems.h > vh * 1.5
-    return pinned && (dive.push > 0.5 || dive.sys < 0.04) ? -1 : IDX.get('systems')!
+    return pinned && (dive.push > 0.1 || dive.sys < 0.04) ? -1 : IDX.get('systems')!
   }
   // the work beats show only while their GL cards are on screen (0 < pin < 1); before that "Under the surface" holds
   const pl = R.lab ? pin('lab') : -1

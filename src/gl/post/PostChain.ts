@@ -16,6 +16,8 @@ import { SharpText } from './SharpText'
 import { stickerMask, gemMask } from '../systems/stickerMask'
 import { makeSelective, syncSelective } from '../fx/hotBloom' // CINEMATIC: selective bloom (hot spots only)
 import { FOOT_MODE, FooterWorldEffect } from './footerWorld' // FOOTER MOCKUP (VITE_FOOT 1|2; 0 = live, effect absent)
+import { heroPass, HeroHidePass, HeroDrawPass, UiHidePass } from './heroPass' // R6.87 SPLIT RESOLUTION
+import { SPLIT } from '../quality'
 import { gpuTimer } from '../systems/perfGovernor' // SHARP: the governor's GPU frame timer ends after the last draw
 
 /**
@@ -62,6 +64,9 @@ export class PostChain {
   text: SharpText
   preUfx: RenderPass
   postUfx: RenderPass
+  /** R6.87: the footer effect's uniforms (the hero composite rides the same curtain) */
+  footer: FooterWorldEffect | null = null
+  private ufxUnderRef: THREE.Scene; private ufxCameraRef: THREE.Camera
 
   /** NEIGHBOUR HOOK: the outgoing section's own small chain (systems/neighbour.ts) — created on first use */
   private nbc: { composer: EffectComposer; grade: GradeEffect; bloom: BloomEffect; w: number; h: number; swaps: number } | null = null
@@ -70,6 +75,7 @@ export class PostChain {
 
   constructor(public gl: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, ufxUnder: THREE.Scene, ufxOver: THREE.Scene, ufxCamera: THREE.Camera) {
     this.nbArgs = [scene, camera, ufxUnder, ufxOver, ufxCamera]
+    this.ufxUnderRef = ufxUnder; this.ufxCameraRef = ufxCamera
     this.composer = new EffectComposer(gl, { frameBufferType: THREE.HalfFloatType, multisampling: 0 })
     // W18 fps fix: the whole chain (AA included) stays at the scene's adaptive DPR; only one bilinear blit touches the
     // full-density canvas, then the text layer (scissored to its boxes). Before this the last pass (SMAA/FXAA) ran at
@@ -90,16 +96,22 @@ export class PostChain {
     const renderScale = () => props.dpr / Math.max(1, Math.min(window.devicePixelRatio || 1, 2))
     // sharpen (convolution) first, then the grade on its result: one pass instead of two when below native size
     // FOOTER MOCKUP: the footer's world and the in-frame curtain ride in the Grade pass (no extra full-screen pass)
-    const gradeOnly = FOOT_MODE ? new EffectPass(camera, this.grade, new FooterWorldEffect(FOOT_MODE)) : new EffectPass(camera, this.grade)
+    this.footer = FOOT_MODE ? new FooterWorldEffect(FOOT_MODE) : null
+    const gradeOnly = this.footer ? new EffectPass(camera, this.grade, this.footer) : new EffectPass(camera, this.grade)
+    heroPass.attachDepth(this.composer.inputBuffer) // R6.87: the scene pass's depth, for the heroes' occlusion
     const sharpGrade = new EffectPass(camera, new InlineSharpenEffect(), this.grade)
     const sharp = () => false && renderScale() < 0.99   // W18: CAS in the final upscale replaces the inline sharpen
     this.entries = [
+      { name: 'HeroHide', order: -1, pass: new HeroHidePass(), needsRender: () => heroPass.active() },   // R6.87 SPLIT
       { name: 'Scene', order: 0, pass: this.scenePass, needsRender: () => true },
+      { name: 'HeroDraw', order: 1, pass: new HeroDrawPass(scene, camera), needsRender: () => heroPass.active() },   // R6.87 SPLIT
       { name: 'DiveGodRays', order: 5, pass: new DiveGodRaysPass(camera), needsRender: () => diveRays.on },
       { name: 'Bloom', order: 10, pass: new EffectPass(camera, this.bloom), needsRender: () => settings.USE_BLOOM && props.look.bloom > 0.001 },
       { name: 'Grade', order: 30, pass: gradeOnly, needsRender: () => !sharp() },
       { name: 'Sharpen+Grade', order: 30, pass: sharpGrade, needsRender: () => sharp() },
+      { name: 'UiHide', order: 49, pass: new UiHidePass(false), needsRender: () => heroPass.hasUi() },   // R6.87 SPLIT
       { name: 'PreUfx', order: 50, pass: this.preUfx, needsRender: () => ufxUnder.children.some((c) => c.visible) },
+      { name: 'UiShow', order: 51, pass: new UiHidePass(true), needsRender: () => heroPass.hasUi() },   // R6.87 SPLIT
       { name: 'ScreenPaintDistortion', order: 3100, pass: new EffectPass(camera, this.distortion), needsRender: () => props.look.paintAmount > 0 && !paintState.asleep },
       { name: 'PostUfx', order: 100, pass: this.postUfx, needsRender: () => ufxOver.children.some((c) => c.visible) },
       { name: 'SMAA', order: 4000, pass: new EffectPass(camera, smaa), needsRender: () => quality.aa === 'smaa' },
@@ -108,7 +120,7 @@ export class PostChain {
       // (so a boundary never doubles it or slides it with a card) and BEFORE the trail, so the trail still bends it
       // (W18, Shifat 14:01Z) the slot is no longer a pass in this chain: drawText() draws it after the final pass, at the
       // canvas's full density, through the same trail displacement
-      { name: 'ClipComposite', order: 3000, pass: new EffectPass(camera, new ClipCompositeEffect()), needsRender: () => clip.boundary || clip.capture >= 0 },
+      { name: 'ClipComposite', order: 3000, pass: new EffectPass(camera, new ClipCompositeEffect()), needsRender: () => (clip.boundary && !clip.cut) || clip.capture >= 0 },
     ]
   }
   // the one full-density pass: the finished frame (in the composer's input buffer after its last swap) upscaled once
@@ -163,7 +175,8 @@ void main(){
     // SHARP: bicubic + CAS when upscaled (strength by ratio); a mild CAS at 1:1 (rest: native density, SMAA). ?nocas: off
     const up = props.textDpr > props.dpr * 1.05
     this.blitMat.uniforms.u_up.value = up ? 1 : 0
-    this.blitMat.uniforms.u_sharp.value = NOCAS ? 0 : up ? Math.min(1, (props.textDpr / props.dpr - 1) * 0.8) : 0.25
+    // R6.87 SPLIT: the background is meant to be soft under the sharp heroes; a strong CAS on a 2.5–4x upscale reads crunchy
+    this.blitMat.uniforms.u_sharp.value = NOCAS ? 0 : up ? Math.min(SPLIT ? 0.4 : 1, (props.textDpr / props.dpr - 1) * 0.8) : 0.25
     gl.setRenderTarget(null); gl.autoClear = false
     gl.render(this.blitScene, this.blitCam)
     gl.autoClear = auto; gl.setRenderTarget(prev)
@@ -257,6 +270,7 @@ void main(){
       this.warmAll = false
       // NEIGHBOUR HOOK: link the neighbour chain's programs (bloom+grade pass, its targets) behind the curtain too
       try { this.renderNeighbour(props.look, 0.5, dt) } catch { /* warm-up only */ }
+      heroPass.warm(this.gl, this.nbArgs[0], this.nbArgs[1], this.grade, this.distortion, this.footer ? this.footer.uniforms : null) // R6.87 SPLIT
       // DIAG (preloader): this frame links every post program at once without parallel compile (4.8 s on live at 1440,
       // ANGLE/D3D11) and used to run AFTER the counter read 100. It now counts: the counter holds an honest ~85 % through
       // it and reaches 100 only after it. (Spreading it one pass per frame was measured: it doubled the total wait.)
@@ -270,6 +284,7 @@ void main(){
     }
     this.composer.render(dt)
     this.blit()
+    heroPass.composite(this.gl, this.grade, this.distortion, this.footer ? this.footer.uniforms : null, this.ufxUnderRef, this.ufxCameraRef) // R6.87 SPLIT
     this.text.draw(this.gl)
     gpuTimer.end()
     void shared

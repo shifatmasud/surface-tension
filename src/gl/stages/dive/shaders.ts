@@ -16,6 +16,7 @@ uniform vec3 u_sunAir;     // direction toward the sun in air
 uniform float u_time, u_deep, u_split, u_star;
 uniform float u_amb;       // v3: 0..1 the deep water's own glow takes over from the sunlit water (by depth)
 uniform float u_abyss;     // v3: 0..1 the systems deep: exponential fog density, marine snow, the last shafts
+uniform float u_sinkK;     // R6.88 SINK: 0..1 how far the tablet has taken us down below the Shade DS scene (the water darkens)
 uniform float u_caus;      // caustic strength 0..1 (QA: ?nocaus)
 uniform vec2 u_res;
 uniform sampler2D u_bn;
@@ -42,7 +43,7 @@ vec3 deepWater(vec3 dir){
   vec3 c = mix(vec3(0.002, 0.012, 0.028), vec3(0.008, 0.055, 0.105), smoothstep(0.0, 0.55, up));
   c = mix(c, vec3(0.030, 0.150, 0.230), smoothstep(0.5, 1.0, up));
   c += vec3(0.020, 0.110, 0.150) * pow(up, 6.0);                    // the faint glow of the surface, far overhead
-  return c * (1.0 - 0.3 * u_abyss);
+  return c * (1.0 - 0.3 * u_abyss) * (1.0 - 0.72 * u_sinkK);
 }
 /** FogExp2: density thickens with depth (u_abyss) */
 float deepFog(float dist){

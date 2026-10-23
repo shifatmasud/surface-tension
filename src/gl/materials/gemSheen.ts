@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { shared } from '../../state/props'
 import { causticUniforms, causticsChunk } from '../water/caustics'
+import { DIS_GLSL } from '../stages/dive/disintegrate' // R6.88 SINK
 
 /**
  * Thin-film interference, shared GLSL: the colour of light reflected by a film of thickness d (nm) and index nf
@@ -33,6 +34,7 @@ export function createGemSheen(opts: { strength?: number; warm?: number } = {}) 
     u_under: { value: 1 },           // 0 disables the underwater look (caustics, absorption, waterline)
     u_tp: { value: 1 },
     u_feather: { value: 1.75 },
+    u_dis: { value: 0 },   // R6.88 SINK: the stone's particle dissolve (HeroStage shares its gemDisU here)
     u_dep: { value: new THREE.Vector2(0, 2) },   // W25 R6.42: shared with the stone's under-pass depth fade (HeroStage gemDep)     // W25 R6.41: silhouette coverage ramp (scene px), shared with the stone's (HeroStage gemFeather)              // CINEMATIC: three-point strength (key from the surface underwater, fill, rim)
     ...causticUniforms,
   }
@@ -67,12 +69,15 @@ export function createGemSheen(opts: { strength?: number; warm?: number } = {}) 
       }`,
     fragmentShader: /* glsl */ `
       uniform float u_time, u_strength, u_warm, u_surfaceY, u_under, u_tp, u_feather; uniform vec2 u_dep; uniform vec3 u_key, u_rim;
+      uniform float u_dis;
+      ${DIS_GLSL}
       varying vec3 vN; varying vec3 vW; varying vec3 vO; varying vec3 vON; varying vec3 vOW;
       varying vec3 vSilB; varying vec3 vSilN0; varying vec3 vSilN1; varying vec3 vSilN2;
       ${THIN_FILM}
       float h31(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
       ${causticsChunk()}
       void main() {
+        if (u_dis > 0.0 && disRaw(u_dis, disFGem(vO)) >= 0.0) discard;   // R6.88 SINK
         vec3 n = normalize(vN);
         vec3 v = normalize(cameraPosition - vW);
         if (dot(n, v) < 0.0) n = -n;

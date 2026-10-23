@@ -3,7 +3,7 @@ import * as THREE from 'three'
 /**
  * TUNNEL ZOOM BLUR (Shifat Oct 21 12:44Z "blur … ultra fast smoothness even for cheap phone"): one cheap radial
  * (zoom) blur of the inner-world picture toward the tunnel's vanishing point, driven by the scroll speed.
- * It runs at HALF the inner render target's size (the inner target is already 1024 / 512-on-low on its long side,
+ * It runs at the inner render target's own size (R6.87; was half; the inner target is already 1024 / 512-on-low on its long side,
  * i.e. far below the screen), with a fixed tap count per tier (high 10, mid 8, low 6 — same look, cheaper fill),
  * and ONLY while the tunnel is on. The screen shader then mixes the sharp picture with this blurred one by distance
  * from the vanishing point, so the crewmate (centre) stays crisp and the walls smear. No extra full-res pass.
@@ -25,7 +25,9 @@ void main(){
 }`
 
 export function buildTunnelBlur(src: THREE.WebGLRenderTarget, tier: 'low' | 'mid' | 'high') {
-  const w = Math.max(64, src.width >> 1), h = Math.max(64, src.height >> 1)
+  // R6.87 (kept from R6.84; Shifat's phone edges): the FULL inner-target size (was half). The half-size smear, magnified
+  // on a phone screen, laid a blocky ghost outline just outside the crewmate's silhouette.
+  const w = src.width, h = src.height
   const rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, depthBuffer: false, stencilBuffer: false, generateMipmaps: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter })
   const taps = tier === 'high' ? 10 : tier === 'mid' ? 8 : 6
   const material = new THREE.ShaderMaterial({

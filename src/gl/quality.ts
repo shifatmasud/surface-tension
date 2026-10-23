@@ -109,14 +109,27 @@ const DESKTOP_SCENE_DPR = 1.2
 
 /** PERFGOV: phone GPUs well under a 2019 mid-range part (Adreno 3xx/4xx/50x, Mali-4xx/T6xx–T8xx/G31/G51/G52,
  *  PowerVR GE8xxx) — ?lowend forces it (QA) */
-const LOW_END_GPU = /Adreno \(TM\) (3\d\d|4\d\d|50\d)\b|Mali-(4\d\d|T[678]\d\d|G31|G51|G52)|PowerVR Rogue GE/i.test(settings.GPU) || q.has('lowend')
+export const LOW_END_GPU = /Adreno \(TM\) (3\d\d|4\d\d|50\d)\b|Mali-(4\d\d|T[678]\d\d|G31|G51|G52)|PowerVR Rogue GE/i.test(settings.GPU) || q.has('lowend')
+
+/** R6.87 SPLIT RESOLUTION (Shifat 5:46–5:48 PM Oct 22: "Resolution Quality down the bg scene but quality up the stone,
+ *  project images, [...] crewmate model only"; "Only crewmate, stone, project images/videos are my true hi res subjects").
+ *  The scene (water, sky, environment, fog, bloom, particles, the tablet, the journey's scenery) renders at the governor's
+ *  background DPR (props.dpr); the hero subjects (the stone, the project slides with their reels, the crewmate) render
+ *  at the hero density (props.heroDpr: the device's own DPR, phones capped at 2) in their own pass (post/heroPass.ts) and
+ *  are composited over the upscaled background through the same grade and trail. The canvas (and with it the text
+ *  layer) runs at the hero density. The governor moves the background only; the heroes stay sharp.
+ *  Budget GPUs (LOW_END_GPU) take the biggest background cut: ceiling 0.75, floor 0.5. ?nosplit = the R6.83 path. */
+export const SPLIT = settings.USE_GL && !q.has('nosplit')
+const LOW_BG_CAP = 0.75
+const BG_FLOOR = SPLIT && LOW_END_GPU ? 0.5 : 0.6
+const PHONE_HERO_DPR = 2
 
 /** PERFGOV: set bits in a small history mask */
 function bits(x: number) { let n = 0; while (x) { n += x & 1; x >>>= 1 } return n }
 
 class Quality {
   readonly tier = tier
-  readonly ladder = LADDER[tier] ?? [1]
+  readonly ladder = SPLIT && LOW_END_GPU && tier === 'low' ? [...LADDER.low, 0.5] : (LADDER[tier] ?? [1])  // R6.87: budget GPUs get one more background rung
   readonly boost = BOOST[tier] ?? []
   level = 0
   aa: 'smaa' | 'fxaa' = 'smaa'
@@ -162,7 +175,9 @@ class Quality {
   stepAt(level: number) { return level < 0 ? this.boost[Math.min(this.boost.length, -level) - 1] : this.ladder[Math.min(this.maxLevel, level)] }
   /** the device's own density for this window: device DPR (cap 3) within the canvas pixel cap — the single ceiling */
   nativeFor(w: number, h: number) { return Math.max(1, Math.min(3, window.devicePixelRatio || 1, Math.sqrt(CANVAS_PIXELS / Math.max(1, w * h)))) }
-  private cap(w: number, h: number) { return Math.min(browser.dpr, this.nativeFor(w, h), Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h)), tier === 'low' ? PHONE_SCENE_DPR : DESKTOP_SCENE_DPR) }
+  private cap(w: number, h: number) { return Math.min(browser.dpr, this.nativeFor(w, h), Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h)), tier === 'low' ? (SPLIT && LOW_END_GPU ? LOW_BG_CAP : PHONE_SCENE_DPR) : DESKTOP_SCENE_DPR) }
+  /** R6.87 SPLIT: the hero subjects' density — the device's own (canvas cap), phones at most 2x. Never moved by the governor. */
+  heroDprFor(w: number, h: number) { const n = this.nativeFor(w, h); return tier === 'low' ? Math.min(n, PHONE_HERO_DPR) : n }
   /** the rest target before the rest judge: native within 1.2x the scene pixel cap */
   private restTarget(w: number, h: number) { return Math.min(this.nativeFor(w, h), Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h)) * 1.2, tier === 'low' ? PHONE_SCENE_DPR : DESKTOP_SCENE_DPR) }
   /** the canvas density a rest frame refines to: native, phones capped at PHONE_CANVAS_DPR */
@@ -173,7 +188,7 @@ class Quality {
   dprFor(w: number, h: number, noRest = false) {
     this.w = w; this.h = h
     const td = this.textDprFor(w, h, noRest)
-    const moving = Math.min(td, Math.max(0.6, Math.min(this.stepAt(this.level), this.cap(w, h))))
+    const moving = Math.min(td, Math.max(BG_FLOOR, Math.min(this.stepAt(this.level), this.cap(w, h))))
     if (!this.rest || noRest) return moving
     return Math.min(td, Math.max(moving, Math.min(this.restTarget(w, h), this.restCap)))
   }
@@ -184,6 +199,7 @@ class Quality {
   textDprFor(w: number, h: number, noRest = false) {
     const n = this.nativeFor(w, h)
     if (tier !== 'low') return n
+    if (SPLIT) return this.heroDprFor(w, h) // R6.87: the canvas (text included) runs at the hero density
     if (this.rest && !noRest) return this.textCeil(w, h)
     // W27 R6.65: the text rung drops to 1.5x from level 1 on (the same absolute level as before the ladder grew: it was
     // "the last two of three"), and NEVER lower — the new 0.85 / 0.72 / 0.6 scene steps keep the text at 1.5x, so
@@ -298,7 +314,7 @@ class Quality {
   private nextUp(): number {
     const cur = this.dprFor(this.w, this.h, true)
     for (let l = this.level - 1; l >= this.minLevel; l--) {
-      const d = Math.max(0.6, Math.min(this.stepAt(l), this.cap(this.w, this.h)))
+      const d = Math.max(BG_FLOOR, Math.min(this.stepAt(l), this.cap(this.w, this.h)))
       if (d > cur + 0.01) return l
     }
     return this.level
@@ -341,7 +357,7 @@ class Quality {
     const calm = now - this.calmSince
     if (this.gpuFresh(now)) {
       // measured: predict the GPU time at the next DPR (cost ∝ pixels) and only probe where it fits
-      const cur = this.dprFor(this.w, this.h, true), nd = Math.max(0.6, Math.min(this.stepAt(up), this.cap(this.w, this.h)))
+      const cur = this.dprFor(this.w, this.h, true), nd = Math.max(BG_FLOOR, Math.min(this.stepAt(up), this.cap(this.w, this.h)))
       const pred = this.gpuMs * (nd / cur) * (nd / cur)
       if (pred > BUDGET_MS * GPU_NO) { this.stats.gpuVetoes++; this.calmSince = now; return }
       if (pred < BUDGET_MS * GPU_UP && calm > GPU_CALM_MS) { this.stats.gpuProbes++; this.probe(up, now); return }

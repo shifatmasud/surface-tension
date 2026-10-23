@@ -77,7 +77,12 @@ export function inner(p: number, out: Inner, portrait = false) {
   out.visible = p < T.BREAK
   // ---- camera: an orbit in space, a chase from above while falling, eye level in the clearing
   const a = mix(-0.75, 0.45, seg(p, 0, 0.26))
-  const offSpace = _a.set(Math.sin(a) * 6.2, 1.1, Math.cos(a) * 6.2)
+  // R6.88 (Shifat 10:09 PM: "Make crewmate a bit farther away from camera to keep small scale. Too big hero looks bad"):
+  // in space the orbit stands 1.5x farther off (the crewmate reads at ~2/3 of its old size, a small figure in a big sky),
+  // easing back to the old orbit inside the tunnel. The glass's portal and the sky's frame read this same function, so
+  // the crewmate is the same size through the glass, through the portal push and inside
+  const far = mix(1.5, 1.0, ss(0.1, 0.3, p))
+  const offSpace = _a.set(Math.sin(a) * 6.2 * far, 1.1 * far, Math.cos(a) * 6.2 * far)
   const offFall = _b.set(2.6, 0.6, 6.8)
   const offLand = _c.set(mix(0, -1.3, easeIO(seg(p, 0.52, 0.74))), mix(0.2, 0.3, seg(p, 0.52, 0.74)), mix(7.6, 7.0, easeIO(seg(p, 0.52, 0.74))))
   const off = offSpace.lerp(offFall, ss(0.22, 0.36, p)).lerp(offLand, ss(0.38, 0.52, p))

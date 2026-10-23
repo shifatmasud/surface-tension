@@ -9,6 +9,7 @@ import { Spring } from '../../../core/spring'
 import { dive } from '../dive/diveState'
 import { DIVE_COMMON } from '../dive/shaders'
 import { SlideFluid, FLUID_GLSL } from './slideFluid'
+import { heroPass } from '../../post/heroPass' // R6.87 SPLIT
 
 /**
  * SLIDES (Shifat 17:49Z): "Project slides no need appear animation. Over animation is bad. They should naturally live in
@@ -214,6 +215,7 @@ export const labGL = {
         visibleWhen: () => this.onScreen(card),
       }
       ufx.add(card.item)
+      heroPass.add(mesh, true) // R6.87 SPLIT RESOLUTION: the project slides (images + reels) draw at the canvas density
       // (Shifat 18:52Z, no duplicate labels: the slot's "Work · 0n / 03" line already carries the number and the tags,
       // so the slide no longer paints its own label texture)
       // posters are small: fetch them all up front so no card ever shows before its picture

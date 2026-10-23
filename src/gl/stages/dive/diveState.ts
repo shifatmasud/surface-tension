@@ -29,6 +29,17 @@ export const dive = {
   abyss: 0,        // 0..1 how deep into the systems water we are (fog density, deep ambient, marine snow)
   sys: 0,          // 0..1 progress through the Systems part of the dive (cylinder turn)
   push: 0,         // W17 Scene 3 entry: 0..1 the camera pushes into the stone (the ring opens, the tablet inside lights up)
+  // R6.88 SINK (Shifat 10:04 PM Oct 22): after the Shade DS scene the parts dissolve into falling points, the tablet alone
+  // sinks deep, the diamond comes to dead centre behind it and dissolves the same way; then the push into the screen
+  dis: 0,          // 0..1 the Shade DS parts' particle dissolve (disintegrate.ts)
+  sink: 0,         // metres the tablet (and the camera with it, a beat behind) has sunk below its place
+  camSink: 0,      // metres the camera has sunk (= sink at push 1, so the hand-off pose is unchanged)
+  lock: 0,         // R6.88b PORTAL LOCK: 0..1 the camera rides the scroll's own pose (no spring lag) through the portal (CameraRig)
+  gemC: 0,         // 0..1 the diamond travelling to dead centre behind the tablet
+  gemDis: 0,       // 0..1 the diamond's particle dissolve
+  gemCtr: new THREE.Vector3(), // where 'dead centre behind the tablet' is (written by UiCylinder from the real camera)
+  gemCtrOk: false,
+  gemBig: 2,       // the stone's scale there (written with gemCtr)
 }
 ;(window as any).__dive = dive
 
@@ -99,6 +110,30 @@ export const SYS_C = new THREE.Vector3(0, -40, 50)
 export function sysLift() { return 1.0 * (1 - portrait()) }
 /** W17 Scene 3 (13:24Z): where the floating tablet settles, relative to SYS_C (in front of the stone's old place) */
 export const TAB_F = new THREE.Vector3(0, 0.05, -0.7)
+/** R6.88 SINK: how far the tablet sinks over the push (m), and how far behind it the diamond comes to rest (m) */
+export const SINK_M = 7.0, GEM_BEHIND = 1.7
+/** R6.88b DEEP TABLET (Shifat 10:41 PM: "Tablets should be by default in the deep underwater scene. Not spawned in the
+ *  Shade DS scene"): the tablet is no part of the Shade DS drum. It waits from the start down in the deepest water,
+ *  SINK_M below the drum (world), its glass facing back up the dive (normal −z). Phones hold it upright (portrait), so
+ *  the whole slab sits in the tall frame and the bezel slides off all four edges together on the push. */
+export const TAB_DEEP = new THREE.Vector3(SYS_C.x + TAB_F.x, SYS_C.y + TAB_F.y - SINK_M, SYS_C.z + TAB_F.z)
+/** the glass's centre (the slab's origin sits 0.032 behind its glass; the glass faces −z) */
+export const TAB_GLASS = new THREE.Vector3(TAB_DEEP.x, TAB_DEEP.y, TAB_DEEP.z - 0.032)
+/** R6.88b: the push where the portal (the camera through the glass) begins; the push ends at the stage switch */
+export const PORTAL0 = 0.64
+/** the push where the glass covers the frame and the camera stops (a beat before the switch, so springs settle on it) */
+export const PORTAL1 = 0.97
+export function tabletUpright() { return portrait() > 0.5 }
+/** the lens distance at which the whole slab is presented: ~60 % of the frame's width, at most ~56 % of its height */
+export function tabletPresentDist(fovDeg: number, aspect: number, upright: boolean) {
+  const t = Math.tan((fovDeg * Math.PI) / 360), hw = upright ? 0.485 : 0.735, hh = upright ? 0.735 : 0.485
+  return Math.max(hw / (0.6 * t * aspect), hh / (0.56 * t))
+}
+/** the lens distance at which the DISPLAY over-covers the frame (8 % bleed); TabletWindow uses the same rule */
+export function tabletFillDist(fovDeg: number, aspect: number, upright: boolean) {
+  const t = Math.tan((fovDeg * Math.PI) / 360), wx = upright ? 0.44 : 0.69, wy = upright ? 0.69 : 0.44
+  return 0.92 * Math.min(wy / t, wx / (t * aspect))
+}
 const curP = new THREE.CatmullRomCurve3(KEYS.map((k) => new THREE.Vector3(...k.p)), false, 'centripetal')
 const curT = new THREE.CatmullRomCurve3(KEYS.map((k) => new THREE.Vector3(...k.t)), false, 'centripetal')
 
@@ -185,7 +220,9 @@ export function gemPath(u: number, pos: THREE.Vector3, target: THREE.Vector3, vf
     _b.copy(SYS_C); _b.y += sysLift() + Math.sin(time * 0.55) * 0.06; _b.x += Math.sin(time * 0.37) * 0.03
     out.lerp(_b, w2)
   }
-  // Scene 3 hand-off (13:24Z): the stone drifts aside and down, back into the fog, as the tablet takes the focus
-  if (dive.push > 0) { const p = Math.min(1, dive.push / 0.5), w = p * p * (3 - 2 * p); out.x += 1.6 * w; out.y -= 1.0 * w; out.z += 1.6 * w }
+  // R6.88b: while the Shade DS parts dissolve the stone keeps its place (the camera sinks away from it); then it comes down
+  // to dead centre BEHIND the waiting tablet (dive.gemCtr: on the lens axis through the glass, written by Dive.tsx from the
+  // deep camera's own framing, no last-frame read) and dissolves there
+  if (dive.gemC > 0) out.lerp(dive.gemCtr, dive.gemC * dive.gemC * (3 - 2 * dive.gemC))
   return out
 }

@@ -6,7 +6,8 @@ import { visuals } from '../../gl/systems/visuals'
 import { props } from '../../state/props'
 import { clamp } from '../../core/math'
 import { vfovFor } from '../../core/frame'
-import { dive, divePath, gemPath, U_MAX, SYS_C, TAB_F } from '../../gl/stages/dive/diveState'
+import { dive, divePath, gemPath, U_MAX, SINK_M, TAB_GLASS, PORTAL0, PORTAL1, GEM_BEHIND, tabletUpright, tabletPresentDist, tabletFillDist } from '../../gl/stages/dive/diveState'
+import { GLIDE_PRE } from '../../gl/stages/journey/spaceSky' // R6.88 PORTAL
 import { portrait } from '../../core/frame'
 import { sections } from '../../app/sections'
 import { TOOLS } from '../../content/site'
@@ -16,8 +17,16 @@ import { browser } from '../../services/settings'
 import { noOrphan } from '../a11y/noOrphans'
 
 /** dive progress where the work (lab) takes over, and where the scene ends under the Shade DS card */
+const LOOK_BG0 = new THREE.Color('#020405'), LOOK_BG1 = new THREE.Color('#020203') // R6.88: the dive's and the journey's grade backgrounds
 export const U_LAB = 0.88, U_END = 1.0
 const ss = (a: number, b: number, x: number) => { const t = clamp((x - a) / (b - a)); return t * t * (3 - 2 * t) }
+/** R6.88b: the camera's sink to the deep tablet (smootherstep: no speed step at either end) */
+const sinkK = (p: number) => { const t = clamp((p - 0.04) / 0.38); return t * t * t * (t * (6 * t - 15) + 10) }
+/** smoothstep's inverse on 0..1 */
+const invSS = (y: number) => { let lo = 0, hi = 1; for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (m * m * (3 - 2 * m) < y) lo = m; else hi = m } return (lo + hi) / 2 }
+/** the systems progress where the glass's picture starts converging on the journey's frame (TabletWindow: h = ss(0.8, 1, k),
+ *  k = ss(PORTAL0, 1, push), push = ss(0.56, 1, sys)) — GLIDE_PRE runs from here to the switch */
+const SYS_H = 0.56 + 0.44 * invSS(PORTAL0 + (1 - PORTAL0) * invSS(0.8))
 const RM = browser.reducedMotion
 /** QA: the scroll position at which the dive reaches progress u (0 … U_LAB, the dive section only) */
 let scrollForU: ((u: number) => number) | null = null
@@ -69,7 +78,7 @@ export function Dive() {
         pose.target.y += dist * fl * (0.0026 * Math.sin(tt * 0.23 + 0.7) + 0.0012 * Math.sin(tt * 0.67 + 2.1))
       }
       // v3: in the deep, phones step back so the whole UI cylinder fits the tall frame
-      const pb = portrait() * ss(1.0, 1.22, dive.u) * (1 - dive.push)
+      const pb = portrait() * ss(1.0, 1.22, dive.u) // R6.88b: held through the push (the deep framing takes over by its own blend)
       if (pb > 0) {
         // phones: the tall frame's horizontal fov is narrow — come in closer so the cylinder spans the width
         back.subVectors(pose.pos, pose.target).normalize(); pose.pos.addScaledVector(back, -pb * 1.8)
@@ -78,20 +87,39 @@ export function Dive() {
       }
       // R6.82 (Shifat 6:46 AM PT Oct 22): wide screens ride a little lower too, so the atom (the stone at its centre)
       // sits just above mid-frame, clear of the Systems type in the lower part. Phones (portrait = 1) get 0: unchanged.
-      const db = (1 - portrait()) * ss(1.0, 1.22, dive.u) * (1 - dive.push)
+      const db = (1 - portrait()) * ss(1.0, 1.22, dive.u)
       if (db > 0) { pose.pos.y -= db * 0.35; pose.target.y -= db * 0.35 }
       // W17 SCENE 3 ENTRY (STRUCTURE v3): at the end of the systems water the camera pushes INTO the stone, where the
       // tablet glows through its facets; the journey (stars + the crewmate) then takes over from inside it
+      // R6.88b DEEP TABLET + PORTAL (Shifat 10:08 PM "0 jump cut … only smooth portal in", 10:41 PM the tablet waits in the
+      // deep): over the push the camera sinks from the Shade DS framing to the tablet waiting SINK_M below (0.04 → 0.42),
+      // square to its glass on its axis, the whole slab presented at the centre of the frame; holds there while the diamond
+      // comes to dead centre behind it and dissolves (a slow drift in); then pushes straight through the glass
+      // (PORTAL0 → PORTAL1): the bezel slides off the frame's edges and the display grows until it covers the frame, at a
+      // constant rate of zoom (log distance, eased in and out). The stage switch comes after PORTAL1, at full cover.
       if (dive.push > 0) {
-        // (13:24Z) focus moves from the stone to the tablet rising in front of it, then the camera pushes into its screen
-        const a = ss(0.0, 0.5, dive.push), b = ss(0.5, 1.0, dive.push)
-        tabW.copy(SYS_C).add(TAB_F)
-        pushP.copy(tabW); pushP.y += 0.35; pushP.z -= 3.0 + 0.8 * portrait()
-        pose.pos.lerp(pushP, a); pose.target.lerp(tabW, a)
-        pushP.copy(tabW); pushP.z -= 0.62 - 0.2 * portrait()   // phones: the tall frame needs the screen closer to fill it
-        pose.pos.lerp(pushP, b)
-        pose.fov = pose.fov + (vfovFor(46, 30, 74) - pose.fov) * a
+        const p = dive.push, fovD = vfovFor(46, 30, 74), aspect = props.width / Math.max(1, props.height), up = tabletUpright()
+        const Dv = tabletPresentDist(fovD, aspect, up), Df = tabletFillDist(fovD, aspect, up)
+        let dist = Dv * (1 - 0.08 * clamp((p - 0.42) / (PORTAL0 - 0.42)))
+        const kp = clamp((p - PORTAL0) / (PORTAL1 - PORTAL0)), ke = kp < 0.5 ? 4 * kp * kp * kp : 1 - Math.pow(-2 * kp + 2, 3) / 2
+        if (ke > 0) dist = dist * Math.pow(Df / dist, ke)
+        const A = sinkK(p)
+        deepP.set(TAB_GLASS.x, TAB_GLASS.y, TAB_GLASS.z - dist)
+        pose.pos.lerp(deepP, A); pose.target.lerp(TAB_GLASS, A)
+        pose.fov = pose.fov + (fovD - pose.fov) * A
+        // where the diamond comes to rest: on the lens axis through the glass, GEM_BEHIND behind it, its girdle ≈ 1.45 × the
+        // slab's width as seen from the held lens (upright on phones: it shows either side; wide: all round)
+        const dG = Dv + 0.032 + GEM_BEHIND, R = (up ? 1.45 : 1.25) * (up ? 0.485 : 0.735) * dG / Dv
+        dive.gemBig = R / 0.5
+        dive.gemCtr.set(TAB_GLASS.x, TAB_GLASS.y, TAB_GLASS.z + 0.032 + GEM_BEHIND) // its girdle (the part that shows either side) on the axis
+        dive.gemCtrOk = true
       }
+      // R6.88 ZERO-CUT: over the last of the push the dive's grade arrives at the journey's (Journey.tsx), so the frame before
+      // the stage switch and the frame after it are graded alike (it was a vignette / contrast / bloom-threshold step)
+      { const k = ss(0.8, 1, dive.push), L = st.look
+        L.saturation = 1.02 + (1.0 - 1.02) * k; L.contrast = 1.05 + (1.06 - 1.05) * k; L.vignette = 0.34 + (0.4 - 0.34) * k
+        L.vignetteSoft = 0.7 + (0.75 - 0.7) * k; L.bloomThreshold = 0.86 + (0.75 - 0.86) * k; L.paintOffsetRatio = 1 + (0.6 - 1) * k
+        L.bg.copy(LOOK_BG0).lerp(LOOK_BG1, k); L.fogColor.copy(L.bg) }
       dive.pose.copy(pose.pos)
       // QA (W19): the dive camera's pose as numbers (u, height, z, pitch in degrees) for the regression suite
       ;(window as any).__divePose = { u: +dive.u.toFixed(4), y: +pose.pos.y.toFixed(3), z: +pose.pos.z.toFixed(3), pitch: +(Math.atan2(pose.target.y - pose.pos.y, Math.hypot(pose.target.x - pose.pos.x, pose.target.z - pose.pos.z)) * 57.2958).toFixed(2) }
@@ -100,7 +128,7 @@ export function Dive() {
       bg: new THREE.Color('#020405'), fogColor: new THREE.Color('#020405'),
       saturation: 1.02, contrast: 1.05, vignette: 0.34, vignetteSoft: 0.7, bloom: 0.5, bloomThreshold: 0.86, dive: 1,
     })
-    const back = new THREE.Vector3(), pushP = new THREE.Vector3(), tabW = new THREE.Vector3()
+    const back = new THREE.Vector3(), deepP = new THREE.Vector3()
     ;(window as any).__diveGo = (u: number) => { if (scrollForU) scroll.scrollTo(scrollForU(u), { immediate: true }) }
     scrollForU = (u: number) => range.docTop - props.height + Math.max(0, Math.min(1, u / U_LAB)) * Math.max(1, range.height)
     let lastT = -1
@@ -121,8 +149,25 @@ export function Dive() {
         dive.u = rawS > 0 ? U_END + (U_MAX - U_END) * rawS : rawL > 0 ? U_LAB + (U_END - U_LAB) * rawL : raw * U_LAB
         dive.sys = clamp((rawS - 0.3) / 0.7)
         dive.push = ss(0.56, 1.0, dive.sys) // POLISH-2: starts as the parts finish forming (morph ends at 0.56), so the tablet's approach gets more scroll
+        // R6.88 SINK (Shifat 10:04–10:05 PM Oct 22), all on the same push (no new scroll): the parts dissolve into falling
+        // points (0 → 0.4); the tablet alone sinks SINK_M into the dark, the camera following a beat behind (both reach the
+        // full depth at 1, so the hand-off pose is unchanged); the diamond comes to dead centre behind the tablet
+        // (0.2 → 0.46) and dissolves the same way (0.44 → 0.7); then the push into the screen carries on as before
+        // R6.88b (Shifat 10:41 PM: the tablet waits in the deep): the parts dissolve into falling points (0 → 0.3); the
+        // camera sinks SINK_M through darkening water to the tablet waiting there (0.04 → 0.42); the diamond comes down to
+        // dead centre behind it (0.3 → 0.48) and dissolves the same way (0.46 → 0.68); then the portal push (PORTAL0 → 1)
+        dive.dis = ss(0.0, 0.3, dive.push)
+        dive.sink = dive.camSink = SINK_M * sinkK(dive.push)
+        dive.gemC = ss(0.3, 0.48, dive.push)
+        dive.lock = ss(PORTAL0 - 0.06, PORTAL0 + 0.1, dive.push) // the lens leaves its springs as the portal begins (CameraRig)
+        dive.gemDis = clamp((dive.push - 0.46) / 0.22)
+        // R6.88 PORTAL: the glide into the sky starts inside the glass as it converges (the push where the display's picture
+        // starts converging on the journey's frame, TabletWindow h > 0), linear in scroll (spaceSky.ts GLIDE_PRE)
+        GLIDE_PRE.t = clamp((dive.sys - SYS_H) / (1 - SYS_H))
+        if (sysR) GLIDE_PRE.span = (1 - SYS_H) * 0.7 * sysR.height / Math.max(1, props.height)
         dive.abyss = ss(0.96, 1.2, dive.u)
-        dive.gemScale = 1 + 0.7 * ss(1.02, 1.2, dive.u)
+        { const base = 1 + 0.7 * ss(1.02, 1.2, dive.u), c = dive.gemC * dive.gemC * (3 - 2 * dive.gemC)
+          dive.gemScale = base + (Math.max(base, dive.gemBig) - base) * c } // R6.88: larger behind the tablet, so it shows around it
         props.dive = dive.u
         // the guide gem: handed from the hero's physics to the dive path as the dive starts; it sinks, then leads
         const vf = vfovFor(divePath(dive.u, gp, gt), 30, 74); underwaterShape(dive.u, gp, gt)  // (path pose without the phone step-back: the stone's place is world-fixed in the deep)

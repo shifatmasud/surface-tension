@@ -32,6 +32,11 @@ class Clip {
   private readonly FADE = new Set<number>([1])
   /** the current boundary crossfades (reduced motion, or a FADE boundary) */
   xfade = false
+  /** R6.87 GENTLE DIVE: the push boundary is a straight hand-off — the glass at the end of the dive and the journey's
+   *  opening are the same picture (one sky, the same glide, the crewmate at full density on both sides), so the live
+   *  block is shown alone: no copy frame, no softened crossfade, no neighbour render. ?divexfade = the R6.83 crossfade. */
+  cut = false
+  private readonly CUT = !(typeof location !== 'undefined' && /[?&]divexfade/.test(location.search))
   /** block that owns the live render (the incoming one during a boundary) */
   owner = 0
   /** bumps whenever the owner changes: camera springs and the look snap to the new block (hidden under the card) */
@@ -106,7 +111,7 @@ class Clip {
     this.capture = -1
     this.ufxY = 0
     if (!this.boundary) {
-      this.xfade = false
+      this.xfade = false; this.cut = false
       // arm: a neighbouring block is about to enter (either direction) — keep the latest frame of this one
       if ((owner + 1 < N && this.top(owner + 1) < vh * 1.6) || (owner > 0 && this.top(owner) > -vh * 0.6)) this.capture = owner
       this.still = -1
@@ -122,6 +127,8 @@ class Clip {
     this.yTop = yTop; this.t = t; this.d = d
     const R = Math.min(64, Math.max(18, vw * 0.035))
     this.xfade = this.reduced || this.FADE.has(b)
+    this.cut = this.CUT && this.FADE.has(b)
+    if (this.cut) this.capture = -1 // nothing to keep: the live block is the whole frame
     if (this.xfade) {
       // reduced motion: no card move — the composite crossfades the two frames (never a cut); the outgoing DOM fades
       this.shift = 0; this.scale = 1; this.lag = 0; this.dark = 0; this.radius = 0; this.inset = 0; this.outRadius = 0

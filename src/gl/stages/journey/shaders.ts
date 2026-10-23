@@ -174,6 +174,7 @@ export function screenMaterial(tex: THREE.Texture, size: THREE.Vector2) {
       // TUNNEL DRAMA (tunnelBlur.ts): the half-res zoom-blurred picture, how much of it to show (u_zoom), the vanishing
       // point it smears toward (u_zoomC, uv), the chromatic split at speed (u_chroma) and the warp flash (u_flash)
       u_blur: { value: tex }, u_zoom: { value: 0 }, u_zoomC: { value: new THREE.Vector2(0.5, 0.5) }, u_chroma: { value: 0 }, u_flash: { value: 0 },
+      u_crew: { value: null }, u_crewScale: { value: new THREE.Vector2(1, 1) },
     },
     vertexShader: /* glsl */ `
       uniform vec2 u_center; uniform float u_bulge, u_width, u_ringT, u_ringAmp, u_time;
@@ -203,6 +204,7 @@ export function screenMaterial(tex: THREE.Texture, size: THREE.Vector2) {
     fragmentShader: /* glsl */ `
       uniform sampler2D u_map; uniform vec2 u_size; uniform float u_bright, u_time, u_gloss;
       uniform sampler2D u_blur; uniform vec2 u_zoomC; uniform float u_zoom, u_chroma, u_flash;
+      uniform sampler2D u_crew; uniform vec2 u_crewScale; // R6.87 SPLIT: the crewmate at the canvas density (crewLayer.ts)
       varying vec2 vUv; varying vec3 vWPos; varying float vH;
       void main(){
         vec3 n = normalize(cross(dFdx(vWPos), dFdy(vWPos)));
@@ -218,6 +220,12 @@ export function screenMaterial(tex: THREE.Texture, size: THREE.Vector2) {
         float dist = length(rad);
         vec2 ca = rad * u_chroma * dist;
         vec3 col;
+      #ifdef CREW_ONLY
+        // R6.87 SPLIT: the overlay (hero pass) — the crewmate alone, through the same bent-glass lookup; alpha = coverage
+        vec4 cr = texture2D(u_crew, (vUv - off) * u_crewScale);
+        if (cr.a < 0.003) discard;
+        col = cr.rgb / cr.a;
+      #else
         col.r = texture2D(u_map, vUv - off * (1.0 + 0.10 * disp) + ca).r;
         col.g = texture2D(u_map, vUv - off).g;
         col.b = texture2D(u_map, vUv - off * (1.0 - 0.10 * disp) - ca).b;
@@ -227,6 +235,7 @@ export function screenMaterial(tex: THREE.Texture, size: THREE.Vector2) {
           float k = min(0.65, u_zoom * smoothstep(0.03, 0.55, dist) * 1.2); // the lines keep their edge, the smear trails them
           col = mix(col, blr, k);
         }
+      #endif
         col += vec3(0.78, 0.86, 1.0) * u_flash * (1.0 - 0.6 * dist); // the warp flash on entry / exit
         col *= u_bright;
         // liquid glass highlights: Fresnel sheen + one soft key, only where the surface actually bends
@@ -239,7 +248,11 @@ export function screenMaterial(tex: THREE.Texture, size: THREE.Vector2) {
         // flat glass: a faint diagonal sheen when we see the tablet from outside
         float sheen = smoothstep(0.55, 1.25, vUv.y * 0.8 + (1.0 - vUv.x) * 0.6); // a soft studio reflection across the top-left of the glass
         col = col * (1.0 - 0.12 * sheen * u_gloss) + vec3(0.75, 0.8, 0.9) * sheen * 0.05 * u_gloss;
+      #ifdef CREW_ONLY
+        gl_FragColor = vec4(col, cr.a);
+      #else
         gl_FragColor = vec4(col, 1.0);
+      #endif
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }`,

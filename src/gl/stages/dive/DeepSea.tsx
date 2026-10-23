@@ -3,7 +3,7 @@ import { runToEnd } from '../../prewarm' // PERFGOV
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { props } from '../../../state/props'
-import { DIVE_LAYER, SYS_C, dive } from './diveState'
+import { DIVE_LAYER, SYS_C, dive, PORTAL0 } from './diveState'
 import { DIVE_COMMON, CLIP } from './shaders'
 
 /**
@@ -254,7 +254,7 @@ export function DeepSea({ u }: { u: Record<string, THREE.IUniform> }) {
     const g = group.current; if (!g) return
     g.visible = (u.u_amb.value as number) > 0.01
     mats.plankton.uniforms.u_px.value = props.renderH
-    mats.bubbles.uniforms.u_warp.value = Math.pow(Math.max(0, (dive.push - 0.55) / 0.45), 1.5)
+    mats.bubbles.uniforms.u_warp.value = Math.pow(Math.max(0, (dive.push - PORTAL0) / (1 - PORTAL0)), 1.5) // R6.88b: the streaks belong to the portal push
   })
   return (
     <group ref={group}>

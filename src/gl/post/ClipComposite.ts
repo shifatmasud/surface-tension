@@ -101,7 +101,7 @@ export class ClipCompositeEffect extends Effect {
       if (s.rt.width !== inputBuffer.width || s.rt.height !== inputBuffer.height) s.rt.setSize(inputBuffer.width, inputBuffer.height)
       fboHelper.copy(inputBuffer.texture, s.rt)
     }
-    const on = clip.boundary
+    const on = clip.boundary && !clip.cut // R6.87 GENTLE DIVE: the push boundary shows the live block alone
     this.u('u_on').value = on ? 1 : 0
     if (!on) return
     // the still block's slot holds its frame from when it was last the live render (copied every frame while live)

@@ -6,6 +6,7 @@ import { MeshRefractionMaterial } from '@react-three/drei'
 import { createWaterMaterial } from '../../materials/water'
 import { createSkyDome, sky } from '../../shaders/sky'
 import { brilliantGeometry } from './diamond'
+import { DIS_GLSL } from '../dive/disintegrate' // R6.88 SINK: the diamond's dissolve front
 import { createGemSheen } from '../../materials/gemSheen'
 import { props, shared } from '../../../state/props'
 import { settings } from '../../../services/settings'
@@ -18,6 +19,7 @@ import { dive, DIVE_LAYER } from '../dive/diveState'
 import { quality } from '../../quality' // PERF HOOK
 import { waterInput } from '../../water/waterInput' // WATER HOOK
 import { gemMask } from '../../systems/stickerMask'
+import { heroPass } from '../../post/heroPass' // R6.87 SPLIT
 /** PERFGOV: the water plane's normal, shared (the reflection pass rebuilt it every frame) */
 const WATER_UP = new THREE.Vector3(0, 1, 0)
 
@@ -52,6 +54,9 @@ const gemBoost = { value: 1 }   // W24 R6.36: facet range above the floor (phone
 const gemFeather = { value: 1.75 }   // W24 R6.36: silhouette coverage ramp in scene px (portrait 2.75: 1 px more feather)
 const gemDep = { value: new THREE.Vector2(0, 2) }   // W25 R6.42: under-surface pass only: x = on, y = 1 / stone radius (depth fade of the lake's refracted ghost)
 const gemPre = { value: 0 }   // W25 R6.42: 1 when the stone is drawn opaque (its alpha is not applied by blending)
+/** R6.88 SINK: the diamond's particle dissolve (dive/disintegrate.ts), 0 = whole; and the mesh, for its points' frame */
+export const gemDisU = { value: 0 }
+export const gemRef = { m: null as THREE.Mesh | null }
 const gemFill = { value: 0.7 }   // W23: 0.7 in the hero (the darkest navy chips lift toward the env blue), 0.85 in the dive (set per frame)
 function gemPatch(fresPow: string, lod: string) {
   return (sh: { vertexShader: string; fragmentShader: string; uniforms: Record<string, { value: unknown }> }) => {
@@ -62,14 +67,16 @@ function gemPatch(fresPow: string, lod: string) {
     sh.uniforms.w24Feather = gemFeather
     sh.uniforms.w25Dep = gemDep
     sh.uniforms.w25Pre = gemPre
+    sh.uniforms.w26Dis = gemDisU
     // W23 (390 stepped outline): the stone's silhouette edges get analytic coverage (diamond.ts addSilhouetteAttrs): on a
     // triangle whose neighbour across an edge faces away, alpha ramps from 0 at that edge to 1 over ~1.75 scene pixels,
     // so the outline stops stepping when the phone's scene (≈1.3–1.5× density) is scaled up. No MSAA (SMAA-only rule).
     sh.vertexShader = sh.vertexShader
-      .replace('varying vec3 vNormal;', 'varying vec3 vNormal;\n  attribute vec3 aSilB; attribute vec3 aSilN0; attribute vec3 aSilN1; attribute vec3 aSilN2;\n  varying vec3 vSilB; varying vec3 vSilN0; varying vec3 vSilN1; varying vec3 vSilN2;')
-      .replace('gl_Position = projectionMatrix * viewMatrix * modelMatrix * transformedPosition;', 'vSilB = aSilB; mat3 w23M = mat3(modelMatrix); vSilN0 = w23M * aSilN0; vSilN1 = w23M * aSilN1; vSilN2 = w23M * aSilN2;\n    gl_Position = projectionMatrix * viewMatrix * modelMatrix * transformedPosition;')
+      .replace('varying vec3 vNormal;', 'varying vec3 vNormal;\n  attribute vec3 aSilB; attribute vec3 aSilN0; attribute vec3 aSilN1; attribute vec3 aSilN2;\n  varying vec3 vSilB; varying vec3 vSilN0; varying vec3 vSilN1; varying vec3 vSilN2; varying vec3 w26O;')
+      .replace('gl_Position = projectionMatrix * viewMatrix * modelMatrix * transformedPosition;', 'w26O = position.xyz; vSilB = aSilB; mat3 w23M = mat3(modelMatrix); vSilN0 = w23M * aSilN0; vSilN1 = w23M * aSilN1; vSilN2 = w23M * aSilN2;\n    gl_Position = projectionMatrix * viewMatrix * modelMatrix * transformedPosition;')
     sh.fragmentShader = sh.fragmentShader
-      .replace('uniform float bounces;', 'uniform float bounces;\n  uniform float w22Fill;\n  uniform float w23Sil;\n  uniform float w23Lift;\n  uniform float w24Boost;\n  uniform float w24Feather;\n  uniform vec2 w25Dep;\n  uniform float w25Pre;\n  varying vec3 vSilB; varying vec3 vSilN0; varying vec3 vSilN1; varying vec3 vSilN2;')
+      .replace('uniform float bounces;', 'uniform float bounces;\n  uniform float w22Fill;\n  uniform float w23Sil;\n  uniform float w23Lift;\n  uniform float w24Boost;\n  uniform float w24Feather;\n  uniform vec2 w25Dep;\n  uniform float w25Pre;\n  varying vec3 vSilB; varying vec3 vSilN0; varying vec3 vSilN1; varying vec3 vSilN2;\n  uniform float w26Dis; varying vec3 w26O;\n' + DIS_GLSL)
+      .replace('void main() {', 'void main() {\n    if (w26Dis > 0.0 && disRaw(w26Dis, disFGem(w26O)) >= 0.0) discard;   // R6.88: gone before the trace')
       .replace('pow( 1.0 + dot( viewDirection, worldNormal), 10.0 )', `pow( clamp(1.0 + dot( viewDirection, worldNormal), 0.0, 1.0), ${fresPow} )`)
       .replace('gl_FragColor = vec4(mix(diffuseColor.rgb, vec3(1.0), nFresnel), diffuseColor.a);', `
     #ifdef ENVMAP_TYPE_CUBEM
@@ -107,6 +114,7 @@ function gemPatch(fresPow: string, lod: string) {
       // W25 R6.42 (scorer-r636..r639: the 1440 dive's refracted ghost lobe reads as solid as the stone above the surface): in
       // the under-surface pass only, the stone's coverage fades with its depth below the lake (full at the waterline, ~30 %
       // a stone-radius down), so the lake's refraction of the pavilion recedes into the water instead of a hard lilac lobe
+      if (w26Dis > 0.0) { float w26R = disRaw(w26Dis, disFGem(w26O)); if (w26R >= 0.0) discard; gl_FragColor.rgb += disEmber(w26R); }   // R6.88 SINK
       if (w25Dep.x > 0.5) { float w25f = mix(1.0, 0.3, smoothstep(0.05, 0.9, max(0.0, -vWorldPosition.y) * w25Dep.y)); gl_FragColor.a *= w25f; if (w25Pre > 0.5) gl_FragColor.rgb *= w25f; }`)
   }
 }
@@ -283,6 +291,13 @@ export function HeroStage() {
     fit()
     return quality.on(fit)
   }, [size, lake])
+  // R6.87 SPLIT RESOLUTION: the stone (and its sheen shell) is a hero subject — drawn at the canvas density in its own
+  // pass over the low-res scene (post/heroPass.ts); its reflection in the lake keeps coming from the mirror pass
+  useEffect(() => {
+    ;(sheenMesh.current.material as THREE.ShaderMaterial).uniforms.u_dis = gemDisU // R6.88 SINK: the sheen dissolves with the stone
+    const a = heroPass.add(gemMesh.current), b = heroPass.add(sheenMesh.current)
+    return () => { a(); b() }
+  }, [])
   useEffect(() => {
     if (!lake) return
     wu.u_lakeTex!.value = lake.rt.texture
@@ -362,6 +377,7 @@ export function HeroStage() {
     st.spin += dt * 0.16
     const m = gemMesh.current
     ;(window as any).__heroGem = { m, sheen: sheenMesh.current }
+    gemRef.m = m; gemDisU.value = dive.gemMix > 0 ? dive.gemDis : 0 // R6.88 SINK
     m.position.copy(gem.pos)
     m.scale.setScalar(gem.radius * (dive.gemMix > 0 ? dive.gemScale : 1))
     // contact bookend: the low camera saw the hero's forward tilt edge-on (a flat sliver); tip the table toward the lens
@@ -493,6 +509,8 @@ export function HeroStage() {
       env.cam.update(gl, scene)
       m.visible = true; sheenMesh.current.visible = true
     }
+    // R6.88 SINK: the diamond is all points once its dissolve has run (its trace and its sheen stop drawing)
+    { const gone = gemDisU.value > 0.999; if (m.visible === gone) { m.visible = !gone; sheenMesh.current.visible = !gone } }
     {
       // W23: where the stone sits on screen (viewport px), so the trail's smear leaves its edge alone (post/effects.ts)
       if (lakeOn && m.visible) {

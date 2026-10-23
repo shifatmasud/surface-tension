@@ -8,11 +8,13 @@ import { Spring3, Spring } from '../../core/spring'
 import { BrownianMotion } from '../../core/math'
 import { tilt } from '../../services/tilt'
 import { clip } from './clip'
+import { dive } from '../stages/dive/diveState' // R6.88b PORTAL LOCK
 
 const FINE_POINTER = typeof matchMedia === 'function' ? matchMedia('(any-pointer: fine)').matches : true
 const REDUCED = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)').matches : false
 // the handheld operator is a polish item awaiting the OK for LIVE: on everywhere except the live host (or with ?cam)
 const OPERATOR = typeof location === 'undefined' || location.hostname !== 'shifat-surface-tension.sites.tab.bot' || /[?&]cam/.test(location.search)
+const LK_P = new THREE.Vector3(), LK_T = new THREE.Vector3() // R6.88b PORTAL LOCK scratch
 /** critically damped follow (Shifat 15:30Z "mouse/touch move smoothly animates camera like real life"): w = 6.2 rad/s
  *  settles in ~0.75 s with no overshoot */
 class Crit { x = 0; v = 0; constructor(public w = 6.2) {} step(t: number, dt: number) { const a = this.w * this.w * (t - this.x) - 2 * this.w * this.v; this.v += a * dt; this.x += this.v * dt; return this.x } }
@@ -39,6 +41,7 @@ export function CameraRig() {
     fresh: { pos: new THREE.Vector3(), target: new THREE.Vector3(), fov: 35 } as Pose, freshLook: makeLook(),
   }), [])
   useFrame((_, dt) => {
+    ;(window as any).__mainCam = camera // QA (R6.88b fbf: captures wait for the lens to settle)
     visuals.resolve(st.pose, dt)
     if (!st.init) { st.pos.x.reset(st.pose.pos.x); st.pos.y.reset(st.pose.pos.y); st.pos.z.reset(st.pose.pos.z); st.tgt.x.reset(st.pose.target.x); st.tgt.y.reset(st.pose.target.y); st.tgt.z.reset(st.pose.target.z); st.init = true }
     // a stage that lives far away (the journey sits 200 m off) is a cut, not a 200 m dolly through the void
@@ -65,15 +68,22 @@ export function CameraRig() {
       st.cutAt = props.frame
     }
     st.last.copy(st.pose.pos)
-    const p = st.pos.update(st.pose.pos, dt), t = st.tgt.update(st.pose.target, dt)
+    const p0 = st.pos.update(st.pose.pos, dt), t0 = st.tgt.update(st.pose.target, dt)
+    // R6.88b PORTAL LOCK (Shifat 10:08 PM: "0 jump cut … only smooth portal in"): through the push into the glass the lens
+    // eases off the follow springs onto the scroll's own pose (dive.lock 0 → 1 over the portal's first stretch), and the
+    // parallax / drift / handheld turn fade out with it, so the glass ALWAYS covers the frame at the stage switch however
+    // fast the scroll (a lagging spring at the switch would be a cut from the water to the sky). Continuous in scroll.
+    const lk = props.stage === 'dive' ? dive.lock : 0
+    const p = lk > 0 ? LK_P.set(p0.x + (st.pose.pos.x - p0.x) * lk, p0.y + (st.pose.pos.y - p0.y) * lk, p0.z + (st.pose.pos.z - p0.z) * lk) : p0
+    const t = lk > 0 ? LK_T.set(t0.x + (st.pose.target.x - t0.x) * lk, t0.y + (st.pose.target.y - t0.y) * lk, t0.z + (st.pose.target.z - t0.z) * lk) : t0
     const f = st.fov.update(st.pose.fov, dt)
     // mouse-move parallax (damped) — or device tilt on phones
     // a touch is not a hover: on coarse pointers the last tap point must not park the camera off-centre
     const fine = FINE_POINTER
     const mx = tilt.active ? tilt.x : fine ? input.mouseXY.x : 0, my = tilt.active ? tilt.y : fine ? input.mouseXY.y : 0
     // stages that frame an exact composition (the journey's screen fills the viewport) take the parallax away
-    st.parK += ((props.overlayOpen || props.stage === 'journey' ? 0 : 1) - st.parK) * (1 - Math.exp(-4 * dt))
-    const strength = st.parK
+    st.parK += ((props.overlayOpen || props.stage === 'journey' ? 0 : 1 - lk) - st.parK) * (1 - Math.exp(-4 * dt)) // R6.88b: ≈0 by the switch, so the journey does not start with the dive's parallax
+    const strength = Math.min(st.parK, 1 - lk)
     const par = st.par.update({ x: mx * 0.55 * strength, y: my * 0.3 * strength, z: 0 }, dt)
     const d = st.drift.update(dt)
     camera.position.set(p.x + par.x + d.x * 0.12 * strength, p.y + par.y + d.y * 0.08 * strength, p.z + d.z * 0.1 * strength)
@@ -88,10 +98,11 @@ export function CameraRig() {
       const tx = fine ? input.mouseXY.x : touching ? input.mouseXY.x : 0
       const ty = fine ? input.mouseXY.y : touching ? input.mouseXY.y : 0
       // stages with an exact composition (the journey's screen fills the viewport) take a smaller share
-      O.k += ((props.overlayOpen ? 0 : props.stage === 'journey' ? 0.35 : 1) - O.k) * (1 - Math.exp(-3 * dt))
+      O.k += ((props.overlayOpen ? 0 : props.stage === 'journey' ? 0.35 : 1 - lk) - O.k) * (1 - Math.exp(-3 * dt))
+      const ok = O.k * (1 - lk) // R6.88b: no handheld turn inside the portal
       // Shifat 16:33Z: one fixed front-facing camera; only a subtle eased pointer parallax (about ±1.5°)
-      const yaw = O.yaw.step(-tx * 0.026 * O.k, dt)          // ±1.5°
-      const pitch = O.pitch.step(ty * 0.018 * O.k, dt)       // ±1.0°
+      const yaw = O.yaw.step(-tx * 0.026 * ok, dt)          // ±1.5°
+      const pitch = O.pitch.step(ty * 0.018 * ok, dt)       // ±1.0°
       camera.rotateY(yaw); camera.rotateX(pitch)
       st.opOn = true; st.opYaw = yaw; st.opPitch = pitch
       if (Math.abs(camera.fov - f) > 1e-3) { camera.fov = f; camera.updateProjectionMatrix() }

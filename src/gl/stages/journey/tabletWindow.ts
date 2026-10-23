@@ -5,10 +5,14 @@ import { vfovFor } from '../../../core/frame'
 import { mix, smoothstep as ss } from '../../../core/math'
 import { nb } from '../../systems/neighbour'
 import { FIXED_LENS } from '../../world/handoff'
+import { PORTAL0 } from '../dive/diveState' // R6.88b
 import { inner, type Inner } from './timeline'
 import { Crewmate, crewMaterials, CREW_CENTER_Y } from './crewmate'
 import { makeEnvs, makeEnvsSteps } from './env'
-import { skyMaterial, starMaterial, glintStarMaterial } from './shaders'
+import { CrewLayer } from './crewLayer' // R6.87 SPLIT: the crewmate at the canvas density
+import { heroPass } from '../../post/heroPass'
+import { SPLIT } from '../../quality'
+import { buildSpaceSky, SkyExtras, SPACE_LIGHT, starPrFor, isSharedSkyGeometry, JOURNEY_LENS, journeyVisibleTan, glideOffset, glideT, GLIDE_PRE, glideStartBack } from './spaceSky' // R6.87: ONE sky (the journey's), shared
 import { warmSteps as prewarmSteps, prewarm, runToEnd } from '../../prewarm' // PERFGOV
 
 /**
@@ -41,49 +45,9 @@ const PLANE_W = 1.5, PLANE_H = 1.0
  *  (5.1 mm on the same scale). The display rectangle above is unchanged. */
 export const IPAD_GLASS = { hw: WIN_HW + 0.045, hh: WIN_HH + 0.045, r: 0.075 }
 export const IPAD_T = 0.0266
-const ROCKS = 7
-/** The journey's visible lens at p = 0, as its screen covers the viewport (JourneyStage: sw × sh screen, OVERSCAN, the
- *  ultrawide widening): the vertical tan of what the viewer actually sees. SCENE may change the crop (journey glass
- *  fitted at dFillJ); set JOURNEY_LENS.crop to match and the hand-off follows. */
-export const JOURNEY_LENS = { crop: 1.14 }
-export function journeyVisibleTan(fovDeg: number, isPortrait: boolean, aspect: number) {
-  const sw = isPortrait ? 8.8 : 12.8, sh = isPortrait ? 12.8 : 8.8
-  const wideK = isPortrait ? 1 : Math.max(1, aspect / 1.6)
-  const fillH = Math.min(sh / JOURNEY_LENS.crop, sw / (JOURNEY_LENS.crop * aspect))
-  return Math.tan(THREE.MathUtils.degToRad(fovDeg) / 2) * wideK * (fillH / sh)
-}
-const DUST = 420
-
+export { JOURNEY_LENS, journeyVisibleTan } // R6.87: defined once in spaceSky.ts
 
 // the tablet's pose (rise, bob, and with the fixed lens its travel to the camera) lives in world/handoff.ts (SCENE lane)
-
-const DUST_VS = /* glsl */ `
-attribute float aSize; attribute float aSeed;
-uniform float u_time, u_pr, u_opacity;
-varying float vA; varying float vSeed; varying float vBokeh;
-void main(){
-  vec3 p = position;
-  p += vec3(sin(u_time * 0.11 + aSeed * 6.0), cos(u_time * 0.09 + aSeed * 4.0), sin(u_time * 0.07 + aSeed * 9.0)) * 0.35;
-  vec4 mv = modelViewMatrix * vec4(p, 1.0);
-  gl_Position = projectionMatrix * mv;
-  float d = max(-mv.z, 0.1);
-  // near motes are big soft discs (out of focus), far ones crisp pinpoints
-  float px = aSize * u_pr * 42.0 / d;
-  vBokeh = smoothstep(2.5, 9.0, px);
-  gl_PointSize = clamp(px, 1.0, 26.0 * u_pr);
-  vA = u_opacity * mix(0.95, 0.22, vBokeh) * smoothstep(1.0, 4.0, d);
-  vSeed = aSeed;
-}`
-const DUST_FS = /* glsl */ `
-varying float vA; varying float vSeed; varying float vBokeh;
-void main(){
-  vec2 c = gl_PointCoord - 0.5; float r = length(c) * 2.0;
-  float core = exp(-r * r * 7.0);
-  float disc = smoothstep(1.0, 0.82, r) * (0.55 + 0.45 * smoothstep(0.5, 0.95, r)); // bokeh: a disc with a brighter rim
-  float a = mix(core, disc, vBokeh) * vA;
-  vec3 col = mix(vec3(0.75, 0.84, 1.0), vec3(1.0, 0.9, 0.82), step(0.7, fract(vSeed * 7.13)));
-  gl_FragColor = vec4(col * a, 1.0);
-}`
 
 /** the glass: the portal image recessed under a thin-film coated cover glass, a bezel, the stone's caustic sweeping across */
 const GLASS_VS = /* glsl */ `
@@ -100,7 +64,8 @@ uniform vec4 u_rect;      // the rendered sub-rectangle of the window (local uni
 uniform vec2 u_rtScale;   // used fraction of the allocation
 uniform vec2 u_texel;
 uniform vec2 u_win;       // window half extents
-uniform float u_time, u_on, u_sweep, u_fill, u_live, u_sheen;
+uniform float u_time, u_on, u_sweep, u_fill, u_live, u_sheen, u_rot;
+uniform sampler2D u_crew; uniform vec2 u_crewScale; // R6.87: the crewmate at the canvas density (crewLayer.ts)
 varying vec2 vUv; varying vec3 vWP; varying vec3 vWN;
 float sdBox(vec2 p, vec2 b, float r){ vec2 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r; }
 void main(){
@@ -109,9 +74,17 @@ void main(){
   vec3 N = normalize(vWN);
   float ndv = clamp(abs(dot(N, V)), 0.0, 1.0);
   // ---- the live 3D image (only the on-screen sub-rectangle exists in the target)
-  vec2 wu = (lp - u_rect.xy) / max(u_rect.zw - u_rect.xy, vec2(1e-4));
+  vec2 vp = u_rot > 0.5 ? vec2(-lp.y, lp.x) : lp; // R6.88b: the view frame (an upright tablet's picture stays upright)
+  vec2 wu = (vp - u_rect.xy) / max(u_rect.zw - u_rect.xy, vec2(1e-4));
   wu = clamp(wu, u_texel * 0.5, 1.0 - u_texel * 0.5);
+#ifdef CREW_ONLY
+  // R6.87 SPLIT: the overlay (hero pass) — the crewmate alone, same mapping, same glass on top; alpha = its coverage
+  vec4 cr = texture2D(u_crew, wu * u_crewScale);
+  if (cr.a < 0.003) discard;
+  vec3 img = cr.rgb / cr.a * u_live;
+#else
   vec3 img = texture2D(u_rt, wu * u_rtScale).rgb * u_live;
+#endif
   float scr = sdBox(lp, u_win, 0.03);
   float inS = smoothstep(0.003, -0.003, scr);
   // the image sits a hair under the glass: a soft inner shadow along the display edge (fades as it fills the frame)
@@ -150,23 +123,12 @@ void main(){
   float topk = 0.35 + 0.65 * smoothstep(-0.4, 0.9, lp.y / hp.y);
   c += vec3(0.55, 0.86, 0.95) * bevel * topk * (0.3 + 0.7 * (1.0 - ndv)) * 0.5 * glass;
   c += vec3(0.010, 0.030, 0.034) * 0.35 * (1.0 - inS) * (0.5 + 0.5 * pow(1.0 - ndv, 2.0)) * glass; // iPad: the bezel stays near-black (a faint fill only)
+#ifdef CREW_ONLY
+  gl_FragColor = vec4(c, cr.a * inS);
+#else
   gl_FragColor = vec4(c, 1.0);
+#endif
 }`
-
-function rockGeometry() {
-  const g = new THREE.IcosahedronGeometry(1, 2)
-  const p = g.attributes.position as THREE.BufferAttribute, v = new THREE.Vector3()
-  for (let i = 0; i < p.count; i++) {
-    v.fromBufferAttribute(p, i)
-    const n = Math.sin(v.x * 3.1 + 1.3) * Math.sin(v.y * 2.7 + 0.4) * Math.sin(v.z * 3.3 + 2.1)
-    const n2 = Math.sin(v.x * 7.3) * Math.sin(v.y * 6.1 + 1.0) * Math.sin(v.z * 8.7)
-    v.multiplyScalar(1 + 0.28 * n + 0.07 * n2).multiply(new THREE.Vector3(1, 0.78, 0.9))
-    p.setXYZ(i, v.x, v.y, v.z)
-  }
-  const ng = g.toNonIndexed(); g.dispose()
-  ng.computeVertexNormals()
-  return ng
-}
 
 let current: TabletWindow | null = null
 /** for the integrator (W18's ClipComposite, SCENE's swap): how converged the glass is on the journey's p = 0 frame (0..1);
@@ -184,9 +146,12 @@ export class TabletWindow {
   private crewMats: ReturnType<typeof crewMaterials>
   private sky: THREE.Mesh; private skyMat: THREE.ShaderMaterial
   private stars: THREE.Points; private starMat: THREE.ShaderMaterial; private glintMat: THREE.ShaderMaterial
-  private dust: THREE.Points; private dustMat: THREE.ShaderMaterial
-  private rocks: THREE.InstancedMesh; private rockMat: THREE.MeshStandardMaterial
-  private rockData: { p: THREE.Vector3; s: number; ax: THREE.Vector3; w: number; ph: number }[] = []
+  private extras: SkyExtras
+  /** R6.87 SPLIT: the crewmate's own target + the glass's crew-only twin */
+  private crewL: CrewLayer | null = null
+  private crewMat: THREE.ShaderMaterial | null = null
+  private overlay: THREE.Mesh | null = null
+  private offHero = () => {}
   private I: Inner = { crew: new THREE.Vector3(), yaw: 0, pitch: 0, roll: 0, walk: 0, phase: 0, float: 0, squash: 0, visible: true, cam: new THREE.Vector3(), look: new THREE.Vector3(), fov: 42, atmos: 0, stars: 1, shadow: 0 }
   /** the window's frame in the inner world (rebuilt on resize) */
   private basis = new THREE.Matrix4()
@@ -198,7 +163,7 @@ export class TabletWindow {
   private key = ''
   private reduced = browser.reducedMotion
   // scratch
-  private m = new THREE.Matrix4(); private e = new THREE.Vector3(); private v = new THREE.Vector3(); private q = new THREE.Quaternion()
+  private m = new THREE.Matrix4(); private e = new THREE.Vector3(); private v = new THREE.Vector3(); private q = new THREE.Quaternion(); private v2 = new THREE.Vector2()
   private dummy = new THREE.Object3D()
   private compiled = false
   /** QA: the last frame's numbers */
@@ -230,96 +195,47 @@ export class TabletWindow {
         u_rt: { value: this.rt.texture }, u_rect: { value: new THREE.Vector4(-WIN_HW, -WIN_HH, WIN_HW, WIN_HH) },
         u_rtScale: { value: new THREE.Vector2(1, 1) }, u_texel: { value: new THREE.Vector2(1 / 512, 1 / 512) },
         u_win: { value: new THREE.Vector2(WIN_HW, WIN_HH) },
-        u_time: { value: 0 }, u_on: { value: 0 }, u_sweep: { value: -1 }, u_fill: { value: 0 }, u_live: { value: 0 }, u_sheen: { value: 1 },
+        u_time: { value: 0 }, u_on: { value: 0 }, u_sweep: { value: -1 }, u_fill: { value: 0 }, u_live: { value: 0 }, u_sheen: { value: 1 }, u_rot: { value: 0 },
       },
       vertexShader: GLASS_VS, fragmentShader: GLASS_FS, toneMapped: false,
     })
+    // R6.87 SPLIT: the crewmate is drawn out of the background target into its own, at the canvas density, and the glass's
+    // twin (same geometry, same uniforms, CREW_ONLY) draws it in the hero pass over the low-res glass
+    this.material.uniforms.u_crew = { value: null }; this.material.uniforms.u_crewScale = { value: new THREE.Vector2(1, 1) }
+    if (SPLIT) {
+      this.crewL = new CrewLayer(); CrewLayer.depthFor(this.rt)
+      this.material.uniforms.u_crew.value = this.crewL.rt.texture
+      this.crewMat = new THREE.ShaderMaterial({ uniforms: this.material.uniforms, vertexShader: GLASS_VS, fragmentShader: GLASS_FS, toneMapped: false, defines: { CREW_ONLY: '' },
+        transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 })
+      this.overlay = new THREE.Mesh(this.screen.geometry, this.crewMat); this.overlay.frustumCulled = false; this.overlay.visible = false
+      this.overlay.layers.mask = this.screen.layers.mask; this.overlay.renderOrder = this.screen.renderOrder
+      this.screen.add(this.overlay)
+      // the hero pass touches only the crewmate's part of the glass (its uv in the drawn rectangle → the glass's plane)
+      const ov = this.overlay, cl = this.crewL, R = this.material.uniforms.u_rect.value as THREE.Vector4
+      ov.userData.heroRect = (cam: THREE.Camera) => cl.rectOn(ov, cam, (u, v, o) => o.set(R.x + u * (R.z - R.x), R.y + v * (R.w - R.y), 0))
+      this.offHero = heroPass.add(this.overlay)
+    }
 
-    // ---- the inner world: the journey's own space
+    // ---- the inner world: the journey's own space — R6.87 SINGLE SKY: the dome, the stars, the glints, the rocks and the
+    // dust come from spaceSky.ts (the very buffers the journey draws), so the glass shows the sky the camera then enters
     const sc = this.scene
-    this.skyMat = skyMaterial()
-    this.sky = new THREE.Mesh(new THREE.SphereGeometry(900, 48, 24), this.skyMat)
-    this.sky.renderOrder = -10; this.sky.frustumCulled = false
-    // far stars: the journey's recipe byte for byte (JourneyStage build(): seed 3, its per-tier counts, temperature weights,
-    // brightness curve, the bright few at the same directions) so the hand-off shows the very same sky
-    const low = settings.TIER === 'low'
-    let seed = 3; const r = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
-    const MWN = new THREE.Vector3(0.55, 0.83, 0).normalize(), mwA = new THREE.Vector3(0, 0, -1), mwB = new THREE.Vector3().crossVectors(MWN, mwA).normalize()
-    const N = low ? 2200 : 6500
-    const sp = new Float32Array(N * 3), ssz = new Float32Array(N), scol = new Float32Array(N * 3)
-    const temp = [new THREE.Color('#9fbfff'), new THREE.Color('#cadaff'), new THREE.Color('#f4f6ff'), new THREE.Color('#fff4e3'), new THREE.Color('#ffd9a8'), new THREE.Color('#ffb98a')]
-    const tw = [0.08, 0.2, 0.36, 0.2, 0.11, 0.05]
-    const pickT = () => { let x = r(), i = 0; while (i < tw.length - 1 && x > tw[i]) { x -= tw[i]; i++ } return temp[i] }
-    const v = new THREE.Vector3()
-    for (let i = 0; i < N; i++) {
-      if (r() < 0.42) {
-        const lon = r() * Math.PI * 2, g = (r() + r() + r() - 1.5) * 0.32
-        v.copy(mwA).multiplyScalar(Math.cos(lon)).addScaledVector(mwB, Math.sin(lon)).multiplyScalar(Math.cos(g)).addScaledVector(MWN, Math.sin(g)).normalize()
-      } else {
-        const u = r() * 2 - 1, th = r() * Math.PI * 2, s = Math.sqrt(1 - u * u)
-        v.set(Math.cos(th) * s, u, Math.sin(th) * s)
-      }
-      sp.set([v.x * 600, v.y * 600, v.z * 600], i * 3)
-      const m = Math.pow(r(), 5.5)
-      ssz[i] = 0.9 + m * 2.1 + r() * 0.35
-      const c = pickT(), b = 0.1 + m * 0.95
-      scol.set([c.r * b, c.g * b, c.b * b], i * 3)
-    }
-    const sg = new THREE.BufferGeometry()
-    sg.setAttribute('position', new THREE.BufferAttribute(sp, 3)); sg.setAttribute('aSize', new THREE.BufferAttribute(ssz, 1)); sg.setAttribute('aColor', new THREE.BufferAttribute(scol, 3))
-    this.starMat = starMaterial(1)
-    this.stars = new THREE.Points(sg, this.starMat); this.stars.frustumCulled = false; this.stars.renderOrder = -9
-    const GN = low ? 7 : 12
-    const gp = new Float32Array(GN * 3), gs = new Float32Array(GN), gc = new Float32Array(GN * 3), ga = new Float32Array(GN)
-    for (let i = 0; i < GN; i++) {
-      const az = -Math.PI / 2 + (r() - 0.5) * 2.6, el = (r() - 0.35) * 1.0
-      v.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az)).normalize()
-      if (i === 0) v.set(-0.42, 0.3, -0.86).normalize()
-      if (i === 1) v.set(0.5, 0.24, -0.83).normalize()
-      gp.set([v.x * 580, v.y * 580, v.z * 580], i * 3)
-      gs[i] = (i < 2 ? 44 : 22 + r() * 16)
-      const c = temp[[0, 1, 2, 2, 3, 4][Math.floor(r() * 6)]], b = i < 2 ? 1.0 : 0.55 + r() * 0.35
-      gc.set([c.r * b, c.g * b, c.b * b], i * 3)
-      ga[i] = r() * Math.PI
-    }
-    const gg = new THREE.BufferGeometry()
-    gg.setAttribute('position', new THREE.BufferAttribute(gp, 3)); gg.setAttribute('aSize', new THREE.BufferAttribute(gs, 1)); gg.setAttribute('aColor', new THREE.BufferAttribute(gc, 3)); gg.setAttribute('aAngle', new THREE.BufferAttribute(ga, 1))
-    this.glintMat = glintStarMaterial(1)
-    const glints = new THREE.Points(gg, this.glintMat); glints.frustumCulled = false; glints.renderOrder = -8
-    this.stars.add(glints)
+    const SK = buildSpaceSky(1)
+    this.sky = SK.sky; this.skyMat = SK.skyMat; this.stars = SK.stars; this.starMat = SK.starMat; this.glintMat = SK.glintMat
 
-    // ---- the crewmate (the real model) + the journey's space light: violet hemi, warm key from the camera side, cyan rim
+    // ---- the crewmate (the real model) + the journey's space light (one table: SPACE_LIGHT)
     this.crewMats = crewMaterials(null)
     this.crew = new Crewmate(this.crewMats)
-    const hemi = new THREE.HemisphereLight('#7a5cff', '#071a22', 0.7)
-    const keyL = new THREE.DirectionalLight('#ffd2c4', 2.6); keyL.position.set(5, 6, 6)
-    const rimL = new THREE.DirectionalLight('#5fd8ff', 3.4); rimL.position.set(-6, 3, -7)
+    const L = SPACE_LIGHT
+    const hemi = new THREE.HemisphereLight(L.hemiSky, L.hemiGround, L.hemi)
+    const keyL = new THREE.DirectionalLight(L.key, L.keyI); keyL.position.set(...L.keyPos)
+    const rimL = new THREE.DirectionalLight(L.rim, L.rimI); rimL.position.set(...L.rimPos)
     const rig = new THREE.Group(); rig.add(keyL, rimL, keyL.target, rimL.target); rig.name = 'rig'
-    this.crewMats.body.userData.rim.u_crewRimCol.value = rimL.color // CINEMATIC: the Fresnel rim takes the rig's rim colour
+    // (R6.87: the crewmate's Fresnel rim keeps the journey's own colour, so it is the same crewmate on both sides of the glass)
 
-    // ---- rocks: a few tumbling chunks at different depths (one draw)
-    this.rockMat = new THREE.MeshStandardMaterial({ color: '#6b6e76', roughness: 0.65, metalness: 0.08, flatShading: true, transparent: true, depthWrite: true, fog: false })
-    this.rocks = new THREE.InstancedMesh(rockGeometry(), this.rockMat, ROCKS)
-    this.rocks.frustumCulled = false
+    // ---- the sky's rocks + dust (shared with the journey's space)
+    this.extras = new SkyExtras()
 
-    let seed2 = 7; const r2 = () => ((seed2 = (seed2 * 16807) % 2147483647) / 2147483647)
-    // ---- dust: motes from just behind the glass out to the far field (one draw); the near ones go soft (bokeh)
-    const dp = new Float32Array(DUST * 3), ds = new Float32Array(DUST), dd = new Float32Array(DUST)
-    for (let i = 0; i < DUST; i++) {
-      // a cone along -z of the window frame (built in the frame, moved into the world in layout())
-      const z = 2 + Math.pow(r2(), 1.6) * 70, spread = 0.25 + z * 0.62
-      dp.set([(r2() * 2 - 1) * spread, (r2() * 2 - 1) * spread * 0.75, -z], i * 3)
-      ds[i] = 0.02 + Math.pow(r2(), 3) * 0.06; dd[i] = r2()
-    }
-    const dg = new THREE.BufferGeometry()
-    dg.setAttribute('position', new THREE.BufferAttribute(dp, 3)); dg.setAttribute('aSize', new THREE.BufferAttribute(ds, 1)); dg.setAttribute('aSeed', new THREE.BufferAttribute(dd, 1))
-    this.dustMat = new THREE.ShaderMaterial({
-      uniforms: { u_time: { value: 0 }, u_pr: { value: 1 }, u_opacity: { value: 1 } }, vertexShader: DUST_VS, fragmentShader: DUST_FS,
-      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
-    })
-    this.dust = new THREE.Points(dg, this.dustMat); this.dust.frustumCulled = false
-
-    sc.add(this.sky, this.stars, this.rocks, this.crew.root, this.dust, hemi, rig)
+    sc.add(this.sky, this.stars, this.extras.rocks, this.crew.root, this.extras.dust, hemi, rig)
 
     this.screen.material = this.material
     this.src.addEventListener('dispose', this.onSrcDispose)
@@ -339,7 +255,7 @@ export class TabletWindow {
   /** the inner frame: the journey's opening view, pulled back so the main camera's lens frames it the same */
   private layout(isPortrait: boolean, fillD: number) {
     const W = props.width, H = props.height
-    const key = `${W}x${H}|${isPortrait}|${fillD.toFixed(3)}`
+    const key = `${W}x${H}|${isPortrait}|${fillD.toFixed(3)}|${GLIDE_PRE.span.toFixed(3)}`
     if (key === this.key) return
     this.key = key
     const I = inner(0, this.I, isPortrait)
@@ -349,8 +265,11 @@ export class TabletWindow {
     const fwd = this.v.subVectors(I.look, I.cam).normalize()
     const crewC = new THREE.Vector3(I.crew.x, I.crew.y + CREW_CENTER_Y, I.crew.z)
     const dC = crewC.clone().sub(I.cam).dot(fwd)
-    // eye: along the opening view, at the distance where the main lens sees the crewmate at the journey's size
-    const eye = I.cam.clone().addScaledVector(fwd, dC * (1 - tJ / tM))
+    // eye: along the opening view, at the distance where the main lens sees the crewmate at the size the journey shows it
+    // where the glass starts converging on it (R6.88b: the glide's start, pulled back by glideStartBack — so through the
+    // whole push the crewmate only grows, and the convergence lands on the same size, no shrink-back)
+    const back = glideStartBack(isPortrait, W, H)
+    const eye = I.cam.clone().addScaledVector(fwd, dC - (dC + back) * (tJ / tM))
     this.m.lookAt(eye, I.look, new THREE.Vector3(0, 1, 0))
     this.basis.copy(this.m).setPosition(0, 0, 0)
     this.qJ.setFromRotationMatrix(this.basis)
@@ -358,25 +277,12 @@ export class TabletWindow {
     this.m.lookAt(eye, crewC, new THREE.Vector3(0, 1, 0)); this.qC.setFromRotationMatrix(this.m)
     this.eye0.copy(eye)
     // the window sits a little under halfway to the crewmate: the crewmate floats well behind the glass
-    const dWin = dC * (tJ / tM) * 0.46
+    const dWin = (dC + back) * (tJ / tM) * 0.46
     this.dWin = dWin
     this.sIn = dWin / Math.max(0.05, fillD)
     this.winC.copy(eye).addScaledVector(fwd, dWin)
-    // dust: the cone, in the window frame, placed at the window
-    this.dust.position.copy(this.winC); this.dust.quaternion.setFromRotationMatrix(this.basis)
-    // rocks: two big far ones behind the crewmate, three mid, two near the glass at the edges (they leave the frame as we fly in)
-    const place: [number, number, number, number][] = [
-      [-0.9, 0.55, 2.6, 1.3], [1.15, -0.35, 3.1, 1.7], [0.55, 0.62, 1.15, 0.42], [-0.62, -0.5, 1.35, 0.5],
-      [1.05, 0.2, 0.8, 0.3], [-1.25, -0.05, 0.35, 0.16], [0.95, -0.72, 0.28, 0.12],
-    ]
-    let s2 = 11; const r = () => ((s2 = (s2 * 16807) % 2147483647) / 2147483647)
-    this.rockData = place.map(([x, y, z, sc]) => {
-      // x, y: fractions of a calm cone around the view (about the main lens's own reach); z: depth behind the window,
-      // in units of the crewmate's distance
-      const dz = dWin + z * dC * (tJ / tM)
-      const p = new THREE.Vector3(x * 0.34 * dz, y * 0.22 * dz, -dz).applyMatrix4(this.basis).add(eye)
-      return { p, s: sc * dC * 0.1, ax: new THREE.Vector3(r() - 0.5, r() - 0.5, r() - 0.5).normalize(), w: 0.05 + r() * 0.12, ph: r() * 6.28 }
-    })
+    // the sky's rocks + dust: laid out once per viewport by the shared sky (the journey's space places them identically)
+    this.extras.layout(isPortrait, W, H)
     // light rig follows the crewmate
     this.scene.getObjectByName('rig')!.position.copy(I.crew)
     this.cam.quaternion.setFromRotationMatrix(this.basis)
@@ -439,7 +345,9 @@ export class TabletWindow {
    * it, until the display covers the frame; then the picture hands off to the journey's opening camera. The progress is
    * an input, so the camera path can be anything (a moving camera still works: the portal reads the camera every frame).
    */
-  static FLY0 = 0.25 // POLISH-2: the fly starts earlier (more scroll), so the tablet is seen coming to the lens
+  static FLY0 = PORTAL0 // R6.88b: k runs over the portal push (the camera's, Dive.tsx); the tablet itself no longer flies
+  /** R6.88b: the CAMERA pushes through the glass (the tablet waits, world-fixed); the tablet-to-camera fly is off */
+  static CAM_PUSH = true
   /** read-only hand-off state for the integrator: h (0..1, 1 = the glass shows exactly the journey's p = 0 frame) */
   handoff = { k: 0, h: 0, cam: this.cam as THREE.PerspectiveCamera }
   private restP = new THREE.Vector3(); private restQ = new THREE.Quaternion(); private pq = new THREE.Quaternion()
@@ -454,7 +362,7 @@ export class TabletWindow {
     const aspect = props.width / Math.max(1, props.height)
     const fillH = Math.min(sh / JOURNEY_LENS.crop, sw / (JOURNEY_LENS.crop * aspect))
     const rtPerCss = rtH * (fillH / sh) / Math.max(1, props.height)
-    const starPr = Math.min(props.dpr || 1, 2) * (rtW / 1024)
+    const starPr = starPrFor(rtW, props.dpr) // R6.87: one star size rule (spaceSky.ts)
     return { rtPerCss, starCss: starPr / rtPerCss }
   }
 
@@ -467,7 +375,11 @@ export class TabletWindow {
     const aspect = props.width / Math.max(1, props.height)
     const tM = Math.tan(THREE.MathUtils.degToRad(camP.fov) / 2)
     // the distance at which the display just over-covers the frame (2 % bleed), square to the camera
-    const fillD = 0.92 * Math.min(WIN_HH / tM, WIN_HW / (tM * aspect)) // the display over-covers the frame (8 % bleed)
+    // R6.88b UPRIGHT: phones hold the tablet upright (rolled 90° about its glass normal, UiCylinder). Everything below runs in
+    // the VIEW frame of the glass — x = screen right, y = screen up — so the portal's picture stays upright: a glass point
+    // (gx, gy) is (−gy, gx) in it, and the display's half extents swap
+    const rot = !!tablet.userData.upright, WX = rot ? WIN_HH : WIN_HW, WY = rot ? WIN_HW : WIN_HH
+    const fillD = 0.92 * Math.min(WY / tM, WX / (tM * aspect)) // the display over-covers the frame (8 % bleed) — = diveState.tabletFillDist
     this.warm()
     this.layout(isPortrait, Math.round(fillD * 20) / 20) // (the portal's scale: steady while the lens breathes)
     // ---- the fly: the tablet's own pose (UiCylinder's rise + bob) → square in front of the camera at fillD
@@ -478,7 +390,7 @@ export class TabletWindow {
     // One continuous path: no cut, no fade, no pop.
     const k = ss(TabletWindow.FLY0, 1, push)
     const kk = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2
-    if (k > 0 && tablet.parent && !FIXED_LENS.on) {
+    if (k > 0 && tablet.parent && !FIXED_LENS.on && !TabletWindow.CAM_PUSH) {
       tablet.updateWorldMatrix(true, false)
       tablet.matrixWorld.decompose(this.restP, this.restQ, this.v)
       camP.getWorldDirection(this.fwd)
@@ -505,41 +417,48 @@ export class TabletWindow {
     this.qB.copy(this.qC).slerp(this.qJ, ss(0.15, 0.95, k))
     this.basis.makeRotationFromQuaternion(this.qB)
     this.winC.set(0, 0, -this.dWin).applyMatrix4(this.basis).add(this.eye0)
-    this.dust.position.copy(this.winC); this.dust.quaternion.copy(this.qB)
     // the glass owns the frame at the hand-off: drawn last, over anything floating in the water in front of it
     const top = h > 0.9
     if (top !== (screen.renderOrder === 1000)) {
       screen.renderOrder = top ? 1000 : 11
       this.material.depthTest = !top; this.material.transparent = top
+      if (this.overlay && this.crewMat) { this.overlay.renderOrder = screen.renderOrder; this.crewMat.depthTest = !top }
     }
     const u = this.material.uniforms, su = this.src.uniforms
-    u.u_sheen.value = (1 - ss(0.55, 0.7, push)) * (isPortrait ? 0.7 : 1) // portrait: 30 % less glass sheen
+    u.u_sheen.value = (1 - ss(0.2, 0.6, k)) * (isPortrait ? 0.7 : 1) // portrait: 30 % less glass sheen (R6.88b: gone early in the portal push)
+    u.u_rot.value = rot ? 1 : 0
     u.u_on.value = su.u_on.value; u.u_sweep.value = su.u_sweep.value; u.u_time.value = su.u_time.value
     u.u_fill.value = ss(0.55, 0.95, k) // the glass (sheen, reflections, inner shadow) clears as it fills the frame
     // ---- the eye in the glass's frame
     screen.updateWorldMatrix(true, false)
     this.m.copy(screen.matrixWorld).invert()
     const e = this.e.copy(camP.position).applyMatrix4(this.m)
-    if (e.z < 0.02) { this.stats.drawn = false; return }
+    if (rot) e.set(-e.y, e.x, e.z)
+    // (the corners below are rotated the same way BEFORE the eye is taken off: a rotation about the glass normal)
+    if (e.z < 0.02) { this.stats.drawn = false; if (this.overlay) this.overlay.visible = false; return }
     // ---- the viewport's footprint on the glass (V) and the part of the window that is on screen (R)
     let vx0 = 1e9, vy0 = 1e9, vx1 = -1e9, vy1 = -1e9, ok = true
     for (let i = 0; i < 4; i++) {
-      const d = this.v.set(i & 1 ? 1 : -1, i & 2 ? 1 : -1, 0.5).unproject(camP).applyMatrix4(this.m).sub(e)
+      const d = this.v.set(i & 1 ? 1 : -1, i & 2 ? 1 : -1, 0.5).unproject(camP).applyMatrix4(this.m)
+      if (rot) d.set(-d.y, d.x, d.z)
+      d.sub(e)
       if (d.z > -1e-4) { ok = false; break }
       const t = -e.z / d.z
       const px = e.x + d.x * t, py = e.y + d.y * t
       vx0 = Math.min(vx0, px); vx1 = Math.max(vx1, px); vy0 = Math.min(vy0, py); vy1 = Math.max(vy1, py)
     }
-    if (!ok) { vx0 = -WIN_HW; vy0 = -WIN_HH; vx1 = WIN_HW; vy1 = WIN_HH }
+    if (!ok) { vx0 = -WX; vy0 = -WY; vx1 = WX; vy1 = WY }
     const m = 0.02 * (1 - h) // a margin for the springs between this frame and the drawn one (none once it is the frame)
-    const x0 = Math.max(-WIN_HW, vx0 - m), y0 = Math.max(-WIN_HH, vy0 - m), x1 = Math.min(WIN_HW, vx1 + m), y1 = Math.min(WIN_HH, vy1 + m)
-    if (x1 <= x0 || y1 <= y0) { this.stats.drawn = false; return } // the window is off screen: nothing to draw
+    const x0 = Math.max(-WX, vx0 - m), y0 = Math.max(-WY, vy0 - m), x1 = Math.min(WX, vx1 + m), y1 = Math.min(WY, vy1 + m)
+    if (x1 <= x0 || y1 <= y0) { this.stats.drawn = false; if (this.overlay) this.overlay.visible = false; return } // the window is off screen: nothing to draw
     // ---- resolution: ~0.62 × DPR of R's size on screen (→ the journey's own density at the hand-off), in the allocation
     const dpr = Math.min(props.dpr || 1, 2)
     const J = this.journeyDensity(isPortrait)
     const pxPerUnit = props.height / Math.max(1e-4, vy1 - vy0)
     // mid-push ~0.62 × DPR (the neighbour pass scales it down); at the hand-off at least the journey's own density, full scale
-    const dens = mix(0.75 * dpr * (nb.active ? nb.scale : 1), Math.max(J.rtPerCss, 0.75 * dpr) * 1.1, h)
+    // R6.88 ZERO-CUT: at full cover the glass's target has exactly the journey target's pixels per CSS px (no 1.1 over-sample,
+    // no DPR floor), so the stars' size and softness are the same pixels on both sides of the stage switch
+    const dens = mix(0.75 * dpr * (nb.active ? nb.scale : 1), J.rtPerCss, h * h * (3 - 2 * h))
     let w = (x1 - x0) * pxPerUnit * dens, hh = (y1 - y0) * pxPerUnit * dens
     const big = Math.max(w, hh), lim = this.cap
     if (big > lim) { w *= lim / big; hh *= lim / big }
@@ -556,7 +475,7 @@ export class TabletWindow {
       const map = (x: number, a0: number, a1: number, lo: number, hi: number) => lo + (x - a0) / Math.max(1e-6, a1 - a0) * (hi - lo)
       l = mix(l, map(x0, vx0, vx1, -tJx, tJx), h); r = mix(r, map(x1, vx0, vx1, -tJx, tJx), h)
       b = mix(b, map(y0, vy0, vy1, -tJ, tJ), h); tp = mix(tp, map(y1, vy0, vy1, -tJ, tJ), h)
-      this.jEye.copy(I.cam); this.jLook.copy(I.look)
+      this.jEye.copy(I.cam).add(glideOffset(isPortrait, props.width, props.height, this.v)); this.jLook.copy(I.look) // R6.87 GENTLE DIVE: the start of the glide
       this.m.lookAt(this.jEye, this.jLook, this.v.set(0, 1, 0)); this.jq.setFromRotationMatrix(this.m)
       this.cam.position.lerp(this.jEye, h); this.cam.quaternion.slerp(this.jq, h)
     }
@@ -570,24 +489,12 @@ export class TabletWindow {
     const drift = (this.reduced ? 0 : 1) * (1 - h)
     this.v.copy(I.crew); this.v.y += 0.08 * Math.sin(time * 0.5) * drift; this.v.x += 0.05 * Math.sin(time * 0.31) * drift
     this.crew.update({ pos: this.v, yaw: I.yaw + 0.16 * Math.sin(time * 0.27) * drift, pitch: I.pitch + 0.06 * Math.sin(time * 0.41) * drift, roll: I.roll + 0.1 * Math.sin(time * 0.33 + 1) * drift, walk: 0, phase: 0, float: I.float, squash: 0, scale: 1 }, 1 / 60, time, true)
-    for (let i = 0; i < this.rockData.length; i++) {
-      const R = this.rockData[i]
-      this.dummy.position.copy(R.p)
-      this.dummy.position.y += Math.sin(time * 0.2 + R.ph) * R.s * 0.15
-      this.q.setFromAxisAngle(R.ax, R.ph + time * R.w)
-      this.dummy.quaternion.copy(this.q); this.dummy.scale.setScalar(R.s)
-      this.dummy.updateMatrix(); this.rocks.setMatrixAt(i, this.dummy.matrix)
-    }
-    this.rocks.instanceMatrix.needsUpdate = true
-    // the extras step aside as the picture becomes the journey's opening (which has none)
-    const extras = 1 - h
-    this.rockMat.opacity = extras; this.rocks.visible = extras > 0.002
-    this.dustMat.uniforms.u_opacity.value = extras; this.dust.visible = extras > 0.002
-    this.dustMat.uniforms.u_time.value = time
     // point sizes: the target's pixels per CSS px × the journey's own on-screen star size
     const rtPerCss = hh / Math.max(1, (y1 - y0) * pxPerUnit)
     const pr = Math.max(0.5, rtPerCss * J.starCss)
-    this.dustMat.uniforms.u_pr.value = rtPerCss * dpr
+    // R6.87 SINGLE SKY: the rocks and dust stay (Shifat 5:48 PM "Keep rocks in sky too in tablet"); they are part of the
+    // journey's space now, so nothing steps aside at the hand-off. Same clock, same sizes on screen as inside.
+    this.extras.update(time, 1, rtPerCss * Math.min(Math.max(props.dpr || 1, 0.6), 2))
     this.skyMat.uniforms.u_time.value = time
     this.starMat.uniforms.u_time.value = time; this.starMat.uniforms.u_pr.value = pr
     this.glintMat.uniforms.u_time.value = time; this.glintMat.uniforms.u_pr.value = pr
@@ -596,7 +503,7 @@ export class TabletWindow {
     let same = this.sigOk && !nb.active
     const put = (i: number, x: number) => { if (S[i] !== x) { same = false; S[i] = x } }
     for (let i = 0; i < 16; i++) { put(i, cm[i]); put(16 + i, smw[i]) }
-    put(32, time); put(33, h); put(34, w); put(35, hh); put(36, camP.fov); put(37, k)
+    put(32, time); put(38, glideT()); put(39, GLIDE_PRE.t); put(33, h); put(34, w); put(35, hh); put(36, camP.fov); put(37, k)
     this.sigOk = !nb.active
     if (same) { this.stats.drawn = true; this.stats.skipped++; return }
     // ---- draw into the sub-area of the allocation
@@ -605,9 +512,23 @@ export class TabletWindow {
     gl.setRenderTarget(this.rt)
     gl.autoClear = false
     gl.clear(true, true, false)
+    // R6.87 SPLIT: the background target holds the sky only; the crewmate goes into its own target at the canvas density
+    const split = !!this.crewL && this.crew.root.visible
+    if (split) this.crew.root.visible = false
     gl.render(this.scene, this.cam)
+    if (split) this.crew.root.visible = true
     gl.autoClear = prevAuto
     gl.setRenderTarget(prev)
+    if (split && this.crewL) {
+      // the window's on-screen rectangle at the canvas density (aspect = the background target's), capped at the canvas
+      const hd = props.textDpr || dpr
+      let cw = (x1 - x0) * pxPerUnit * hd * (nb.active ? nb.scale : 1), ch = (y1 - y0) * pxPerUnit * hd * (nb.active ? nb.scale : 1)
+      const lim = Math.max(props.width, props.height) * hd * 1.05, big = Math.max(cw, ch)
+      if (big > lim) { cw *= lim / big; ch *= lim / big }
+      this.crewL.render(gl, this.scene, this.cam, this.crew.root, this.rt, this.v2.set(w / this.cap, hh / this.cap), cw, ch)
+      ;(u.u_crewScale.value as THREE.Vector2).copy(this.crewL.scale)
+    }
+    if (this.overlay) this.overlay.visible = split
     u.u_rect.value.set(x0, y0, x1, y1)
     u.u_rtScale.value.set(w / this.cap, hh / this.cap)
     u.u_texel.value.set(1 / w, 1 / hh)
@@ -624,8 +545,9 @@ export class TabletWindow {
     clearTimeout(this.idleT)
     this.src.removeEventListener('dispose', this.onSrcDispose)
     this.rt.dispose(); this.material.dispose()
-    this.scene.traverse((o: any) => { if (o.geometry) o.geometry.dispose() })
-    this.skyMat.dispose(); this.starMat.dispose(); this.glintMat.dispose(); this.dustMat.dispose(); this.rockMat.dispose()
+    if (this.overlay) { this.offHero(); this.overlay.parent?.remove(this.overlay); this.crewMat?.dispose(); this.crewL?.dispose() }
+    this.scene.traverse((o: any) => { if (o.geometry && !isSharedSkyGeometry(o.geometry)) o.geometry.dispose() }) // R6.87: the sky's buffers are shared with the journey
+    this.skyMat.dispose(); this.starMat.dispose(); this.glintMat.dispose(); this.extras.dispose()
     this.crewMats.body.dispose(); this.crewMats.visor.dispose()
     if (this.envs) { this.envs.space.dispose(); this.envs.page.dispose() }
   }
