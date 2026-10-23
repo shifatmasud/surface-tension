@@ -244,7 +244,7 @@ html.lab-gl .lab .card__dom { opacity: 0; }
 
 
 /* ===== S4 · Systems — the glass stack (GL star) + its real controls. Appended block; overrides the earlier .systems rules. ===== */
-.systems { display: block; min-height: 0; height: 240vh; padding: 0; }  /* POLISH-2: 200 → 240vh (pin 140vh) so the tablet visibly comes to the lens before the hand-off */  /* SECTION CUT: 260 → 200vh (pin 160 → 100vh: atom → drum → tablet push still reads) */
+.systems { display: block; min-height: 0; height: 310vh; padding: 0; }  /* Shifat 3:25 AM Oct 23 "B": Shade DS zone +50% (pin 140 → 210vh) */  /* POLISH-2: 200 → 240vh (pin 140vh) so the tablet visibly comes to the lens before the hand-off */  /* SECTION CUT: 260 → 200vh (pin 160 → 100vh: atom → drum → tablet push still reads) */
 .systems .systems__inner { padding: calc(var(--pad-y) + 56px) var(--pad-x) var(--s5); display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
 .systems .systems__eyebrow { pointer-events: auto; }
 .systems .systems__row { display: grid; grid-template-columns: repeat(var(--grid-cols), minmax(0, 1fr)); column-gap: var(--grid-gap); align-items: end; position: relative; z-index: 1; }
