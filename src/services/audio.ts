@@ -1,6 +1,8 @@
 import { props } from '../state/props'
 import { dive as diveState } from '../gl/stages/dive/diveState'
 import * as K from './soundKit'
+import { UnderwaterPad } from './underwaterPad' // R6.90: the deep pad
+import { PORTAL0 } from '../gl/stages/dive/diveState'
 
 /** R6.89 gain staging (see build) */
 const MASTER_ON = 0.5
@@ -130,7 +132,11 @@ class AudioService {
     this.droneGain = ctx.createGain(); this.droneGain.gain.value = 0
     ;[55, 55.6, 82.4].forEach((f) => { const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f; o.connect(this.droneFilter); o.start() })
     this.droneFilter.connect(this.droneGain); this.droneGain.connect(this.master); this.droneGain.connect(this.reverb)
+    // R6.90: the deep underwater pad (its own voice; underwaterPad.ts)
+    this.pad = new UnderwaterPad(ctx, this.master, this.reverb, { phone: PHONE_AUDIO })
   }
+  pad: UnderwaterPad | null = null
+  private padK = 0
   // W25 R6.55 (sound audit #1/#2/#3/#7):
   //  - the state flips synchronously, so a fast double tap is on → off (it used to read the stale state across the await and
   //    land on → on, with the wave line and the sound disagreeing)
@@ -203,6 +209,14 @@ class AudioService {
     this.aim(1, this.bedGain.gain, K.bedLevel(dive, props.scrollStrength), t, 0.3, 0.001)
     this.aim(2, this.droneGain.gain, dive * 0.12, t, 0.5, 0.001)
     this.aim(3, this.droneFilter.frequency, 160 + (1 - dive) * 600, t, 0.4, 2)
+    // R6.90 the deep pad: in as the camera goes under, deeper on the way down to the tablet, out over the portal push
+    {
+      const st = props.stage, inDive = (st === 'dive' || st === 'lab') && diveState.under
+      const sm = (a: number, b: number, x: number) => { const u = Math.min(1, Math.max(0, (x - a) / (b - a))); return u * u * (3 - 2 * u) }
+      const want = inDive ? 1 - sm(PORTAL0, 1, diveState.push) : 0
+      this.padK += (want - this.padK) * (1 - Math.exp(-4 * dt))
+      this.pad?.update(dt, this.padK, sm(0, 0.42, diveState.push))
+    }
     // the cursor paint speaks in droplets
     this.plipClock -= dt
     if (props.waterPointerActive && this.plipClock <= 0) { this.plip(0.4); this.plipClock = 0.16 + Math.random() * 0.25 }
@@ -210,9 +224,37 @@ class AudioService {
 }
 export const audio = new AudioService()
 
+/** R6.90 video hook (?offlineaudio=SECONDS only): the whole page's sound renders into an OfflineAudioContext that advances
+ *  in step with a frame-stepped capture (__offAdvance(t) renders up to t seconds and holds there), so every cue lands on the
+ *  frame that triggered it; __offFinish() renders the rest and returns 16-bit PCM (interleaved stereo, 48 kHz) as base64 chunks */
+if (typeof window !== 'undefined' && /[?&]offlineaudio=/.test(location.search)) {
+  const secs = Math.max(1, +(location.search.match(/offlineaudio=([\d.]+)/)?.[1] || 60))
+  const sr = 48000, off = new OfflineAudioContext(2, Math.ceil(sr * secs), sr)
+  const A = audio as any
+  A.build(off); A.enabled = true; audio.master.gain.value = MASTER_ON; audio.prepareLegacy(true)
+  ;(audio as any).toggle = async () => {}   // the speaker pill cannot rebuild it
+  let started = false, render: Promise<AudioBuffer> | null = null
+  ;(window as any).__offAdvance = (t: number) => new Promise<void>((res) => {
+    if (t >= secs - 0.01) { res(); return }
+    off.suspend(t).then(() => res())
+    if (!started) { started = true; render = off.startRendering() } else off.resume()
+  })
+  ;(window as any).__offFinish = async () => {
+    if (!started) { started = true; render = off.startRendering() } else off.resume()
+    const buf = await render!
+    const L = buf.getChannelData(0), R = buf.getChannelData(1), n = buf.length, pcm = new Int16Array(n * 2)
+    let peak = 0
+    for (let i = 0; i < n; i++) { const l = L[i], r = R[i]; peak = Math.max(peak, Math.abs(l), Math.abs(r)); pcm[2 * i] = Math.max(-1, Math.min(1, l)) * 32767; pcm[2 * i + 1] = Math.max(-1, Math.min(1, r)) * 32767 }
+    const bytes = new Uint8Array(pcm.buffer), out: string[] = []
+    for (let i = 0; i < bytes.length; i += 3 * 1 << 20) { let s = ''; const e = Math.min(bytes.length, i + (3 << 20)); for (let j = i; j < e; j += 8192) s += String.fromCharCode.apply(null, Array.from(bytes.subarray(j, Math.min(e, j + 8192)))); out.push(btoa(s)) }
+    return { chunks: out, peakDb: 20 * Math.log10(peak || 1e-9), frames: n }
+  }
+}
+
 /** R6.89 test hook (?audiotest only): renders the real chain offline (6 s, 48 kHz) and reports the output's peak. `play`
  *  schedules the cues at the context's time 0; `raw` skips the ceiling so the compressor + trim stage can be read alone */
 if (typeof window !== 'undefined' && /[?&]audiotest/.test(location.search)) {
+  ;(window as any).__audio = audio   // R6.90: the pad's offline check calls __audio.pad.force()
   ;(window as any).__audioTest = async (play: () => void, raw = false) => {
     const sr = 48000, off = new OfflineAudioContext(2, sr * 6, sr)
     const A = audio as any
