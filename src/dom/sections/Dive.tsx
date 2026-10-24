@@ -6,7 +6,7 @@ import { visuals } from '../../gl/systems/visuals'
 import { props } from '../../state/props'
 import { clamp } from '../../core/math'
 import { vfovFor } from '../../core/frame'
-import { dive, divePath, gemPath, U_MAX, SINK_M, TAB_GLASS, PORTAL0, PORTAL1, GEM_BEHIND, tabletUpright, tabletPresentDist, tabletFillDist } from '../../gl/stages/dive/diveState'
+import { dive, divePath, gemPath, U_MAX, SINK_M, TAB_GLASS, PORTAL0, PORTAL1, GEM_BEHIND, tabletUpright, tabletPresentDist, tabletFillDist, portalKe } from '../../gl/stages/dive/diveState'
 import { GLIDE_PRE } from '../../gl/stages/journey/spaceSky' // R6.88 PORTAL
 import { portrait } from '../../core/frame'
 import { sections } from '../../app/sections'
@@ -138,7 +138,11 @@ export function Dive() {
         const p = dive.push, fovD = vfovFor(46, 30, 74), aspect = props.width / Math.max(1, props.height), up = tabletUpright()
         const Dv = tabletPresentDist(fovD, aspect, up), Df = tabletFillDist(fovD, aspect, up)
         let dist = Dv * (1 - 0.08 * clamp((p - 0.42) / (PORTAL0 - 0.42)))
-        const kp = clamp((p - PORTAL0) / (PORTAL1 - PORTAL0)), ke = kp < 0.5 ? 4 * kp * kp * kp : 1 - Math.pow(-2 * kp + 2, 3) / 2
+        // R6.99 (the zoom through the glass ran in ~0.2 screens of scroll: 70 % of it in 50 px on the 1366 PC, a jump on a
+        // normal scroll, then the lens sat still until the switch): the same push now runs linear in the section's own
+        // scroll (sys, not the push's smoothstep, which bunched it up) from PORTAL0 to just before the switch, eased with a
+        // plain smoothstep, so the zoom is spread ~2.5× wider with no faster peak. Same start, same end pose, same scroll.
+        const ke = portalKe(dive.sys)
         if (ke > 0) dist = dist * Math.pow(Df / dist, ke)
         const A = sinkK(p)
         deepP.set(TAB_GLASS.x, TAB_GLASS.y, TAB_GLASS.z - dist)

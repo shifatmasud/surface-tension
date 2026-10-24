@@ -23,6 +23,10 @@ import { clip } from '../../systems/clip'
 
 /** The journey's visible lens at p = 0, as its screen covers the viewport (JourneyStage: sw × sh screen, OVERSCAN, the
  *  ultrawide widening): the vertical tan of what the viewer actually sees. */
+/** R7.01 RICH (Shifat: "the rich purple tablet picture drops into a darker, less colourful opening of space"): the gain on
+ * space's Milky Way, nebula and star dust (skyMaterial u_rich; 1 = the old grade). 1.75 = the glow the tablet's glass shows
+ * its picture at, so the colour carries through the hand-off; the black between stays black. ?rich=<n> overrides (QA). */
+export const SPACE_RICH = (() => { try { const v = parseFloat(new URLSearchParams(location.search).get('rich') || ''); return isFinite(v) && v > 0 ? v : 1.75 } catch { return 1.75 } })()
 export const JOURNEY_LENS = { crop: 1.14 }
 export function journeyVisibleTan(fovDeg: number, isPortrait: boolean, aspect: number) {
   const sw = isPortrait ? 8.8 : 12.8, sh = isPortrait ? 12.8 : 8.8
@@ -252,7 +256,15 @@ export class SkyExtras {
  *  scroll stretch where nothing moved before), the inner camera keeps gliding into the sky, from a little behind the
  *  journey's opening viewpoint to it, easing out. The glass converges on the START of that glide and the journey draws
  *  the same glide, so the two pictures are the same at every point of that scroll, in both directions. */
-export const GLIDE = { frac: 0.2 }   // pull-back at the start of the glide, as a fraction of the crewmate's distance
+export const GLIDE = { frac: 0.2 }
+/** R7.04 TRANSITIONS: the cubic ease-out came to a full stop over the last third of the card's crossing (≈ 1/3 viewport of
+ *  scroll with a still picture), then the journey's orbit started from rest: a stop-and-go. Part linear now, so the glide
+ *  still eases in but arrives still moving (end speed ~15% of its start, was 0); the pre-glide speed matches its start. ?oldtrans = 7.03 */
+const OLDG = typeof location !== 'undefined' && /[?&]oldtrans/.test(location.search)
+const GLIDE_LIN = 0 // R7.04 tried 0.35 (arrive moving): no visible gain headless, kept 7.03's ease
+void OLDG
+export const GLIDE_V0 = 3 * (1 - GLIDE_LIN) + GLIDE_LIN
+function glideEase(g: number) { return (1 - GLIDE_LIN) * (1 - Math.pow(1 - g, 3)) + GLIDE_LIN * g }   // pull-back at the start of the glide, as a fraction of the crewmate's distance
 let frameKey = '', frameCache: ReturnType<typeof skyFrame> | null = null
 function frameFor(isPortrait: boolean, W: number, H: number) {
   const k = `${W}x${H}|${isPortrait}`
@@ -268,12 +280,12 @@ export function glideT() {
 /** the inner camera's offset now (inner-world units, along the opening view): add it to the journey's opening eye */
 export function glideOffset(isPortrait: boolean, W: number, H: number, out: THREE.Vector3) {
   const F = frameFor(isPortrait, W, H)
-  const g = glideT(), e = 1 - Math.pow(1 - g, 3)   // ease-out: it arrives gently at the journey's opening frame
+  const g = glideT(), e = glideEase(g)   // ease-out: it arrives gently at the journey's opening frame
   // R6.88 PORTAL (Shifat 10:08 PM: "0 jump cut … only smooth portal in"): the glide no longer starts from rest at the
   // hand-off. It begins inside the glass, during the push's last stretch (GLIDE_PRE: 0 → 1 as the display converges), at
   // a constant speed that equals the ease-out's speed at its start (3 × frac per boundary length), so the move into the
   // sky runs straight through the switch: no stop, no speed jump; the glass and the journey stand on the same point
-  const pre = g > 0 ? 0 : GLIDE_PRE.span * 3 * GLIDE.frac * (1 - GLIDE_PRE.t)
+  const pre = g > 0 ? 0 : GLIDE_PRE.span * GLIDE_V0 * GLIDE.frac * (1 - GLIDE_PRE.t)
   return out.copy(F.fwd).multiplyScalar(-F.dC * (GLIDE.frac * (1 - e) + pre))
 }
 /** R6.88 PORTAL: the dive writes these (Dive.tsx): t 0 → 1 over the push's convergence, span = its scroll / one viewport */
@@ -283,5 +295,5 @@ export const GLIDE_PRE = { t: 1, span: 0.2 }
  *  tablet's portal is calibrated to end exactly there, so the crewmate only ever grows on the way in (no shrink-back). */
 export function glideStartBack(isPortrait: boolean, W: number, H: number) {
   const F = frameFor(isPortrait, W, H)
-  return F.dC * (GLIDE.frac + GLIDE_PRE.span * 3 * GLIDE.frac)
+  return F.dC * (GLIDE.frac + GLIDE_PRE.span * GLIDE_V0 * GLIDE.frac)
 }

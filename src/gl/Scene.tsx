@@ -348,6 +348,7 @@ function LaterStages() {
   })
   const cur = useRef(mounted)
   const away = useRef<number[]>(LATER.map(() => 0))
+  const stageWin = useRef<{ owner: number; src: boolean[] | null }>({ owner: -1, src: null })   // R6.95
   useEffect(() => {
     // PERFGOV: fetch every later stage's code now, behind the odometer (it used to wait for the curtain)
     LATER.forEach((s) => { s.load().catch(() => {}) })
@@ -450,7 +451,7 @@ function LaterStages() {
       if (behindCurtain.warmed.has(s.name) || behindCurtain.urgent.has(s.name) || stageGap(s.name) > props.height * NEAR_VIEWPORTS) continue
       behindCurtain.urgent.set(s.name, now); behindCurtain.log.push([s.name, 'reached', Math.round(now)])
     }
-    const next = cur.current.slice()
+    let next = cur.current   // R6.95: copied only when something changes (was a fresh array + window object every frame)
     let changed = false
     for (let i = 0; i < LATER.length; i++) {
       const inWin = Math.abs(BLOCK_OF[i] - owner) <= 1
@@ -458,11 +459,12 @@ function LaterStages() {
       // PERFGOV: while the warm-up behind the curtain is still running it mounts the stages itself (built in steps, the
       // stage in view first) and nothing here mounts or unmounts one
       if (!behindCurtain.finished) continue
-      if (inWin) { away.current[i] = 0; if (!next[i]) { next[i] = true; changed = true } }
-      else if (next[i] && LOW_MEM) { if (!away.current[i]) away.current[i] = now; else if (now - away.current[i] > 8000) { next[i] = false; away.current[i] = 0; changed = true } }
+      if (inWin) { away.current[i] = 0; if (!next[i]) { if (!changed) next = next.slice(); next[i] = true; changed = true } }
+      else if (next[i] && LOW_MEM) { if (!away.current[i]) away.current[i] = now; else if (now - away.current[i] > 8000) { if (!changed) next = next.slice(); next[i] = false; away.current[i] = 0; changed = true } }
     }
     if (changed) { cur.current = next; setMounted(next) }
-    ;(window as any).__stageWindow = { owner, mounted: LATER.filter((_, i) => cur.current[i]).map((s) => s.name) }
+    const sw = stageWin.current
+    if (changed || sw.owner !== owner || sw.src !== cur.current) { sw.owner = owner; sw.src = cur.current; (window as any).__stageWindow = { owner, mounted: LATER.filter((_, i) => cur.current[i]).map((s) => s.name) } }
   })
   return (
     <>

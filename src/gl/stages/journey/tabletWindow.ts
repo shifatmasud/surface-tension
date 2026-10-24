@@ -5,14 +5,14 @@ import { vfovFor } from '../../../core/frame'
 import { mix, smoothstep as ss } from '../../../core/math'
 import { nb } from '../../systems/neighbour'
 import { FIXED_LENS } from '../../world/handoff'
-import { PORTAL0 } from '../dive/diveState' // R6.88b
+import { PORTAL0, dive, portalKe } from '../dive/diveState' // R6.88b
 import { inner, type Inner } from './timeline'
 import { Crewmate, crewMaterials, CREW_CENTER_Y } from './crewmate'
 import { makeEnvs, makeEnvsSteps } from './env'
 import { CrewLayer } from './crewLayer' // R6.87 SPLIT: the crewmate at the canvas density
 import { heroPass } from '../../post/heroPass'
 import { SPLIT } from '../../quality'
-import { buildSpaceSky, SkyExtras, SPACE_LIGHT, starPrFor, isSharedSkyGeometry, JOURNEY_LENS, journeyVisibleTan, glideOffset, glideT, GLIDE_PRE, glideStartBack } from './spaceSky' // R6.87: ONE sky (the journey's), shared
+import { buildSpaceSky, SkyExtras, SPACE_LIGHT, starPrFor, isSharedSkyGeometry, JOURNEY_LENS, journeyVisibleTan, glideOffset, glideT, GLIDE_PRE, glideStartBack, SPACE_RICH } from './spaceSky' // R6.87: ONE sky (the journey's), shared
 import { warmSteps as prewarmSteps, prewarm, runToEnd } from '../../prewarm' // PERFGOV
 
 /**
@@ -388,6 +388,15 @@ export class TabletWindow {
 
   update(camera: THREE.Camera, push: number) {
     if (this.disposed) return
+    // R6.95: once the dive hands off to the journey, the dive's stage group is hidden (DiveStage: shown only while the dive
+    // is the stage), so the slab is never on screen there; but the push stays at 1 and the glass kept drawing its inner
+    // world and the crewmate layer into its targets every frame through the journey, CTA and footer (the rig: ~0.65 Mpx of
+    // offscreen work per frame on the phone path, at the page's heaviest section). Off the dive nothing is drawn now; the
+    // first dive frame (scrolling back up) redraws in full before the slab is shown (the stage is set before the frame runs).
+    if (!nb.active && props.stage !== 'dive') {
+      this.stats.drawn = false; this.sigOk = false
+      return
+    }
     const t0 = performance.now()
     const screen = this.screen, tablet = screen.parent as THREE.Object3D
     const camP = camera as THREE.PerspectiveCamera
@@ -448,7 +457,10 @@ export class TabletWindow {
     u.u_sheen.value = (1 - ss(0.2, 0.6, k)) * (isPortrait ? 0.7 : 1) // portrait: 30 % less glass sheen (R6.88b: gone early in the portal push)
     u.u_rot.value = rot ? 1 : 0
     u.u_on.value = su.u_on.value; u.u_sweep.value = su.u_sweep.value; u.u_time.value = su.u_time.value
-    u.u_fill.value = ss(0.55, 0.95, k) // the glass (sheen, reflections, inner shadow) clears as it fills the frame
+    // the glass (sheen, reflections, inner shadow) and the screen's glow clear as it fills the frame — R6.99: at the pace of the
+    // zoom (portalKe, 0.12 → 0.97), not over a short stretch of the push, so the glowing picture settles to the journey's own
+    // exposure over the whole push instead of dimming in ~2 frames
+    u.u_fill.value = ss(0.12, 0.97, portalKe(dive.sys))
     // ---- the eye in the glass's frame
     screen.updateWorldMatrix(true, false)
     this.m.copy(screen.matrixWorld).invert()
@@ -471,10 +483,17 @@ export class TabletWindow {
     // the frame by 0 → 4 % of its height (a pure function of the pose, so scrolling back brings it back the same way)
     if (this.twin) {
       const cover = ok ? Math.min(WX - Math.max(Math.abs(vx0), Math.abs(vx1)), WY - Math.max(Math.abs(vy0), Math.abs(vy1))) / WY : -1
-      const a = (1 - ss(0.0, 0.04, cover)) * (h > 0.9 ? 0 : 1)
+      // R6.99 (1366 weak PC: the twin dropped out in one frame as the bezel left, a bright → dark pop with the bezel's lit edge
+      // as thin lines at both sides): the twin now dissolves over the cover 0 → 7 % (the lens reaches 12 % before the
+      // switch, Dive.tsx), so it is gone before the stage switch
+      const a = 1 - ss(0.0, 0.07, cover)
       this.material.uniforms.u_heroA.value = a
       this.twin.visible = a > 0.002
     }
+    // R6.99: the glass's lit edge, reflections and inner shadow also clear as the last of the bezel nears the frame's edges
+    // (cover -5 % → +2 %), so no thin lit line rides the frame's sides at the hand-off; a pure function of the pose
+    { const cv = ok ? Math.min(WX - Math.max(Math.abs(vx0), Math.abs(vx1)), WY - Math.max(Math.abs(vy0), Math.abs(vy1))) / WY : -1
+      u.u_fill.value = Math.max(u.u_fill.value, ss(-0.05, 0.02, cv)) }
     if (!ok) { vx0 = -WX; vy0 = -WY; vx1 = WX; vy1 = WY }
     const m = 0.02 * (1 - h) // a margin for the springs between this frame and the drawn one (none once it is the frame)
     const x0 = Math.max(-WX, vx0 - m), y0 = Math.max(-WY, vy0 - m), x1 = Math.min(WX, vx1 + m), y1 = Math.min(WY, vy1 + m)
@@ -543,6 +562,12 @@ export class TabletWindow {
     // R6.87 SPLIT: the background target holds the sky only; the crewmate goes into its own target at the canvas density
     const split = !!this.crewL && this.crew.root.visible
     if (split) this.crew.root.visible = false
+    // R7.01 RICH: the glass shows its picture at a gain (g0 → 1 as it fills the frame); the sky in that picture is drawn at
+    // mix(g0, SPACE_RICH, fill) / gain, so on screen the sky's colour goes from the tablet's rich picture straight to the
+    // journey's opening (SPACE_RICH) with no dim in between; the crewmate and rocks keep the old gain exactly
+    { const mu = this.material.uniforms, g0 = 0.35 + 1.4 * mu.u_on.value, f = mu.u_fill.value
+      const gain = g0 + (1 - g0) * f
+      this.skyMat.uniforms.u_rich.value = gain > 1e-3 ? (g0 + (SPACE_RICH - g0) * f) / gain : 1 }
     gl.render(this.scene, this.cam)
     if (split) this.crew.root.visible = true
     gl.autoClear = prevAuto

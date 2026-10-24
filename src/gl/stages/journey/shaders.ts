@@ -20,12 +20,12 @@ float fbm(vec3 p){ float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++){ s += a *
 export function skyMaterial() {
   return new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
-    uniforms: { u_atmos: { value: 0 }, u_sun: { value: SUN_DIR }, u_time: { value: 0 } },
+    uniforms: { u_atmos: { value: 0 }, u_sun: { value: SUN_DIR }, u_time: { value: 0 }, u_rich: { value: 1 } },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
       void main(){ vDir = normalize(position); vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0); gl_Position = p.xyww; }`,
     fragmentShader: /* glsl */ `
-      uniform float u_atmos; uniform vec3 u_sun; uniform float u_time;
+      uniform float u_atmos; uniform vec3 u_sun; uniform float u_time; uniform float u_rich;
       varying vec3 vDir;
       ${NOISE}
       void main(){
@@ -49,12 +49,15 @@ export function skyMaterial() {
         float glow = band * pow(clouds, 1.6) * (0.6 + 0.8 * fine) * (0.5 + 0.9 * pow(toCore, 3.0));
         glow *= 1.0 - 0.6 * lane;
         vec3 mwCol = mix(vec3(0.05, 0.062, 0.1), vec3(0.085, 0.08, 0.09), pow(toCore, 2.0) * band); // cool and deep; only the core warms a touch
-        space += mwCol * glow * 0.62;
+        space *= 1.0 + 0.5 * (u_rich - 1.0);
+        // R7.01 RICH (Shifat: the tablet's rich purple picture dropped into a darker, greyer opening of space): u_rich (1 = the
+        // old grade) lifts the Milky Way, its warm core and the nebula accent so space keeps the colour the tablet showed
+        space += mwCol * glow * 0.62 + mix(mwCol, vec3(0.085, 0.045, 0.13), 0.8) * glow * 0.62 * 0.6 * (u_rich - 1.0); // the lift leans violet, never grey
         // the nebula, demoted to a faint far accent
         vec3 q = d * 1.15 + vec3(0.0, 0.0, u_time * 0.0015);
         float n1 = fbm(q * 1.7 + vec3(wq * 1.6));
         float region = pow(max(dot(d, normalize(vec3(0.7, 0.35, -0.62))), 0.0), 2.0);
-        space += mix(vec3(0.12, 0.03, 0.24), vec3(0.42, 0.08, 0.3), smoothstep(0.42, 0.75, n1)) * smoothstep(0.38, 0.8, n1) * region * 0.06;
+        space += mix(vec3(0.12, 0.03, 0.24), vec3(0.42, 0.08, 0.3), smoothstep(0.42, 0.75, n1)) * smoothstep(0.38, 0.8, n1) * region * 0.06 * (1.0 + 1.6 * (u_rich - 1.0));
         // unresolved star dust: two scales, denser inside the band, a few coloured
         for (int L = 0; L < 2; L++) {
           float sc = L == 0 ? 260.0 : 520.0;
@@ -63,7 +66,7 @@ export function skyMaterial() {
           float th = mix(L == 0 ? 0.986 : 0.978, L == 0 ? 0.9 : 0.84, band * smoothstep(0.3, 0.7, clouds) * (1.0 - lane));
           float star = step(th, sh) * smoothstep(0.26, 0.0, sr) * (0.25 + 0.75 * pow(h31(sid + 9.1), 3.0));
           vec3 sCol = mix(vec3(0.72, 0.8, 1.0), vec3(1.0, 0.86, 0.72), h31(sid + 5.5));
-          space += sCol * star * (L == 0 ? 0.55 : 0.3) * (0.85 + 0.15 * sin(u_time * 1.3 + sh * 60.0));
+          space += sCol * star * (L == 0 ? 0.55 : 0.3) * (1.0 + 0.6 * (u_rich - 1.0)) * (0.85 + 0.15 * sin(u_time * 1.3 + sh * 60.0));
         }
         // ---- sky (morning): zenith blue → warm horizon, sun glow
         float y = d.y;
@@ -236,7 +239,15 @@ export function screenMaterial(tex: THREE.Texture, size: THREE.Vector2) {
           col = mix(col, blr, k);
         }
       #endif
-        col += vec3(0.78, 0.86, 1.0) * u_flash * (1.0 - 0.6 * dist); // the warp flash on entry / exit
+        // R6.98 (Shifat 3:03 AM on 6.97's warp exit: "feels lifeless whitewashed"): the warp flash no longer ADDS a pale
+        // wash (that lifted every black to grey and turned the night sky milky). It is an exposure + saturation punch on the
+        // picture's own colours: blacks stay black, the tunnel's and the sky's hues get richer and brighter for the beat.
+        {
+          float fk = u_flash * (1.0 - 0.6 * dist);
+          col *= 1.0 + 2.2 * fk;
+          float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
+          col = max(mix(vec3(lum), col, 1.0 + 1.4 * fk), 0.0);
+        }
         col *= u_bright;
         // liquid glass highlights: Fresnel sheen + one soft key, only where the surface actually bends
         float bend = 1.0 - n.z;  // 0 on flat glass
@@ -248,10 +259,21 @@ export function screenMaterial(tex: THREE.Texture, size: THREE.Vector2) {
         // flat glass: a faint diagonal sheen when we see the tablet from outside
         float sheen = smoothstep(0.55, 1.25, vUv.y * 0.8 + (1.0 - vUv.x) * 0.6); // a soft studio reflection across the top-left of the glass
         col = col * (1.0 - 0.12 * sheen * u_gloss) + vec3(0.75, 0.8, 0.9) * sheen * 0.05 * u_gloss;
+        // R6.96 EDGE AA: once the tablet is seen from outside (u_gloss > 0), the screen's border with the black bezel was
+        // a hard raster edge in the low-res background pass, so on phones and weak PCs (background at 0.5-0.75x) it showed
+        // as visible stair-steps once upscaled. Fade the picture into the bezel black over ~1.5 of this target's pixels at
+        // the edge (fwidth: this pass's own pixel size in uv), so the coverage steps fall on near-black pixels. While the
+        // screen IS the viewport (u_gloss = 0) nothing changes.
+        float aaK = smoothstep(0.0, 0.25, u_gloss);
+        float edgeA = 1.0;
+        if (aaK > 0.0) {
+          vec2 dpx = min(vUv, 1.0 - vUv) / max(fwidth(vUv), vec2(1e-6));
+          edgeA = mix(1.0, smoothstep(0.0, 1.6, min(dpx.x, dpx.y)), aaK);
+        }
       #ifdef CREW_ONLY
-        gl_FragColor = vec4(col, cr.a);
+        gl_FragColor = vec4(col, cr.a * edgeA);
       #else
-        gl_FragColor = vec4(col, 1.0);
+        gl_FragColor = vec4(mix(vec3(0.0025), col, edgeA), 1.0);
       #endif
         #include <tonemapping_fragment>
         #include <colorspace_fragment>

@@ -141,6 +141,8 @@ class Visuals {
     const lensUnder = this.hdrJump > 0 ? out.pos.y < 0 : dive.under
     if (this.hdrJump > 0) { this.hdrJump--; if (props.stage === 'dive' && dive.under === out.pos.y < 0) this.hdrJump = 0 }
     const above = props.stage === 'hero' || props.stage === 'statement' || (props.stage === 'dive' && !lensUnder)
+    props.aboveWater = above
+    if (props.stage !== 'journey') props.bgCeil = 0   // R7.00: only the journey's own target caps the phone's sharp background
     let hdr = above ? 'light' : 'dark'
     this.hdrTones[clip.owner] = hdr
     if (clip.boundary) { const under = clip.yTop > 64 ? clip.lower - 1 : clip.lower; if (this.hdrTones[under]) hdr = this.hdrTones[under] }

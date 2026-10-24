@@ -13,14 +13,30 @@ import { Crewmate, crewGeometrySteps, CREW_HEIGHT, CREW_CENTER_Y, crewMaterials 
 import { makeEnvsSteps } from './env'
 import { buildForestSteps, buildShadows, longShadowGeometry, longShadowMaterial } from './forest'
 import { buildSunFan, buildMist, buildMotes } from './forestFx'
-import { buildFoliageSteps } from './foliage' // FOLIAGE HOOK (foliage helper): fluffy grass + trees
+import { buildFoliageSteps, GROUND_U } from './foliage' // FOLIAGE HOOK (foliage helper): fluffy grass + trees
 import { runToEnd, prewarm, type CompileJob } from '../../prewarm' // PERFGOV
 import { buildFireflies, buildCanopy } from './nightFx'
 import { buildTunnel, buildTunnelLights } from './tunnel'
 import { buildTunnelBlur } from './tunnelBlur' // TUNNEL DRAMA: half-res zoom blur
+const OLDT = typeof location !== 'undefined' && /[?&]oldtrans/.test(location.search) // R7.04 QA: ?oldtrans = 7.03 transitions
+
+// R7.05 GROUND: ?oldground = the 7.04 land during the descent (A/B)
+const OLD_GROUND = typeof location !== 'undefined' && /[?&]oldground/.test(location.search)
+const _tN = new THREE.Color(0.1, 0.17, 0.3), _tD = new THREE.Color(1.0, 0.7, 0.55)
+const _hz = new THREE.Color(), _hzA = new THREE.Color(), _hzB = new THREE.Color()
+const _ss = (e0: number, e1: number, x: number) => { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t) }
+/** the inner sky shader's colour just above the horizon (y = 0, away from the sun) as a function of u_atmos, linear */
+function horizonColor(a: number, out: THREE.Color) {
+  if (a < 0.5) {
+    _hzA.setRGB(0.003, 0.0035, 0.009).lerp(_hzB.setRGB(0.033, 0.053, 0.118), _ss(0, 0.22, a))
+    return out.copy(_hzA).lerp(_hzB.setRGB(0.926, 0.335, 0.223), _ss(0.22, 0.5, a))
+  }
+  return out.setRGB(0.926, 0.335, 0.223).lerp(_hzB.setRGB(0.94, 0.497, 0.207), _ss(0.5, 1, a))
+}
 import { buildCta, WALL_Z } from './ctaScene'
 import { screenMaterial, backdropMaterial, SUN_DIR } from './shaders'
-import { buildSpaceSky, SkyExtras, SPACE_LIGHT, starPrFor, isSharedSkyGeometry, JOURNEY_LENS, glideOffset } from './spaceSky' // R6.87 SINGLE SKY
+const QA_J = typeof location !== 'undefined' && /[?&]qa\b/.test(location.search)
+import { buildSpaceSky, SkyExtras, SPACE_LIGHT, starPrFor, isSharedSkyGeometry, JOURNEY_LENS, glideOffset, SPACE_RICH } from './spaceSky' // R6.87 SINGLE SKY
 import { buildShatterGeometry, shatterMaterial, buildGlints } from './shatter'
 import { inner, outer, T, type Inner, type Outer } from './timeline'
 import { journeyAudio, resetJourneyAudio } from './journeyAudio'
@@ -57,6 +73,7 @@ function bezelGeometry(w: number, h: number, r: number, sw: number, sh: number) 
  * picture that fly at the lens in a slow-motion beat (shatter.ts).
  * The stage never renders the main scene and never moves the camera: it writes journey.pose.
  */
+const RIM_PX = +(new URLSearchParams(location.search).get('rimpx') ?? 2) || 0   // R6.96: min rim width, background px
 const CTA_GLIDE = new URLSearchParams(location.search).has('ctaglide')   // R6.92b: off = the CTA rides up as a sheet
 
 export function JourneyStage(): JSX.Element {
@@ -135,6 +152,7 @@ export function JourneyStage(): JSX.Element {
       const jobs: CompileJob[] = [
         { roots: [S.inner], scene: S.inner, camera: S.icam, target: S.rt, force: S.inner },
         { roots: [blurQuad], scene: new THREE.Scene(), camera: new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), target: S.tunnelBlur.rt },
+        ...(S.crewL ? [S.crewL.warmJob()] : []),   // R6.95: the crewmate layer's depth copy (shared program with the tablet's)
       ]
       return { jobs, targets: [S.rt, S.tunnelBlur.rt], steps: (function* () { yield; prebuildShards(S, gl, portrait) })() }
     })
@@ -190,6 +208,8 @@ export function JourneyStage(): JSX.Element {
     S.lightRig.position.copy(I.crew)
     S.sky.position.copy(S.icam.position); S.stars.position.copy(S.icam.position)
     S.skyMat.uniforms.u_atmos.value = I.atmos; S.skyMat.uniforms.u_time.value = time
+    if (QA_J && !(window as any).__jS) (window as any).__jS = S // QA (?qa): the journey stage's parts
+    S.skyMat.uniforms.u_rich.value = SPACE_RICH // R7.01 RICH: space keeps the tablet picture's colour (spaceSky.ts)
     S.starMat.uniforms.u_opacity.value = I.stars; S.starMat.uniforms.u_time.value = time
     S.glintMat.uniforms.u_opacity.value = I.stars; S.glintMat.uniforms.u_time.value = time
     S.stars.visible = I.stars > 0.001
@@ -197,7 +217,10 @@ export function JourneyStage(): JSX.Element {
     // (gone before the tunnel opens at 0.12)
     S.skyExtras.layout(portrait, W, H)
     S.skyExtras.update(time, I.stars * (1 - ss(0.07, 0.115, p)), rtPerCss(S, W, H) * Math.min(Math.max(props.dpr || 1, 0.6), 2))
-    S.forest.visible = I.atmos > 0.2
+    props.bgCeil = props.stage === 'journey' ? Math.round(Math.max(0.75, rtPerCss(S, W, H) * 1.25) * 20) / 20 : 0   // R7.00 PHONE SHARP: the journey's world is its own 512 target
+    // R6.97 TRANSITIONS: the forest switched on at atmos 0.2, a few frames after the bore had gone, so the ground popped
+    // into the night sky. It now waits under the closing tunnel and is already there when the view clears.
+    S.forest.visible = I.atmos > 0.1
     // forest air: grass sway, the sun fan behind the tree line, mist veils and pollen once we are near the ground
     const land = ss(0.42, 0.52, p)
     S.grass.material.uniforms.u_time.value = time
@@ -215,9 +238,9 @@ export function JourneyStage(): JSX.Element {
     {
       const u = Math.min(1, Math.max(0, (p - 0.12) / 0.19))
       const tu = S.tunnel.material.uniforms
-      const inn = ss(0.0, 0.2, u), out = 1 - ss(0.8, 1.0, u)
+      const inn = ss(0.0, OLDT ? 0.2 : 0.34, u), out = 1 - ss(0.8, 1.0, u) // R7.04: the bore opened over ~250 px (dark → full glow in 2 phone notches); now ~1.7x longer
       tu.u_on.value = Math.min(inn, out)
-      tu.u_stretch.value = Math.min(ss(0.0, 0.28, u), 1 - ss(0.74, 1.0, u))  // stars stretch into streaks, then back to points
+      tu.u_stretch.value = Math.min(ss(0.0, OLDT ? 0.28 : 0.4, u), 1 - ss(0.74, 1.0, u))  // stars stretch into streaks, then back to points
       tu.u_travel.value = u * 900 + time * 6                                     // the rush is the scroll; a slow shimmer on top
       tu.u_phase.value = u * 5.0; tu.u_bend.value = 0.6 + 0.4 * Math.sin(u * Math.PI)
       tu.u_exit.value = ss(0.6, 1.0, u); tu.u_time.value = time
@@ -237,7 +260,14 @@ export function JourneyStage(): JSX.Element {
         S.tunnelLights.orbs.position.copy(S.icam.position); S.tunnelLights.orbs.quaternion.copy(S.icam.quaternion)
         S.tunnelLights.rings.position.copy(S.icam.position); S.tunnelLights.rings.quaternion.copy(S.icam.quaternion)
       }
-      const flash = (Math.exp(-Math.pow((u - 0.07) / 0.03, 2)) * 0.32 + Math.exp(-Math.pow((u - 0.9) / 0.04, 2)) * 0.28) * (vis ? 1 : 0)
+      // R6.97 TRANSITIONS: the warp flashes were symmetric 0.03/0.04-wide spikes, gated off the moment the bore closed, so on
+      // a phone fling they strobed for 1–2 frames and the exit cut from a grey wash straight to the black night sky. Now each
+      // rises the way it did but eases out more slowly; the exit's tail runs on past the bore (u > 1) and melts into the sky.
+      // R6.98: the exit tail is shorter (0.07, was 0.11): still no cut to the sky, but the night sky's contrast is back sooner
+      const ur = (p - 0.12) / 0.19
+      // R7.04: the in-flash rose over ~45 px (a strobe on a fling); it rises over ~85 px now, a beat later
+      const fIn = (ur - (OLDT ? 0.07 : 0.1)) / (ur < (OLDT ? 0.07 : 0.1) ? (OLDT ? 0.035 : 0.065) : 0.06), fOut = (ur - 0.9) / (ur < 0.9 ? 0.04 : 0.07)
+      const flash = (ur > -0.2 && ur < 1.4) ? Math.exp(-fIn * fIn) * 0.32 + Math.exp(-fOut * fOut) * 0.28 : 0
       S.tunnelFx.zoom = vis ? tu.u_stretch.value * tu.u_on.value * (0.35 + 0.65 * S.rush) + flash * 0.6 : 0
       S.tunnelFx.chroma = vis ? 0.028 * tu.u_stretch.value * (0.25 + 0.75 * S.rush) + flash * 0.03 : 0
       S.tunnelFx.flash = flash
@@ -272,6 +302,14 @@ export function JourneyStage(): JSX.Element {
     S.rim.position.set(mix(-6, SUN_DIR.x * 10, a), mix(3, 1.2, a), mix(-7, SUN_DIR.z * 10, a))
     const fog = S.inner.fog as THREE.Fog
     fog.color.copy(S.c.fogDusk).lerp(S.c.fogDay, ss(0.55, 1, a))
+    if (!OLD_GROUND) {
+      // R7.05 GROUND: the haze is the sky's own horizon colour through night and dusk (inner sky shader at y = 0), and
+      // eases into the old day haze before touchdown, so the land meets the sky without a line and the forest is unchanged
+      horizonColor(a, _hz)
+      fog.color.copy(_hz).lerp(S.c.fogDay, ss(0.72, 1, a))
+      GROUND_U.u_high.value = ss(1.5, 9, I.crew.y) * (I.visible ? 1 : 0)
+      GROUND_U.u_tint.value.copy(_tN).lerp(_tD, ss(0.18, 0.45, a)).lerp(_hzA.setRGB(1, 1, 1), ss(0.6, 0.9, a))
+    }
     fog.near = mix(20, 60, a); fog.far = mix(220, 380, a)
     const env = a > 0.5 ? S.envs.forest : S.envs.space
     if (S.innerMats.body.envMap !== env) S.innerMats.body.envMap = env
@@ -291,6 +329,7 @@ export function JourneyStage(): JSX.Element {
     // where the inner crewmate sits on the glass at the moment of the break (same pose, so the hand-off is seamless)
     const start = breakStart(S, portrait, fovIn)
     const O = outer(p, S.O, fit, start, SCREEN_Z, farCorner(S.sw, S.sh, start.x, start.y))
+    let shardOut = 0
     // ---- W18 THE ENDING (STRUCTURE v3 13:27Z–13:33Z): glide down past the tablet with the crewmate alongside into the
     // aligned CTA on the black wall (ctaScene.ts). g: a first touch of the glide as the crewmate floats free, the rest
     // over the CTA section's arrival (journey.cta 0 → 1). Pure functions of scroll: reversible, never frozen.
@@ -321,6 +360,7 @@ export function JourneyStage(): JSX.Element {
         O.pitch = mix(O.pitch, 0.05, gc)
         O.roll = mix(O.roll, Math.sin(journey.ctaTime * 0.27) * 0.06 + 0.22 * Math.sin(Math.PI * gc), gc)
         O.float = 1
+        shardOut = Math.min(1, Math.max(0, (g - 0.16) / 0.14)); shardOut = shardOut * shardOut * (3 - 2 * shardOut)
         if (g > 0.3) O.shardsVisible = false
         journey.crew.set(O.crew.x + JOURNEY_ORIGIN.x, O.crew.y, O.crew.z)
         journey.crewScale = O.crewScale
@@ -380,6 +420,11 @@ export function JourneyStage(): JSX.Element {
     journey.pose.target.copy(O.camTarget).add(JOURNEY_ORIGIN)
     journey.pose.fov = O.fov
 
+    // R6.96 RIM LINE: keep the metal rim at least RIM_PX background pixels wide (0 on sharp tiers; ?rimpx=0 turns it off)
+    if (RIM_PX > 0) {
+      const pxu = screenPx(S, state.camera as THREE.PerspectiveCamera, W, H) / S.sh * Math.max(0.25, props.dpr || 1)
+      S.bezelU.u_bezelInset.value = Math.min(0.06, Math.max(0, RIM_PX / pxu - 0.04))
+    }
     const su = S.screenMat.uniforms
     su.u_bulge.value = O.bulge; su.u_width.value = O.width; su.u_center.value.copy(O.center)
     su.u_ringT.value = O.ringT; su.u_ringAmp.value = O.ringAmp; su.u_bright.value = O.screenBright
@@ -417,7 +462,7 @@ export function JourneyStage(): JSX.Element {
       const u = S.shardMat.uniforms
       u.u_t.value = O.shatterT; u.u_crackR.value = O.crackR; u.u_ringR.value = O.ringR; u.u_frost.value = O.frost; u.u_tilt.value = O.tilt
       u.u_hole.value = O.hole; u.u_k.value = start.k; u.u_impact.value.set(start.x, start.y); u.u_time.value = time
-      u.u_bright.value = O.bright; u.u_gloss.value = O.gloss
+      u.u_bright.value = O.bright; u.u_gloss.value = O.gloss; u.u_out.value = shardOut
     }
     S.glints.points.visible = O.shatterT > 0 && O.shatterT < 4
     if (S.glints.points.visible) {
@@ -577,6 +622,10 @@ export function* buildSteps(gl: THREE.WebGLRenderer, portrait: boolean, low: boo
   }
   // the ground is smooth (the grass carries the texture); the trees are soft stylised foliage (forest.ts)
   const groundMat = new THREE.MeshLambertMaterial({ vertexColors: true })
+  // R7.05 GROUND (Shifat: after the tunnel the land read flat grey with a jagged horizon): while it is still high up
+  // (u_high 1 → 0 by touchdown, so the forest at rest is untouched) the land keeps its greens — richer, with soft meadow /
+  // woodland patches — and the haze rises later so near and mid ground stay alive; the far land still melts fully into
+  // the haze, which now takes the sky's own horizon colour (journey frame), so there is no edge and no line
   const { group: forest, spots } = yield* buildForestSteps(low, forestMat, groundMat) // PERFGOV: in steps
   yield // PERFGOV
   const treeShadows = buildShadows(spots, SUN_DIR)
@@ -618,6 +667,18 @@ export function* buildSteps(gl: THREE.WebGLRenderer, portrait: boolean, low: boo
   const body = new THREE.Mesh(new RoundedBoxGeometry(sw + 1.0, sh + 1.0, 0.5, low ? 3 : 5, 0.24), metal)
   body.position.z = -0.03
   const bezel = new THREE.Mesh(bezelGeometry(sw + 0.92, sh + 0.92, 0.44, sw, sh), glass); bezel.position.z = 0.281
+  // R6.96 RIM LINE: the metal rim between the bezel's outer edge and the body's edge is 0.04 units wide, about one background
+  // pixel on the phone and weak-PC paths (background at 0.5-0.75x), so it broke into a dashed grey line along the tablet's top.
+  // The bezel's OUTER contour is pulled in by u_bezelInset (set per frame from the rim's real width in background pixels, so the
+  // rim is never thinner than ~2 of them); the screen opening and everything on a sharp tier are unchanged (inset 0 there).
+  const bezelU = { u_bezelInset: { value: 0 } }
+  { const hx = sw / 2 + 0.46, hy = sh / 2 + 0.46, mx = sw / 2 + 0.05, my = sh / 2 + 0.05
+    glass.onBeforeCompile = (sh2) => {
+      Object.assign(sh2.uniforms, bezelU)
+      sh2.vertexShader = 'uniform float u_bezelInset;\n' + sh2.vertexShader.replace('#include <begin_vertex>',
+        `#include <begin_vertex>\nif (abs(transformed.x) > ${mx.toFixed(4)} || abs(transformed.y) > ${my.toFixed(4)}) transformed.xy *= vec2((${hx.toFixed(4)} - u_bezelInset) / ${hx.toFixed(4)}, (${hy.toFixed(4)} - u_bezelInset) / ${hy.toFixed(4)});`)
+    }
+    glass.customProgramCacheKey = () => 'bezel-inset' }
   const lens = new THREE.Mesh(new THREE.CircleGeometry(0.07, 20), new THREE.MeshBasicMaterial({ color: '#15171c', fog: false }))
   if (portrait) lens.position.set(0, sh / 2 + 0.23, 0.283); else lens.position.set(0, sh / 2 + 0.23, 0.283)
   const segX = low ? 72 : 144, segY = Math.round(segX * (sh / sw))
@@ -690,7 +751,7 @@ export function* buildSteps(gl: THREE.WebGLRenderer, portrait: boolean, low: boo
   }
   return {
     sw, sh, rt, envs, inner: innerScene, skyExtras, crewL, crewScreen, screen, fireflies, canopy, tunnel, tunnelLights, tunnelBlur, rush: 0, tunnelFx: { zoom: 0, chroma: 0, flash: 0, cx: 0.5, cy: 0.5 }, grass, foliage, fan, mist, motes, treeRim, icam, bcam, sky, skyMat, stars, starMat, glintMat, forest, crewIn, innerMats, shadow, shadowMat, hemi, sun, rim, lightRig,
-    outer: outerG, cta, rimU, ctaKey: '', par: new THREE.Vector2(), backdrop, backdropMat, screenMat, crewOut, shards, shardMat, shardKey: '', tier, glints, c, I, IB, O, lastP: -1,
+    outer: outerG, cta, rimU, bezelU, ctaKey: '', par: new THREE.Vector2(), backdrop, backdropMat, screenMat, crewOut, shards, shardMat, shardKey: '', tier, glints, c, I, IB, O, lastP: -1,
     tmp: new THREE.Vector3(), tmp2: new THREE.Vector3(), o3: new THREE.Object3D(), one: new THREE.Vector2(1, 1), dispose,
   }
 }

@@ -68,6 +68,9 @@ export default defineConfig({
     outDir: 'site',
     emptyOutDir: true,
     target: 'es2020',
+    // R6.96 JS TRIM: terser (2 compress passes, comments dropped) instead of esbuild's minifier; same code, smaller gzip
+    minify: 'terser',
+    terserOptions: { compress: { passes: 2 }, format: { comments: false } },
     assetsInlineLimit: 0,
     chunkSizeWarningLimit: 1200,
     rollupOptions: {

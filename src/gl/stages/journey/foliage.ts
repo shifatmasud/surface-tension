@@ -400,11 +400,13 @@ function* buildFluffyTrees(o: FoliageOptions, U: U): Generator<void, { meshes: T
 }
 
 // ================================================================================================ floor
+/** R7.05 GROUND: the land seen from high up during the fall (u_high 1 → 0 by touchdown; JourneyStage drives it) */
+export const GROUND_U = { u_high: { value: 0 }, u_tint: { value: new THREE.Color(1, 1, 1) } }
 function reshadeFloor(o: FoliageOptions, U: U) {
   const ground = o.forest.children.find((c) => (c as THREE.Mesh).isMesh && !(c as THREE.InstancedMesh).isInstancedMesh) as THREE.Mesh | undefined
   if (!ground) return null
   const mat = new THREE.ShaderMaterial({
-    fog: true, uniforms: { ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), ...U }, vertexShader: floorVert, fragmentShader: floorFrag,
+    fog: true, uniforms: { ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), ...U, u_high: GROUND_U.u_high, u_tint: GROUND_U.u_tint }, vertexShader: floorVert, fragmentShader: floorFrag,
   })
   const old = ground.material as THREE.Material
   ground.material = mat

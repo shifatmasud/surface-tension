@@ -124,6 +124,7 @@ export const floorVert = /* glsl */ `
 export const floorFrag = /* glsl */ `
   ${LIGHT_UNIFORMS}
   uniform vec3 u_base; uniform vec3 u_mid; uniform vec3 u_tip; uniform vec3 u_dry; uniform vec3 u_trans;
+  uniform float u_high; uniform vec3 u_tint;
   varying vec3 vW; varying vec3 vN;
   ${FOLIAGE_NOISE}
   ${FOLIAGE_DEPTH}
@@ -144,9 +145,24 @@ export const floorFrag = /* glsl */ `
     vec3 Vd = normalize(cameraPosition - vW);
     float back = pow(max(dot(-Vd, u_sun), 0.0), 2.5);
     c += u_trans * col * back * 0.75 * u_light * smoothstep(2.0, 18.0, d);
-    c = fdepth(c, d);
-    gl_FragColor = vec4(c, 1.0);
-    #include <fog_fragment>
+    vec3 cd = fdepth(c, d);
+    // R7.05 GROUND (Shifat: after the tunnel the land read flat grey): from high up every bit of floor is past the
+    // depth haze's reach, so the whole land went 28% grey + 50% haze. While it is high (u_high) the land keeps the
+    // forest's own greens instead — woodland / meadow patches, the grass's yellow-green, lit by the light of the moment —
+    // and the scene haze (which now takes the sky's horizon colour) rises later, still reaching the far land in full
+    if (u_high > 0.001) {
+      float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+      float pt = fvn(vW.xz * 0.03) * 0.65 + fvn(vW.xz * 0.1 + 7.0) * 0.35;
+      vec3 c1 = mix(vec3(0.05, 0.16, 0.035), vec3(0.18, 0.34, 0.045), smoothstep(0.3, 0.72, pt));
+      c1 = mix(c1, vec3(0.32, 0.43, 0.07), smoothstep(0.64, 0.82, fvn(vW.xz * 0.055 + 3.0)) * 0.55); // sunlit meadows
+      c1 *= u_tint * (0.85 + 0.3 * clamp(l * 3.0, 0.0, 1.0));
+      cd = mix(cd, c1, u_high);
+    }
+    gl_FragColor = vec4(cd, 1.0);
+    #ifdef USE_FOG
+      float fogFactor = pow(smoothstep(fogNear, fogFar, vFogDepth), 1.0 + 1.4 * u_high);
+      gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, fogFactor);
+    #endif
   }
 `
 

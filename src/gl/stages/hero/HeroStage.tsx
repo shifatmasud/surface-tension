@@ -16,7 +16,7 @@ import { input } from '../../../services/input'
 import { Spring } from '../../../core/spring'
 import { engine } from '../../engine'
 import { dive, DIVE_LAYER } from '../dive/diveState'
-import { quality } from '../../quality' // PERF HOOK
+import { quality, PHONE_SHARP } from '../../quality' // PERF HOOK
 import { waterInput } from '../../water/waterInput' // WATER HOOK
 import { gemMask } from '../../systems/stickerMask'
 import { heroPass } from '../../post/heroPass' // R6.87 SPLIT
@@ -333,7 +333,7 @@ export function HeroStage() {
   // camera's draw of the same mesh then only reads it back (water.ts u_lakeComp). Same vertex shader → full-res, exact depth:
   // the stone's silhouette, its submerged cut and the meniscus line are still drawn at scene resolution, and the stone is
   // never in this target, so nothing of it can bleed (no halo). Desktop/mid: nothing here exists (hi).
-  const lake = useMemo(() => hi ? null : { rt: new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType }), scale: 0.65, low: false, frame: -1, mw: new THREE.Matrix4(), pm: new THREE.Matrix4(), comps: 0 }, [hi])
+  const lake = useMemo(() => hi ? null : { rt: new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType }), scale: PHONE_SHARP ? 0.5 : 0.65,   /* R7.00 (Shifat 4:20 AM 'hero … just performance boost'): the lake's own pass 0.65 → 0.5 on budget phones (≈40 % fewer pixels) */ low: false, frame: -1, mw: new THREE.Matrix4(), pm: new THREE.Matrix4(), comps: 0 }, [hi])
   useEffect(() => {
     if (!lake) return
     // the governor's MOVING rung only (noRest), as `under`: no re-allocation on every pointer stop/start
@@ -416,6 +416,11 @@ export function HeroStage() {
     gemFill.value = (window as any).__gemFill ?? (0.7 + 0.15 * Math.min(1, Math.max(0, dive.gemMix)))   // W23 (scorer-r621 #1, root 02:55Z): the hero lifts its darkest chips too (0.7; 0.85 in the dive)
     { const W = window as any; if (W.__gemFres !== undefined) (gemMesh.current.material as any).fresnel = W.__gemFres; if (W.__sheenTp !== undefined) sheen.uniforms.u_tp.value = W.__sheenTp; if (W.__sheenWarm !== undefined) sheen.uniforms.u_warm.value = W.__sheenWarm; if (W.__sheenStr !== undefined) sheen.uniforms.u_strength.value = W.__sheenStr; if (W.__gemHide !== undefined) sheenMesh.current.visible = !W.__gemHide }   // QA hooks (W22 stone A/B)
     waterMesh.current.visible = lakeOn; dome.visible = lakeOn
+    // R7.02 STONE CUT (Shifat 6:55 AM "Stone shapes get cutoff when diving from air to water"): just under the surface
+    // (camY 0 → −0.3) the lake still draws, seen from below, and its depth stood between the camera and the crown above the
+    // plane, so the hero pass sliced the stone flat at the waterline for a few frames. From below, nothing under the plane
+    // can be behind the lake, so the lake stops writing depth while the camera is under it: same pixels, the crown stays.
+    { const wm = water as THREE.Material, noDepth = lakeOn && camera.position.y < 0; if (wm.depthWrite === noDepth) wm.depthWrite = !noDepth }
     waterInput.frame(camera, lakeOn)   // WATER HOOK: touch trails (even mid-scroll) + the sim's visibility
     // W18-DIVE OVER-UNDER: the lake is cut at the lens waterline for the main camera only (never in the env/mirror captures)
     if (!waterMesh.current.userData.wl) {

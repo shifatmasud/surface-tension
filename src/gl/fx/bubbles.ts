@@ -33,7 +33,7 @@ attribute vec4 aRand;          // x size, y speed jitter, z phase, w lateral dri
 uniform vec3 u_cam, u_bR, u_bU, u_bF;
 uniform vec2 u_tan;            // tan(half fov) of the bubble frustum (x, y), margin included
 uniform float u_near, u_far, u_time, u_mo, u_pxScale, u_slotY, u_surf, u_amb, u_abyss;
-varying float vA, vL, vWob;
+varying float vA, vL, vWob, vPx;
 void main(){
   float t = u_time * u_mo;
   float rad = mix(0.0016, 0.0068, aRand.x * aRand.x);                 // radius, m (1.6-7 mm)
@@ -54,6 +54,7 @@ void main(){
   float dist = max(-mv.z, 0.05);
   float px = 2.0 * rad * u_pxScale / dist;                            // true diameter in pixels
   gl_PointSize = clamp(px * 1.25, 5.0, 56.0);                         // the sprite holds the rim's soft edge
+  vPx = gl_PointSize;                                                  // R6.95: the sprite's size in pixels (the fragment's AA)
   // spatial visibility only (never a timed fade): the wrap faces sit outside the frame, the near lens blur, the fog,
   // the surface, and the copy's slot at the bottom of the frame
   float e = min(min(fy, 1.0 - fy), min(fx, 1.0 - fx));
@@ -75,18 +76,25 @@ void main(){
 const frag = /* glsl */ `
 uniform float u_time, u_split; uniform vec2 u_res;
 ${CLIP}
-varying float vA, vL, vWob;
+varying float vA, vL, vWob, vPx;
 void main(){
   splitClip();
   if (vA < 0.002) discard;
   vec2 q = gl_PointCoord * 2.0 - 1.0; q.y = -q.y;
   q *= vec2(1.0 + vWob, 1.0 - vWob) * 1.25;                          // larger bubbles wobble (oblate ↔ prolate)
   float r = length(q);
-  if (r > 1.0) discard;
-  float dark = smoothstep(0.62, 0.84, r) * (1.0 - smoothstep(0.86, 0.95, r));   // the refraction edge: darker than the water
-  float rim = smoothstep(0.82, 0.93, r) * (1.0 - smoothstep(0.95, 1.0, r));      // the silvery line (internal reflection)
-  float spec = exp(-dot(q - vec2(-0.34, 0.4), q - vec2(-0.34, 0.4)) * 34.0);
-  float glint = exp(-dot(q - vec2(0.18, -0.52), q - vec2(0.18, -0.52)) * 40.0) * 0.35;
+  // R6.95 AA (Shifat's PC and phone, where the background renders at 0.5-0.75x): most bubbles sit at the 5 px sprite floor,
+  // so the rim (a tenth of the radius) was a sub-pixel line that broke into flickering dashes. Each band is now at least
+  // one pixel wide (w: a pixel in q units, beyond what the band already spans) with its brightness scaled by the same
+  // factor, so a bubble keeps its light and reads as a clean ring; big sprites (over ~40 px) are unchanged.
+  float w = max(0.0, 2.5 / max(vPx, 1.0) - 0.06);
+  if (r > 1.0 + w) discard;
+  float dark = smoothstep(0.62 - w, 0.84, r) * (1.0 - smoothstep(0.86, 0.95 + w, r)) * (0.175 / (0.175 + w));   // the refraction edge: darker than the water
+  float rim = smoothstep(0.82 - w, 0.93, r) * (1.0 - smoothstep(0.95, 1.0 + w, r)) * (0.1 / (0.1 + w));      // the silvery line (internal reflection)
+  float v2 = w * w * 0.0833;                                           // a pixel box's variance, added to the two highlights
+  float ks = 1.0 / (0.0294 + 2.0 * v2), kg = 1.0 / (0.025 + 2.0 * v2);  // = 34 and 40 when w = 0
+  float spec = exp(-dot(q - vec2(-0.34, 0.4), q - vec2(-0.34, 0.4)) * ks) * (ks / 34.0);
+  float glint = exp(-dot(q - vec2(0.18, -0.52), q - vec2(0.18, -0.52)) * kg) * 0.35 * (kg / 40.0);
   float inner = (1.0 - smoothstep(0.0, 0.85, r)) * 0.05;
   vec3 lc = vec3(0.86, 0.96, 1.0) * vL;
   vec3 col = lc * (rim * 1.15 + inner + glint) + lc * spec * 2.4;     // spec core is HDR: the bloom's hot spot

@@ -17,6 +17,7 @@ import { prewarm, runToEnd } from '../../prewarm' // PERFGOV
 import { pmremFromSceneSteps } from '../../core/pmremSteps' // R6.77
 import { crewGeometrySteps } from '../journey/crewmate' // PERFGOV
 import { heroPass } from '../../post/heroPass' // R6.89: the tablet is a hero subject
+import { SVGLoader } from 'three/examples/jsm/loaders/SVGLoader.js'
 import { TabletWindow, IPAD_GLASS, IPAD_T, WIN_HW, WIN_HH } from '../journey/tabletWindow'; import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js' // TABLET HOOK: the live 3D window (journey/tabletWindow.ts)
 /** QA: ?atom holds the sequence at the atom, ?drum at the drum; window.__morph (0..1) pins it */
 const KEEP_EYE = new THREE.Vector3(0, 0, -1e3), KEEP_F = new THREE.Vector3(0, 0, 1), KEEP_V = new THREE.Vector3() // POLISH-2: the main lens, for the ring's keep-out
@@ -63,18 +64,18 @@ vec3 deepWaterC(vec3 dir){
   vec3 c = mix(vec3(0.002, 0.012, 0.028), vec3(0.008, 0.055, 0.105), smoothstep(0.0, 0.55, up));
   c = mix(c, vec3(0.030, 0.150, 0.230), smoothstep(0.5, 1.0, up));
   c += vec3(0.020, 0.110, 0.150) * pow(up, 6.0);
-  return c * (1.0 - 0.3 * u_abyss) * (1.0 - 0.72 * u_sinkK);
+  return c * (1.0 - 0.3 * u_abyss) * (1.0 - 0.42 * u_sinkK); // R7.04: matches shaders.ts deepWater
 }
 float deepFogC(float dist){ float d = mix(0.028, 0.052, u_abyss) * dist; return 1.0 - exp(-d * d); }
 `
 /** R6.88 SINK: the parts' dissolve (disintegrate.ts): k 0..1 and world → drum space (the front sweeps the drum, not the screen) */
 export const DIS_U = { u_disK: { value: 0 }, u_toDrum: { value: new THREE.Matrix4() } }
-function deepFogPatch(m: THREE.Material, u: Record<string, THREE.IUniform>, dis = true) {
+function deepFogPatch(m: THREE.Material, u: Record<string, THREE.IUniform>, dis = true, fog = 0.6) {
   m.onBeforeCompile = (sh) => {
     sh.uniforms.u_amb = u.u_amb; sh.uniforms.u_abyss = u.u_abyss; sh.uniforms.u_sinkK = u.u_sinkK
     if (dis) { sh.uniforms.u_disK = DIS_U.u_disK; sh.uniforms.u_toDrum = DIS_U.u_toDrum }
     sh.vertexShader = 'varying vec3 vDW;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n  vDW = (modelMatrix * vec4(transformed, 1.0)).xyz;')
-    sh.fragmentShader = '#define PART_FOG 0.6\n' + FOG_GLSL + (dis ? 'uniform float u_disK; uniform mat4 u_toDrum;\n' + DIS_GLSL : '') + sh.fragmentShader.replace('#include <fog_fragment>', `{
+    sh.fragmentShader = `#define PART_FOG ${fog.toFixed(3)}\n` + FOG_GLSL + (dis ? 'uniform float u_disK; uniform mat4 u_toDrum;\n' + DIS_GLSL : '') + sh.fragmentShader.replace('#include <fog_fragment>', `{
       vec3 dv = vDW - cameraPosition; float dd = length(dv);
       gl_FragColor.rgb = mix(gl_FragColor.rgb, deepWaterC(dv / dd) * gl_FragColor.a, deepFogC(dd) * u_amb * PART_FOG);
     }` + (dis ? `
@@ -84,7 +85,7 @@ function deepFogPatch(m: THREE.Material, u: Record<string, THREE.IUniform>, dis 
       gl_FragColor.rgb += disEmber(disR) * gl_FragColor.a;
     }` : ''))
   }
-  m.customProgramCacheKey = () => (dis ? 'deepfogpart2' : 'deepfogtab')
+  m.customProgramCacheKey = () => (dis ? 'deepfogpart2' : 'deepfogtab') + fog.toFixed(3)
   return m
 }
 let fogU: Record<string, THREE.IUniform> | null = null // R6.88: the tablet's own (non-dissolving) patch reads the same fog
@@ -137,31 +138,126 @@ function makeMats(u: Record<string, THREE.IUniform>, env: THREE.Texture) {
     white: new THREE.MeshPhysicalMaterial({ color: '#ffffff', roughness: 0.14, clearcoat: 1, clearcoatRoughness: 0.04, iridescence: 0.5, ...film, envMapIntensity: 1.25, emissive: '#ffffff', emissiveIntensity: 0.07 }),
     silver: new THREE.MeshPhysicalMaterial({ color: '#eef0f3', metalness: 1, roughness: 0.08, iridescence: 0.9, iridescenceIOR: 1.7, iridescenceThicknessRange: [240, 820], envMapIntensity: 2.2 }),
   }
-  fogU = u
+  fogU = u; fogUDS = u
   Object.values(m).forEach((x) => { x.envMap = env; deepFogPatch(x, u) })
   return m
 }
 
-/** crisp text on a part's face (canvas texture, Inter) */
-function label(text: string, h: number, color: string, u: Record<string, THREE.IUniform>, weight = 500, opacity = 1) {
-  const fs = 96, pad = 16
-  const c = document.createElement('canvas'), ctx = c.getContext('2d')!
-  const font = `${weight} ${fs}px Inter, "Helvetica Neue", Arial, sans-serif`
-  ctx.font = font
-  const w = Math.ceil(ctx.measureText(text).width) + pad * 2
-  c.width = w; c.height = 128
-  ctx.font = font; ctx.fillStyle = color; ctx.textBaseline = 'middle'
-  ctx.fillText(text, pad, 66)
-  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4
-  const mat = deepFogPatch(new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity, depthWrite: false }), u)
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(h * (w / 128), h), mat)
+const ICON: Record<string, string> = {"sparkle-bold": "M199,125.31l-49.88-18.39L130.69,57a19.92,19.92,0,0,0-37.38,0L74.92,106.92,25,125.31a19.92,19.92,0,0,0,0,37.38l49.88,18.39L93.31,231a19.92,19.92,0,0,0,37.38,0l18.39-49.88L199,162.69a19.92,19.92,0,0,0,0-37.38Zm-63.38,35.16a12,12,0,0,0-7.11,7.11L112,212.28l-16.47-44.7a12,12,0,0,0-7.11-7.11L43.72,144l44.7-16.47a12,12,0,0,0,7.11-7.11L112,75.72l16.47,44.7a12,12,0,0,0,7.11,7.11L180.28,144ZM140,40a12,12,0,0,1,12-12h12V16a12,12,0,0,1,24,0V28h12a12,12,0,0,1,0,24H188V64a12,12,0,0,1-24,0V52H152A12,12,0,0,1,140,40ZM252,88a12,12,0,0,1-12,12h-4v4a12,12,0,0,1-24,0v-4h-4a12,12,0,0,1,0-24h4V72a12,12,0,0,1,24,0v4h4A12,12,0,0,1,252,88Z", "sliders": "M64,105V40a8,8,0,0,0-16,0v65a32,32,0,0,0,0,62v49a8,8,0,0,0,16,0V167a32,32,0,0,0,0-62Zm-8,47a16,16,0,1,1,16-16A16,16,0,0,1,56,152Zm80-95V40a8,8,0,0,0-16,0V57a32,32,0,0,0,0,62v97a8,8,0,0,0,16,0V119a32,32,0,0,0,0-62Zm-8,47a16,16,0,1,1,16-16A16,16,0,0,1,128,104Zm104,64a32.06,32.06,0,0,0-24-31V40a8,8,0,0,0-16,0v97a32,32,0,0,0,0,62v17a8,8,0,0,0,16,0V199A32.06,32.06,0,0,0,232,168Zm-32,16a16,16,0,1,1,16-16A16,16,0,0,1,200,184Z", "code": "M69.12,94.15,28.5,128l40.62,33.85a8,8,0,1,1-10.24,12.29l-48-40a8,8,0,0,1,0-12.29l48-40a8,8,0,0,1,10.24,12.3Zm176,27.7-48-40a8,8,0,1,0-10.24,12.3L227.5,128l-40.62,33.85a8,8,0,1,0,10.24,12.29l48-40a8,8,0,0,0,0-12.29ZM162.73,32.48a8,8,0,0,0-10.25,4.79l-64,176a8,8,0,0,0,4.79,10.26A8.14,8.14,0,0,0,96,224a8,8,0,0,0,7.52-5.27l64-176A8,8,0,0,0,162.73,32.48Z", "terminal": "M117.31,134l-72,64a8,8,0,1,1-10.63-12L100,128,34.69,70A8,8,0,1,1,45.32,58l72,64a8,8,0,0,1,0,12ZM216,184H120a8,8,0,0,0,0,16h96a8,8,0,0,0,0-16Z", "plus-bold": "M228,128a12,12,0,0,1-12,12H140v76a12,12,0,0,1-24,0V140H40a12,12,0,0,1,0-24h76V40a12,12,0,0,1,24,0v76h76A12,12,0,0,1,228,128Z", "x-bold": "M208.49,191.51a12,12,0,0,1-17,17L128,145,64.49,208.49a12,12,0,0,1-17-17L111,128,47.51,64.49a12,12,0,0,1,17-17L128,111l63.51-63.52a12,12,0,0,1,17,17L145,128Z", "caret-down-bold": "M216.49,104.49l-80,80a12,12,0,0,1-17,0l-80-80a12,12,0,0,1,17-17L128,159l71.51-71.52a12,12,0,0,1,17,17Z", "gear-six-bold": "M128,76a52,52,0,1,0,52,52A52.06,52.06,0,0,0,128,76Zm0,80a28,28,0,1,1,28-28A28,28,0,0,1,128,156Zm113.86-49.57A12,12,0,0,0,236,98.34L208.21,82.49l-.11-31.31a12,12,0,0,0-4.25-9.12,116,116,0,0,0-38-21.41,12,12,0,0,0-9.68.89L128,37.27,99.83,21.53a12,12,0,0,0-9.7-.9,116.06,116.06,0,0,0-38,21.47,12,12,0,0,0-4.24,9.1l-.14,31.34L20,98.35a12,12,0,0,0-5.85,8.11,110.7,110.7,0,0,0,0,43.11A12,12,0,0,0,20,157.66l27.82,15.85.11,31.31a12,12,0,0,0,4.25,9.12,116,116,0,0,0,38,21.41,12,12,0,0,0,9.68-.89L128,218.73l28.14,15.74a12,12,0,0,0,9.7.9,116.06,116.06,0,0,0,38-21.47,12,12,0,0,0,4.24-9.1l.14-31.34,27.81-15.81a12,12,0,0,0,5.85-8.11A110.7,110.7,0,0,0,241.86,106.43Zm-22.63,33.18-26.88,15.28a11.94,11.94,0,0,0-4.55,4.59c-.54,1-1.11,1.93-1.7,2.88a12,12,0,0,0-1.83,6.31L184.13,199a91.83,91.83,0,0,1-21.07,11.87l-27.15-15.19a12,12,0,0,0-5.86-1.53h-.29c-1.14,0-2.3,0-3.44,0a12.08,12.08,0,0,0-6.14,1.51L93,210.82A92.27,92.27,0,0,1,71.88,199l-.11-30.24a12,12,0,0,0-1.83-6.32c-.58-.94-1.16-1.91-1.7-2.88A11.92,11.92,0,0,0,63.7,155L36.8,139.63a86.53,86.53,0,0,1,0-23.24l26.88-15.28a12,12,0,0,0,4.55-4.58c.54-1,1.11-1.94,1.7-2.89a12,12,0,0,0,1.83-6.31L71.87,57A91.83,91.83,0,0,1,92.94,45.17l27.15,15.19a11.92,11.92,0,0,0,6.15,1.52c1.14,0,2.3,0,3.44,0a12.08,12.08,0,0,0,6.14-1.51L163,45.18A92.27,92.27,0,0,1,184.12,57l.11,30.24a12,12,0,0,0,1.83,6.32c.58.94,1.16,1.91,1.7,2.88A11.92,11.92,0,0,0,192.3,101l26.9,15.33A86.53,86.53,0,0,1,219.23,139.61Z", "check-bold": "M232.49,80.49l-128,128a12,12,0,0,1-17,0l-56-56a12,12,0,1,1,17-17L96,183,215.51,63.51a12,12,0,0,1,17,17Z"}
+
+// ---------------------------------------------------------------------------------------------------------------
+// SHADE-REAL (Shifat Oct 24 4:12–4:20 AM: "Shade ds repo actual components must be here without material influence
+// much" / "3d Rendered but 1:1 clone"): every part is a 1:1 clone of a component in github.com/shifatmasud/Shade-DS
+// (dark theme, Theme.tsx tokens; components/Core/*.tsx), built in that component's own CSS px and scaled by PX.
+// Real geometry: rounded-rect slabs with the component's exact radius, its 1px "glow" border as a slab behind the face,
+// phosphor icons (the ones the DS uses) extruded from their SVG paths. Colours are the token hex, UNLIT and not tone
+// mapped (MeshBasic), so the water's light and grade do not tint them; the deep fog touches them at 0.1 of the old
+// strength (only the far side of the drum dims). Depth reads from the slab sides (the face colour, darker).
+// ---------------------------------------------------------------------------------------------------------------
+const DS = {
+  s1: '#121212', s2: '#1E1E1E', s3: '#333333', c1: '#E0E0E0', c2: '#AAAAAA', c3: '#777777',
+  accS: '#f0f0f0', accC: '#0f0f0f', actC: '#D9A7F7', okS: '#032a1d', okC: '#6DD78C', errS: '#281718', errC: '#FF453A',
+}
+const PX = 0.017                     // world units per CSS px of the component
+const D_BODY = 10 * PX, D_PART = 4 * PX // slab depths: a component's body, a raised inner part (thumb, indicator, fill)
+const PART_FOG_DS = 0.06
+const FONT = `'Inter Variable', Inter, "Helvetica Neue", Arial, sans-serif`
+const MONO = `'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace`
+let fogUDS: Record<string, THREE.IUniform> | null = null
+const palCache = new Map<string, THREE.MeshBasicMaterial>()
+/** an unlit token colour (k: brightness for slab sides); faded with the drum, sampled by the dissolve (userData.glow) */
+function pal(hex: string, k = 1) {
+  const key = hex + '|' + k
+  let m = palCache.get(key)
+  if (!m) {
+    const c = new THREE.Color(hex).multiplyScalar(k)
+    m = deepFogPatch(new THREE.MeshBasicMaterial({ color: c, toneMapped: false, transparent: true, depthWrite: true }), fogUDS!, true, PART_FOG_DS) as THREE.MeshBasicMaterial
+    if (k === 1) m.userData.glow = new THREE.Color(hex).lerp(new THREE.Color(1, 1, 1), 0.25)
+    palCache.set(key, m)
+  }
+  return m
+}
+const SOLID_LIFT = (() => { const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('dmlift') : null; return q ? +q : 1.3 })() // ?dmlift=1 = 7.03
+const SOLID_NEUTRAL = SOLID_LIFT === 1 ? new THREE.Color(1, 1, 1) : new THREE.Color(1, 0.99, 0.965) // the deep's grade leaves a cool cast on white
+/** R7.02: an unlit token colour with no fog at all (the Do Magic face: the demo's solid #f0f0f0) */
+function palSolid(hex: string) {
+  const key = hex + '|solid'
+  let m = palCache.get(key)
+  if (!m) {
+    // R7.04: the face measured ~#dedede on screen (the grade runs after it); a linear lift lands it on the demo's #f0f0f0
+    m = deepFogPatch(new THREE.MeshBasicMaterial({ color: new THREE.Color(hex).multiplyScalar(SOLID_LIFT).multiply(SOLID_NEUTRAL), toneMapped: false, transparent: true, depthWrite: true }), fogUDS!, true, 0) as THREE.MeshBasicMaterial
+    m.userData.glow = new THREE.Color(hex).lerp(new THREE.Color(1, 1, 1), 0.25)
+    palCache.set(key, m)
+  }
+  return m
+}
+/** a side colour that still reads on near-black faces: darker for light colours, a touch lighter for the darkest greys */
+const sideK = (hex: string) => { const c = new THREE.Color(hex); const l = c.r * 0.3 + c.g * 0.59 + c.b * 0.11; return l < 0.02 ? 1.9 : 0.62 }
+const ICON_SVG = new SVGLoader()
+const iconGeoCache = new Map<string, THREE.BufferGeometry>()
+/** a phosphor icon (256 grid) extruded; sizePx = the icon's CSS size */
+function iconGeo(name: string, sizePx: number, d = D_PART) {
+  const key = name + '|' + sizePx + '|' + d
+  let g = iconGeoCache.get(key)
+  if (!g) {
+    const data = ICON_SVG.parse(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><path fill-rule="evenodd" d="${ICON[name]}"/></svg>`)
+    const shapes = data.paths.flatMap((p) => SVGLoader.createShapes(p))
+    g = new THREE.ExtrudeGeometry(shapes, { depth: d, bevelEnabled: false, curveSegments: 6 })
+    const s = (sizePx * PX) / 256
+    // SVG y runs down: turn it over about x (a rotation, not a mirror, so the faces keep their winding)
+    g.translate(-128, -128, 0); g.scale(s, s, 1); g.rotateX(Math.PI); g.translate(0, 0, d / 2)
+    g.computeVertexNormals()
+    iconGeoCache.set(key, g)
+  }
+  return g
+}
+
+/** SHADE-REAL2 (Shifat 6:01 AM "Do magic buttons icon should be flat"): a phosphor icon printed FLAT on the face, the way
+ *  the demo draws it — its own path (even-odd, so the bold sparkle keeps its open centre) rasterised big onto a mipmapped
+ *  quad like the labels. No extrusion: at 17 px a 4 px-deep extrude turned the 1.6 px strokes into a dark blob. */
+const iconTexCache = new Map<string, THREE.CanvasTexture>()
+function iconTex(name: string, sizePx: number, color: string, opacity = 1) {
+  const key = name + '|' + color
+  let tex = iconTexCache.get(key)
+  if (!tex) {
+    const N = 256, c = document.createElement('canvas'); c.width = c.height = N
+    const ctx = c.getContext('2d')!
+    ctx.fillStyle = color; ctx.fill(new Path2D(ICON[name]), 'evenodd')
+    tex = new THREE.CanvasTexture(c)
+    tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = TEX_ANISO.v
+    tex.minFilter = THREE.LinearMipmapLinearFilter; tex.generateMipmaps = true
+    iconTexCache.set(key, tex)
+  }
+  const mat = deepFogPatch(new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity, depthWrite: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), fogUDS!, true, PART_FOG_DS)
+  const s = sizePx * PX
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(s, s), mat)
+  mesh.userData.isLabel = true
   return mesh
 }
 
-/** Shifat 13:04Z: "Ensure each ui looks flat in 3d. No need bevel, emboss. Only 3d material." Every part is a FLAT slab:
- *  a rounded-rect outline (the UI's own corner radius, in plan) extruded THIN with no bevel. Depth reads from the
- *  materials alone (iridescent glass, gloss black / white, silver metal). Geometries are cached by size. */
-const T_SLAB = 0.028
+/** crisp text: the DS type token (size px, weight, tracking) rasterised big (mipmapped, anisotropic) onto a quad */
+const TEX_ANISO = { v: 8 }
+function label(text: string, sizePx: number, color: string, weight = 500, tracking = 0.02, family = FONT, opacity = 1) {
+  const fs = 160, pad = 24
+  const c = document.createElement('canvas'), ctx = c.getContext('2d')!
+  const font = `${weight} ${fs}px ${family}`
+  ctx.font = font; (ctx as any).letterSpacing = `${tracking * fs}px`
+  const w = Math.ceil(ctx.measureText(text).width) + pad * 2
+  c.width = w; c.height = 224
+  ctx.font = font; (ctx as any).letterSpacing = `${tracking * fs}px`; ctx.fillStyle = color; ctx.textBaseline = 'middle'
+  ;(ctx as any).fontKerning = 'normal'
+  ctx.fillText(text, pad, 116)
+  const tex = new THREE.CanvasTexture(c)
+  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = TEX_ANISO.v
+  tex.minFilter = THREE.LinearMipmapLinearFilter; tex.generateMipmaps = true
+  const mat = deepFogPatch(new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity, depthWrite: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), fogUDS!, true, PART_FOG_DS)
+  const h = (224 / fs) * sizePx * PX
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(h * (w / 224), h), mat)
+  mesh.userData.textW = (w - pad * 2) / 224 * h
+  mesh.userData.isLabel = true  // the ink's width in world units (for left/right alignment)
+  return mesh
+}
+
 const geoCache = new Map<string, THREE.BufferGeometry>()
 function rrShape(w: number, h: number, r: number, s = new THREE.Shape()) {
   r = Math.min(r, w / 2 - 1e-4, h / 2 - 1e-4)
@@ -172,113 +268,183 @@ function rrShape(w: number, h: number, r: number, s = new THREE.Shape()) {
   s.lineTo(x, y + r); s.absarc(x + r, y + r, r, Math.PI, Math.PI * 1.5, false)
   return s
 }
-function extrude(key: string, shape: () => THREE.Shape, d = T_SLAB) {
+function extrude(key: string, shape: () => THREE.Shape, d: number) {
   let g = geoCache.get(key)
-  if (!g) { g = new THREE.ExtrudeGeometry(shape(), { depth: d, bevelEnabled: false, curveSegments: 12 }); g.translate(0, 0, -d / 2); geoCache.set(key, g) }
+  if (!g) { g = new THREE.ExtrudeGeometry(shape(), { depth: d, bevelEnabled: false, curveSegments: 10 }); g.translate(0, 0, -d / 2); geoCache.set(key, g) }
   return g
 }
-const flat = (w: number, h: number, r: number, d = T_SLAB) => extrude(`r${w}|${h}|${r}|${d}`, () => rrShape(w, h, r), d)
-const disc = (r: number, d = T_SLAB) => extrude(`d${r}|${d}`, () => { const s = new THREE.Shape(); s.absarc(0, 0, r, 0, Math.PI * 2, false); return s }, d)
-const ring = (r: number, w: number, arc = 1, d = T_SLAB) => extrude(`a${r}|${w}|${arc}|${d}`, () => {
-  const s = new THREE.Shape(), a1 = Math.PI * 2 * arc
-  if (arc >= 1) { s.absarc(0, 0, r + w / 2, 0, a1, false); const hole = new THREE.Path(); hole.absarc(0, 0, r - w / 2, 0, a1, true); s.holes.push(hole) }
-  else { s.absarc(0, 0, r + w / 2, 0, a1, false); s.absarc(0, 0, r - w / 2, a1, 0, true) }
-  return s
-}, d)
+/** a rounded rect in CSS px (w, h, radius) → world */
+const rr = (w: number, h: number, r: number, d = D_BODY) => extrude(`r${w}|${h}|${r}|${d}`, () => rrShape(w * PX, h * PX, r * PX), d)
+const circ = (dPx: number, d = D_PART) => extrude(`c${dPx}|${d}`, () => { const s = new THREE.Shape(); s.absarc(0, 0, dPx * PX / 2, 0, Math.PI * 2, false); return s }, d)
+/** split an extrusion into its caps and its sides (two materials, merged later per material) */
+function capsSides(g: THREE.BufferGeometry): [THREE.BufferGeometry, THREE.BufferGeometry] {
+  // every group (an icon has one caps + one sides group PER SHAPE), sorted into caps (material 0) and sides (material 1)
+  const src = g.index ? g.toNonIndexed() : g
+  const out = [0, 1].map((mi) => {
+    const o = new THREE.BufferGeometry()
+    const grs = src.groups.filter((gr) => (gr.materialIndex ?? 0) === mi)
+    for (const [n, att] of Object.entries(src.attributes) as [string, THREE.BufferAttribute][]) {
+      const k = att.itemSize, tot = grs.reduce((s, gr) => s + gr.count, 0), arr = new Float32Array(tot * k)
+      let off = 0
+      for (const gr of grs) { arr.set((att.array as Float32Array).subarray(gr.start * k, (gr.start + gr.count) * k), off); off += gr.count * k }
+      o.setAttribute(n, new THREE.BufferAttribute(arr, k))
+    }
+    return o
+  })
+  return [out[0], out[1]]
+}
 
-type Kind = 'button' | 'toggle' | 'slider' | 'input' | 'card' | 'chip' | 'type' | 'checkbox' | 'segmented' | 'avatar' | 'progress' | 'badge'
-function piece(kind: Kind, M: Mats, u: Record<string, THREE.IUniform>, alt: number) {
+type Kind = 'button' | 'toggle' | 'slider' | 'badge' | 'card' | 'select' | 'segmented' | 'fab' | 'input' | 'btn2' | 'toggle2' | 'btn3'
+function piece(kind: Kind, _M: Mats, _u: Record<string, THREE.IUniform>, _alt: number) {
   const g = new THREE.Group()
-  // W17: what a tap does to this part (toggles flip, sliders move, checkboxes tick, the segmented pill slides)
   const A: Record<string, any> = { kind }
   g.userData.act = A
-  const add = (geo: THREE.BufferGeometry, mat: THREE.Material, x = 0, y = 0, z = 0) => { const o = new THREE.Mesh(geo, mat); o.position.set(x, y, z); g.add(o); return o }
+  // static slabs collect here (merged per material at the end: one draw per colour per part); animated ones are meshes
+  const stat = new Map<THREE.Material, THREE.BufferGeometry[]>()
+  const push = (m: THREE.Material, geo: THREE.BufferGeometry, x: number, y: number, z: number) => { const c = geo.clone(); c.translate(x, y, z); (stat.get(m) ?? stat.set(m, []).get(m)!).push(c) }
+  /** a slab of colour `hex`: face + sides; z = its centre */
+  const slab = (geo: THREE.BufferGeometry, hex: string, x = 0, y = 0, z = 0) => { const [cap, side] = capsSides(geo); push(pal(hex), cap, x, y, z); push(pal(hex, sideK(hex)), side, x, y, z) }
+  /** an animated slab (one mesh, face/side materials) */
+  const live = (geo: THREE.BufferGeometry, hex: string, x = 0, y = 0, z = 0) => { const o = new THREE.Mesh(geo, [pal(hex), pal(hex, sideK(hex))]); o.position.set(x, y, z); g.add(o); return o }
   const put = (o: THREE.Object3D, x: number, y: number, z: number) => { o.position.set(x, y, z); g.add(o); return o }
-  const F = T_SLAB / 2 + 0.004            // just above a slab's face
+  const FZ = D_BODY / 2                       // a body's face
+  const ON = (d = D_PART) => FZ + d / 2 + 0.0015 // the centre of a slab of depth d sitting on the face
+  const TXT = FZ + 0.003                      // text just above a face
+  const P = (v: number) => v * PX             // css px → world
+  /** text left-aligned at x (css px from the part's centre), or right-aligned when right */
+  const textL = (o: THREE.Mesh, xPx: number, yPx: number, z: number) => put(o, P(xPx) + (o.userData.textW as number) / 2, P(yPx), z)
+  const textR = (o: THREE.Mesh, xPx: number, yPx: number, z: number) => put(o, P(xPx) - (o.userData.textW as number) / 2, P(yPx), z)
+  /** the DS getBorder1px glow: a 1px ring of `hex` around a (w,h,r) body = a slab 2px bigger behind it */
+  const border = (w: number, h: number, r: number, hex: string, x = 0, y = 0, z = 0, d = D_BODY) => slab(rr(w + 2.4, h + 2.4, r + 1.2, d * 0.9), hex, P(x), P(y), z - 0.0015)
+  let body: THREE.Mesh | null = null
+  const bodyOf = (geo: THREE.BufferGeometry, hex: string) => { body = live(geo, hex); return body }
   switch (kind) {
-    case 'button': {
-      const dark = alt % 2 === 0
-      add(flat(1.3, 0.44, 0.22), dark ? M.black : M.white)
-      put(label(alt % 3 === 0 ? 'Ship it' : 'Continue', 0.19, dark ? '#ffffff' : '#0a0a0b', u, 500), 0, 0, F)
+    case 'button': { // Button primary L, the demo's "Do Magic": Accent surface pill, 56px, Label.L, ph-bold sparkle at 1.2em
+      const w = 24 + 17 + 8 + 66 + 24, h = 56
+      bodyOf(rr(w, h, 28), DS.accS)
+      // R7.02 (root/Shifat: the face read light grey vs the demo's solid #f0f0f0): the accent face takes no water fog
+      ;(body as unknown as THREE.Mesh).material = [palSolid(DS.accS), pal(DS.accS, sideK(DS.accS))]
+      const lab = label('Do Magic', 14, DS.accC, 500, 0.02)
+      const lw = (lab.userData.textW as number) / PX, total = 17 + 8 + lw, x0 = -total / 2
+      put(iconTex('sparkle-bold', 17, DS.accC), P(x0 + 8.5), 0, TXT) // SHADE-REAL2: flat, printed on the face
+      textL(lab, x0 + 17 + 8, 0, TXT)
       break
     }
-    case 'toggle': {
-      const on = alt % 2 === 0
-      add(flat(0.9, 0.46, 0.23), on ? M.black : M.glass)
-      const k = add(disc(0.17), M.silver, on ? 0.22 : -0.22, 0, T_SLAB)
-      A.on = on; A.knob = k; A.track = g.children[0] as THREE.Mesh; A.mOn = M.black; A.mOff = M.glass
+    case 'toggle': case 'toggle2': { // Toggle: Label.S Content2 on the left, 40×24 track (Surface3 / Active content when on), 16px Surface1 thumb
+      const on = kind === 'toggle'
+      const W = 200 // SHADE-REAL2: a panel row, as wide as the slider and select (the demo's control rows), not a lone pill
+      bodyOf(rr(40, 24, 12), on ? DS.actC : DS.s3).position.x = P(W / 2 - 20)
+      A.track = body; A.mOn = [pal(DS.actC), pal(DS.actC, sideK(DS.actC))]; A.mOff = [pal(DS.s3), pal(DS.s3, sideK(DS.s3))]
+      A.on = on; A.kx = P(8); A.kx0 = P(W / 2 - 20)
+      A.knob = live(circ(16), DS.s1, P(W / 2 - 20) + (on ? A.kx : -A.kx), 0, ON())
+      textL(label(on ? 'Dark Mode' : 'Show Confetti', 11, DS.c2, 500, 0.02), -W / 2, 0, 0)
       break
     }
-    case 'slider': {
-      add(flat(1.6, 0.1, 0.05), M.glass)
-      const v = 0.35 + 0.4 * ((alt * 0.37) % 1)
-      const fill = add(flat(1, 0.1, 0.05), M.white, -0.8 + 0.8 * v, 0, 0.006); fill.scale.x = 1.6 * v
-      const t = add(disc(0.15), M.silver, -0.8 + 1.6 * v, 0, T_SLAB)
-      put(label(`${Math.round(v * 100)}%`, 0.15, '#ffffff', u, 500, 0.9), -0.66, 0.26, 0)
-      A.v = v; A.vT = v; A.fill = fill; A.thumb = t; A.L = 1.6
+    case 'slider': { // RangeSlider: Label.S label, 64×24 value box (Surface2, 1px Surface3, Radius.S, Body.M), 6px track Surface3, Accent fill, 16px thumb
+      // SHADE-REAL2: as the demo lays it out — the label above, the track and the 56 box on ONE line (the box was above)
+      const W = 200, v = 0.56, TW = W - 64 - 12, ty = -8
+      bodyOf(rr(TW, 6, 3, D_PART), DS.s3).position.set(P(-W / 2 + TW / 2), P(ty), 0)
+      textL(label('Corner Radius', 11, DS.c2, 500, 0.02), -W / 2, ty + 24, 0)
+      border(64, 24, 4, DS.s3, W / 2 - 32, ty, 0, D_PART)
+      slab(rr(64, 24, 4, D_PART), DS.s2, P(W / 2 - 32), P(ty), 0)
+      const val = label('56', 14, DS.c1, 400, 0.01); put(val, P(W / 2 - 32), P(ty), D_PART / 2 + 0.003); A.val = val
+      A.setVal = (n: number) => { const nl = label(String(n), 14, DS.c1, 400, 0.01); (val.material as THREE.MeshBasicMaterial).map!.dispose(); (val.material as THREE.MeshBasicMaterial).map = (nl.material as THREE.MeshBasicMaterial).map; val.geometry.dispose(); val.geometry = nl.geometry; (nl.material as THREE.Material).dispose() }
+      const fill = live(rr(1, 6, 0.5, D_PART), DS.accS, 0, P(ty), 0.004)
+      const t = live(circ(16, D_PART * 1.5), DS.accS, 0, P(ty), D_PART * 1.2)
+      A.v = v; A.vT = v; A.fill = fill; A.thumb = t; A.L = P(TW); A.x0 = P(-W / 2); A.fillUnit = P(1)
       break
     }
-    case 'input': {
-      add(flat(1.6, 0.46, 0.12), M.glass)
-      put(label(alt % 2 ? 'Search tokens' : 'you@studio.com', 0.16, '#e4e9ee', u, 400, 0.9), -0.18, 0, F)
-      add(flat(0.018, 0.22, 0.004), M.white, 0.6, 0, F)
+    case 'badge': { // TokenBadge (success): 20px, radius 10, padding 0 8, Data font, Content stroke on Surface fill
+      const lab = label('Color.Success', 11, DS.okC, 400, 0.03, MONO)
+      const w = (lab.userData.textW as number) / PX + 16
+      bodyOf(rr(w, 20, 10), DS.okS)
+      border(w, 20, 10, DS.okC)
+      put(lab, 0, 0, TXT)
       break
     }
-    case 'card': {
-      add(flat(1.15, 1.4, 0.1), M.glass)
-      add(flat(0.95, 0.6, 0.06), alt % 2 ? M.white : M.black, 0, 0.29, F)
-      add(disc(0.11), M.silver, alt % 2 ? -0.24 : 0.24, 0.33, F + T_SLAB)
-      put(label('Shade DS', 0.15, '#ffffff', u, 600), -0.13, -0.2, F)
-      put(label(alt % 2 ? 'Tokens · v2.4' : 'Motion · 12 specs', 0.11, '#d2d9e0', u, 400, 0.9), -0.11, -0.38, F)
-      add(flat(0.38, 0.15, 0.075), M.white, 0.25, -0.56, F)
+    case 'card': { // the demo's floating window: Surface1 panel, 1px Surface3, Radius.XL; header title + red close dot;
+      // a GLOBAL accordion (open: Content1 title, X) over two toggle rows, then COMPONENT (closed: Content3 plus)
+      const W = 200, H = 196
+      bodyOf(rr(W, H, 16), DS.s1)
+      border(W, H, 16, DS.s3)
+      textL(label('CONTROL', 11, DS.c1, 600, 0.02), -W / 2 + 16, H / 2 - 20, TXT)
+      slab(circ(10), DS.errC, P(W / 2 - 18), P(H / 2 - 20), ON())
+      slab(rr(W - 2, 1, 0, D_PART * 0.4), DS.s3, 0, P(H / 2 - 40), ON(D_PART * 0.4))
+      textL(label('GLOBAL', 11, DS.c1, 600, 0.02), -W / 2 + 16, H / 2 - 62, TXT)
+      slab(iconGeo('x-bold', 16), DS.c1, P(W / 2 - 24), P(H / 2 - 62), ON())
+      const row = (t: string, y: number, on: boolean) => {
+        textL(label(t, 11, DS.c2, 500, 0.02), -W / 2 + 28, y, TXT)
+        slab(rr(40, 24, 12, D_PART), on ? DS.actC : DS.s3, P(W / 2 - 48), P(y), ON())
+        slab(circ(16, D_PART), DS.s1, P(W / 2 - 48 + (on ? 8 : -8)), P(y), ON() + D_PART)
+      }
+      row('Dark Mode', H / 2 - 96, true); row('Show Confetti', H / 2 - 128, false)
+      textL(label('COMPONENT', 11, DS.c2, 600, 0.02), -W / 2 + 16, H / 2 - 168, TXT)
+      slab(iconGeo('plus-bold', 16), DS.c3, P(W / 2 - 24), P(H / 2 - 168), ON())
       break
     }
-    case 'chip': {
-      const dark = alt % 2 === 1
-      add(flat(0.8, 0.3, 0.15), dark ? M.black : M.white)
-      put(label(['Primary', 'Neutral', 'Accent'][alt % 3], 0.13, dark ? '#ffffff' : '#0a0a0b', u, 500), 0, 0, F)
+    case 'select': { // Select trigger: Height.M, Surface1, 1px Surface3 glow, Radius.S, Body.M value, caret Content2; Label.S above
+      const W = 200, H = 44
+      bodyOf(rr(W, H, 4), DS.s1)
+      border(W, H, 4, DS.s3)
+      textL(label('Button (Core)', 14, DS.c1, 500, 0.01), -W / 2 + 12, 0, TXT)
+      put(iconTex('caret-down-bold', 16, DS.c2), P(W / 2 - 20), 0, TXT)
+      textL(label('COMPONENT TYPE', 11, DS.c2, 500, 0.05, FONT, 0.8), -W / 2, H / 2 + 14, 0)
       break
     }
-    case 'type': {
-      add(flat(1.0, 1.0, 0.1), M.silver)
-      put(label('Aa', 0.5, '#0b0c0e', u, 400), 0, 0.06, F)
-      put(label('Inter 400', 0.09, '#2a2d33', u, 500, 0.9), 0, -0.32, F)
+    case 'segmented': { // SegmentedTab (the demo's Control / Code I/O / Console): Surface2, 1px Surface3, Radius.M, padding 2,
+      // three equal items (icon + Label.S, gap 8); the active one on a Surface1 indicator (radius 6, 1px Surface3) in Content1,
+      // the others Content3 at 0.7
+      const items = [['sliders', 'Control'], ['code', 'Code I/O'], ['terminal', 'Console']] as const
+      const W = 300, H = 30, iw = (W - 4 - 4) / 3, ih = 24
+      bodyOf(rr(W, H, 8), DS.s2)
+      border(W, H, 8, DS.s3)
+      const ix = (j: number) => -W / 2 + 2 + 1 + iw / 2 + j * (iw + 2)
+      const on: THREE.Object3D[][] = [], off: THREE.Object3D[][] = []
+      items.forEach(([n, t], j) => {
+        const la = label(t, 11, DS.c1, 500, 0.02), lb = label(t, 11, DS.c3, 500, 0.02, FONT, 0.7)
+        const tw = (la.userData.textW as number) / PX, x0 = ix(j) - (16 + 8 + tw) / 2
+        const ia = put(iconTex(n, 16, DS.c1), P(x0 + 8), 0, ON() + D_PART / 2 + 0.003), ib = put(iconTex(n, 16, DS.c3, 0.7), P(x0 + 8), 0, TXT)
+        textL(la, x0 + 24, 0, ON() + D_PART / 2 + 0.003); textL(lb, x0 + 24, 0, TXT)
+        on.push([ia, la]); off.push([ib, lb])
+      })
+      const pill = live(rr(iw, ih, 6, D_PART), DS.s1, 0, 0, ON())
+      const pb = live(rr(iw + 2.4, ih + 2.4, 7.2, D_PART * 0.9), DS.s3, 0, 0, ON() - 0.0015)
+      A.layout = (i: number) => { on.forEach((o, j) => o.forEach((x) => (x.visible = j === i))); off.forEach((o, j) => o.forEach((x) => (x.visible = j !== i))); A.px = P(ix(i)) }
+      A.i = 0; A.layout(0); A.pill = pill; pill.position.x = A.px; pb.position.x = A.px; A.pb = pb
+      A.step = 0
       break
     }
-    case 'checkbox': {
-      add(flat(0.38, 0.38, 0.08), M.black, -0.34, 0, 0)
-      A.check = put(label('✓', 0.26, '#ffffff', u, 600), -0.34, 0, F); A.on = true
-      put(label('Remember', 0.15, '#ffffff', u, 400, 0.9), 0.24, 0, 0)
+    case 'fab': { // the demo's round control button: Surface1 disc, 1px Surface3 ring, ph-bold gear in Content2
+      bodyOf(circ(64, D_BODY), DS.s1)
+      slab(circ(66.4, D_BODY * 0.9), DS.s3, 0, 0, -0.0015)
+      slab(iconGeo('gear-six-bold', 24), DS.c2, 0, 0, ON())
       break
     }
-    case 'segmented': {
-      add(flat(1.5, 0.42, 0.21), M.glass)
-      const i = alt % 3
-      A.pill = add(flat(0.48, 0.34, 0.17), M.white, -0.49 + 0.49 * i, 0, F - 0.006); A.i = i
-      A.labs = ['Day', 'Week', 'Month'].map((t, j) => [put(label(t, 0.13, '#0a0a0b', u, 500), -0.49 + 0.49 * j, 0, F + T_SLAB), put(label(t, 0.13, '#e9eef3', u, 500), -0.49 + 0.49 * j, 0, F + T_SLAB)])
-      A.labs.forEach(([d, l]: THREE.Object3D[], j: number) => { d.visible = j === i; l.visible = j !== i })
-      A.step = 0.49
+    case 'input': { // Input: Label.S (Content2, 0.8) above a Height.M field, Surface1, 1px Surface3 glow, Radius.S, Body.M Content1
+      const W = 200, H = 44
+      bodyOf(rr(W, H, 4), DS.s1)
+      border(W, H, 4, DS.s3)
+      const tx = label('Do Magic', 14, DS.c1, 400, 0.01); textL(tx, -W / 2 + 12, 0, TXT)
+      slab(rr(1.5, 18, 0.5, D_PART * 0.4), DS.c1, P(-W / 2 + 12) + (tx.userData.textW as number) + P(3), 0, ON(D_PART * 0.4)) // the caret
+      textL(label('Label', 11, DS.c2, 500, 0.02, FONT, 0.8), -W / 2, H / 2 + 14, 0)
       break
     }
-    case 'avatar': {
-      add(disc(0.32), alt % 2 ? M.black : M.silver)
-      add(ring(0.41, 0.04), M.glass)
-      put(label('SM', 0.21, alt % 2 ? '#ffffff' : '#0a0a0b', u, 600), 0, 0, F)
+    case 'btn2': { // Button secondary M: Surface2 pill, Height.M, Label.M Content1
+      const lab = label('Secondary', 12, DS.c1, 500, 0.02)
+      bodyOf(rr((lab.userData.textW as number) / PX + 32, 44, 22), DS.s2)
+      put(lab, 0, 0, TXT)
       break
     }
-    case 'progress': {
-      add(ring(0.36, 0.05), M.glass)
-      const a = add(ring(0.36, 0.08, 0.72, T_SLAB * 1.4), M.silver); a.rotation.z = Math.PI / 2
-      put(label('72', 0.25, '#ffffff', u, 500), 0, 0, 0)
-      break
-    }
-    case 'badge': {
-      add(flat(0.66, 0.28, 0.14), alt % 2 ? M.white : M.black)
-      put(label('New', 0.13, alt % 2 ? '#0a0a0b' : '#ffffff', u, 600), 0.07, 0, F)
-      add(disc(0.045), M.silver, -0.19, 0, F)
+    case 'btn3': { // Button destructive M: Error surface pill, Error content label
+      const lab = label('Delete', 12, DS.errC, 500, 0.02)
+      bodyOf(rr((lab.userData.textW as number) / PX + 32, 44, 22), DS.errS)
+      put(lab, 0, 0, TXT)
       break
     }
   }
+  // merge the static slabs per material (one draw per colour), the body first (the atom reads children[0])
+  if (body) { g.remove(body); g.children.unshift(body); (body as THREE.Mesh).parent = g }
+  for (const [m, geos] of stat) { const mg = mergeGeometries(geos, false); if (mg) g.add(new THREE.Mesh(mg, m)); geos.forEach((x) => x.dispose()) }
   return g
 }
 
@@ -382,11 +548,55 @@ function makeTablet(M: Mats) {
 
 // Shifat 13:04Z: "Limit ui components to 4 per row … It looks too crowded now." Three rings of FOUR, interleaved
 // (each row turned 30° on the last) so the front of the drum always shows a calm, open stagger of flat parts.
-const ROWS: { y: number; phase: number; kinds: Kind[] }[] = [
-  { y: 1.3, phase: 0.33, kinds: ['button', 'toggle', 'slider', 'chip'] },
-  { y: 0.0, phase: 0.0, kinds: ['card', 'type', 'segmented', 'avatar'] },
-  { y: -1.3, phase: 0.66, kinds: ['input', 'checkbox', 'progress', 'badge'] },
+// SHADE-REAL (Shifat 5:15 AM: "Only need 5 components"): exactly five, bigger — Do Magic button, toggle, segmented
+// control, slider (with its value box), select — spread 72° apart round the stone over the three heights, so the front of
+// the turning drum always shows two or three of them and never two side by side at one height.
+// SHADE-REAL2: the five in the order they come to the front, alternating above / below the stone (none at its height, so
+// the one in front never covers it), 72° apart; `sc` evens out how big each reads (the wide tab bar a touch smaller, the
+// toggle and the button a touch bigger), kept to the demo's proportions between them.
+const ORDER: { kind: Kind; top: boolean; sc: number }[] = [
+  { kind: 'button', top: true, sc: 1.12 },
+  { kind: 'toggle', top: false, sc: 1.15 },
+  { kind: 'slider', top: true, sc: 1.0 },
+  { kind: 'segmented', top: false, sc: 0.92 },
+  { kind: 'select', top: true, sc: 0.94 },
 ]
+const qn = (k: string, d: number) => { const m = new RegExp('[?&]' + k + '=(-?[\\d.]+)').exec(QS); return m ? +m[1] : d }
+// QA knobs (tuning only): ring radius, part scale and row heights per tier
+const DS_R = [qn('dsr', 3.0), qn('dsrp', 2.15)], DS_S = [qn('dss', 0.74), qn('dssp', 0.84)]
+const DS_YT = [qn('dsyt', 1.1), qn('dsytp', 2.15)], DS_YB = [qn('dsyb', -0.88), qn('dsybp', -1.3)]
+/** QA (?dsqa): each part's screen box (css px), how square it faces the lens, and the stone's screen disc */
+const QA_RECTS = /[?&]dsqa/.test(QS)
+function qaRects(items: { g: THREE.Group }[], cam: THREE.PerspectiveCamera, pf: number) {
+  const W = props.width, H = props.height, bx = new THREE.Box3(), v = new THREE.Vector3(), q = new THREE.Vector3(), n = new THREE.Vector3()
+  const out = items.map((it) => {
+    it.g.updateWorldMatrix(true, true); bx.setFromObject(it.g)
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9
+    for (let c = 0; c < 8; c++) { v.set(c & 1 ? bx.max.x : bx.min.x, c & 2 ? bx.max.y : bx.min.y, c & 4 ? bx.max.z : bx.min.z).project(cam); const px = (v.x + 1) / 2 * W, py = (1 - v.y) / 2 * H; x0 = Math.min(x0, px); x1 = Math.max(x1, px); y0 = Math.min(y0, py); y1 = Math.max(y1, py) }
+    it.g.getWorldPosition(q); n.set(0, 0, 1).transformDirection(it.g.matrixWorld)
+    const face = -n.dot(v.copy(q).sub(cam.position).normalize())   // 1 = square to the lens
+    const dz = q.clone().sub(cam.position).dot(cam.getWorldDirection(v))
+    return { k: (it.g.userData.act as any).kind, x0: Math.round(x0), y0: Math.round(y0), x1: Math.round(x1), y1: Math.round(y1), face: +face.toFixed(2), dz: +dz.toFixed(2) }
+  })
+  const sc = new THREE.Vector3(SYS_C.x, SYS_C.y + sysLift(), SYS_C.z)
+  const sd = sc.clone().sub(cam.position).dot(cam.getWorldDirection(v)); sc.project(cam)
+  const sr = 0.55 / (2 * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2) * sd) * H
+  return { band: Math.round(bandTop()), pf: +pf.toFixed(2), sys: +dive.sys.toFixed(3), W, H, parts: out, stone: { x: Math.round((sc.x + 1) / 2 * W), y: Math.round((1 - sc.y) / 2 * H), r: Math.round(sr), dz: +sd.toFixed(2) } }
+}
+/** the drum's turn through the section: each part in turn comes to the front and holds there a moment (a soft dwell),
+ *  spread evenly over the scroll where the drum stands formed; a slow drift before and after */
+// the drum stands formed from dive.sys ≈ 0.46 (morph-in, R6.89 timing kept) to ≈ 0.63 (the morph-out begins with the push)
+// QA ?dsform=early: the morph-in completes earlier (0.02 → 0.36), giving the formed drum ~2× the scroll (needs Shifat's OK)
+const FORM_EARLY = /[?&]dsform=early/.test(QS)
+const CAR_S0 = FORM_EARLY ? 0.265 : 0.44, CAR_S1 = FORM_EARLY ? 0.625 : 0.646
+function carousel(sys: number) {
+  const n = ORDER.length, slot = (CAR_S1 - CAR_S0) / n
+  let k = (sys - CAR_S0) / slot - 0.5            // 0 at the first part's slot centre … n − 1 at the last's
+  if (k < 0) k = k * 0.35                         // drift in, a third as fast
+  else if (k > n - 1) k = n - 1 + (k - (n - 1)) * 0.35
+  const f = Math.floor(k), fr = k - f
+  return f + ss(0.22, 0.78, fr)                   // hold ~45 % of each slot square to the lens
+}
 
 /** PERFGOV: the cylinder's build as steps (one part per step: its labels are canvas text), spread over short tasks behind
  *  the preloader by prebuildCylinder; a later re-mount runs it in one go as before */
@@ -394,17 +604,16 @@ function* buildCylSteps(gl: THREE.WebGLRenderer, u: Record<string, THREE.IUnifor
   const envRT = yield* deepEnv(gl)
   yield // PERFGOV
   const M = makeMats(u, envRT.texture)
-  const items: { g: THREE.Group; a: number; y: number; ph: number }[] = []
+  const items: { g: THREE.Group; a: number; y: number; ph: number; sc: number }[] = []
   let alt = 0
-  for (const row of ROWS) {
-    const n = row.kinds.length
-    for (let i = 0; i < n; i++) {
-      const k = row.kinds[i]
+  for (let j = 0; j < ORDER.length; j++) {
+    {
+      const o = ORDER[j], k = o.kind
       const g = piece(k, M, u, alt++)
       // the dive's backdrop sphere draws at renderOrder 10 with no depth test: the parts draw after it (11, with the
       // stone and the sand, depth-sorted; transparent ones in the transparent list)
-      g.traverse((o) => { o.layers.set(SYSUI_LAYER); o.renderOrder = 11 })
-      items.push({ g, a: ((i + row.phase) / n) * Math.PI * 2, y: row.y, ph: Math.random() * 6.28 })
+      g.traverse((o) => { o.layers.set(SYSUI_LAYER); o.renderOrder = o.userData.isLabel ? 12 : 11 }) // SHADE-REAL: text after the slabs it sits on
+      items.push({ g, a: -(j / ORDER.length) * Math.PI * 2, y: o.top ? 1 : -1, ph: Math.random() * 6.28, sc: o.sc })
       yield
     }
   }
@@ -424,12 +633,12 @@ function* buildCylSteps(gl: THREE.WebGLRenderer, u: Record<string, THREE.IUnifor
   for (const k of ['black', 'white', 'silver'] as const) { M[k].transparent = true; M[k].depthWrite = true }
   const fades: { m: THREE.Material & { opacity: number }; base: number }[] = []
   const seen = new Set<THREE.Material>()
-  for (const it of items) it.g.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.Material & { opacity: number }; if (m && !seen.has(m)) { seen.add(m); fades.push({ m, base: m.opacity }) } })
+  for (const it of items) it.g.traverse((o) => { const mm = (o as THREE.Mesh).material as (THREE.Material & { opacity: number }) | (THREE.Material & { opacity: number })[]; if (!mm) return; for (const m of Array.isArray(mm) ? mm : [mm]) if (!seen.has(m)) { seen.add(m); fades.push({ m, base: m.opacity }) } })
   // R6.88 SINK: the parts' points (every slab, disc and ring of every part; the text labels go with the front only) and
   // the diamond's (its own facets, object space), sampled once here, behind the preloader
   const glow = new Map<THREE.Material, THREE.Color>([[M.black, new THREE.Color(0.42, 0.5, 0.6)], [M.white, new THREE.Color(1.05, 1.08, 1.12)], [M.silver, new THREE.Color(0.8, 0.88, 1.0)], [M.glass, new THREE.Color(0.55, 0.9, 1.0)]])
   const srcs: DisSource[] = []
-  items.forEach((it, i) => it.g.children.forEach((c) => { const mm = c as THREE.Mesh; const col = mm.isMesh ? glow.get(mm.material as THREE.Material) : undefined; if (col) { mm.updateMatrix(); srcs.push({ geo: mm.geometry, matrix: mm.matrix.clone(), part: i, color: col }) } }))
+  items.forEach((it, i) => it.g.children.forEach((c) => { const mm = c as THREE.Mesh; const m0 = mm.isMesh ? (Array.isArray(mm.material) ? mm.material[0] : mm.material) : undefined; const col = m0 ? (glow.get(m0) ?? (m0.userData.glow as THREE.Color | undefined)) : undefined; if (col) { mm.updateMatrix(); srcs.push({ geo: mm.geometry, matrix: mm.matrix.clone(), part: i, color: col }) } }))
   const disUi = new Disintegrate(srcs, DIS_COUNTS.ui, { seed: 11, size: 0.022, grav: 1.5, spread: 0.5 }) // R6.89 GENTLE: a softer fall (was grav 2.6, spread 0.55)
   yield
   const gemGeo = brilliantGeometry(1)
@@ -499,6 +708,9 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
   // the crewmate; the glass has its own hero twin (TabletWindow). Depth-tested against the scene, so the diamond behind it
   // and the parts' points around it keep their order.
   useEffect(() => { const a = heroPass.add(built.tablet.children[0]), b = heroPass.add(built.tablet.children[2]); return () => { a(); b() } }, [built])
+  // SHADE-REAL: the five DS parts are drawn at the hero density too (the stone's), so their 1px borders, icons and labels are
+  // as crisp as the stone on phones; ?dshero=0 draws them in the background pass as before
+  useEffect(() => { if (/[?&]dshero=0/.test(QS)) return; const offs = built.items.map((it) => heroPass.add(it.g)); return () => offs.forEach((f) => f()) }, [built])
   const cursorHover = (on: boolean) => {
     document.querySelector('.cursor')?.classList.toggle('is-hover', on)
     document.documentElement.style.cursor = on ? 'pointer' : ''
@@ -506,11 +718,10 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
   const play = (i: number) => {
     const A = built.items[i].g.userData.act as Record<string, any>, S = st[i]
     switch (A.kind) {
-      case 'toggle': A.on = !A.on; A.track.material = A.on ? A.mOn : A.mOff; break
-      case 'checkbox': A.on = !A.on; A.check.visible = A.on; S.press = 1; break
-      case 'slider': A.vT = A.vT > 0.82 ? 0.18 : Math.min(0.95, A.vT + 0.22); break
-      case 'segmented': A.i = (A.i + 1) % 3; A.labs.forEach(([d, l]: THREE.Object3D[], j: number) => { d.visible = j === A.i; l.visible = j !== A.i }); break
-      case 'card': case 'avatar': case 'type': case 'progress': S.turnT += Math.PI * 2; break
+      case 'toggle': case 'toggle2': A.on = !A.on; A.track.material = A.on ? A.mOn : A.mOff; break
+      case 'slider': A.vT = A.vT > 0.82 ? 0.18 : Math.min(0.95, A.vT + 0.22); A.setVal?.(Math.round(A.vT * 100)); break
+      case 'segmented': A.i = (A.i + 1) % 3; A.layout(A.i); break
+      case 'card': case 'fab': S.turnT += Math.PI * 2; break
       default: S.press = 1
     }
   }
@@ -535,7 +746,8 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
     // R6.88 SINK: the parts no longer open out of the lens's way (they dissolve and the camera sinks with the tablet): a
     // gentle breath outward only, so the falling points read as the drum coming apart where it stood
     const ringK = 1 + 0.3 * pw
-    const R = (3.0 - 0.75 * portrait()) * ringK
+    const pt = portrait()
+    const R = (DS_R[0] + (DS_R[1] - DS_R[0]) * pt) * ringK // SHADE-REAL2: phones a tighter ring (measured: every part fully on screen at the front)
     // SCENE 3 FOCUS HAND-OFF (Shifat 13:24Z): the drum has dissolved, the stone drifts aside and down into the fog, and
     // the tablet rises out of the deep in front of it, bobbing; the stone's caustic sweeps across its glass. The camera
     // then pushes into its screen (Dive.tsx) until the stars fill the frame.
@@ -560,7 +772,8 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
       { const own = ((tb.userData.tw as TabletWindow | undefined)?.handoff.h ?? 0) > 0.9; tb.children[0].visible = tb.children[2].visible = !own }
     }
     const t = props.time, dt = Math.min(props.dt, 0.05)
-    s.rotation.y = t * 0.035 + dive.sys * 1.9 + kbState.current.off + DRUM_OFF // W20: + the keyboard turn (a focused part comes to the front)
+    // SHADE-REAL2: part j is square to the lens (world angle π) at carousel = j; a slight sway keeps it alive
+    s.rotation.y = Math.PI + carousel(dive.sys) * (Math.PI * 2 / ORDER.length) + (browser.reducedMotion ? 0 : Math.sin(t * 0.3) * 0.035) + kbState.current.off + DRUM_OFF // W20: + the keyboard turn (a focused part comes to the front)
     // W20 (root 22:43Z + 22:55Z: on phones a dark panel sat behind the 'DS' of the title, then just on the 'SYSTEMS'
     // eyebrow; text over busy 3D, r22): phones lift the DRUM (the spin group) so its bottom row keeps ~24 px of clear air
     // above the eyebrow as it turns. Only the drum moves: the particle atom stays centred on the stone (its morph targets
@@ -571,7 +784,7 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
     // they settle and the particles dissolve; it ends as the drum. Scroll-driven, so scrolling up runs it backward.
     const qm = (window as any).__morph
     // W19 (Shifat 19:3xZ: the particle → 3D UI formation was right in R4): POLISH's "no appear" freeze at morph = 1 reverted
-    const morphIn = typeof qm === 'number' ? qm : HOLD >= 0 ? HOLD : ss(0.06, 0.56, dive.sys)
+    const morphIn = typeof qm === 'number' ? qm : HOLD >= 0 ? HOLD : FORM_EARLY ? ss(0.02, 0.36, dive.sys) : ss(0.06, 0.56, dive.sys)
     // R6.89 (Shifat Oct 23 4:38 AM "Shade DS scene UI particle morph out must have same look & feel of particles to UI morph
     // in"): the morph-OUT is the morph-IN played backward — the same beads, sim, stagger and arcs — tied to the push's
     // dissolve scroll (dive.dis, the gentler +50% stretch of item 4). The parts' real materials fade back into the beads as
@@ -631,12 +844,13 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
     if (ia.hover >= 0 && input.isTouch && props.time > ia.touchHold) ia.hover = -1
     // POLISH-2 keep-out: the main lens (position + forward), read in the main pass only
     if (!nb.active) { KEEP_EYE.copy(state.camera.position); state.camera.getWorldDirection(KEEP_F) }
+    if (!nb.active && QA_RECTS) (window as any).__dsQA = () => qaRects(built.items, state.camera as THREE.PerspectiveCamera, pf)
     for (let i = 0; i < built.items.length; i++) {
       const it = built.items[i], S = st[i], A = it.g.userData.act as Record<string, any>
       // W20 (root 23:16Z: on phones the middle row passed over the stone, and a lifted bottom row did too): phones raise the
       // top and middle rows so no row sits at the stone's height; the bottom row stays below it, clear of the SYSTEMS
       // eyebrow. A per-aspect layout of the same parts, like the wide-screen lift above.
-      const iy = it.y + portrait() * (it.y > 0.5 ? 0.9 : it.y > -0.5 ? 1.05 : 0)
+      const iy = it.y > 0 ? DS_YT[0] + (DS_YT[1] - DS_YT[0]) * pt : DS_YB[0] + (DS_YB[1] - DS_YB[0]) * pt // SHADE-REAL2: above / below the stone
       S.h += ((i === ia.hover ? 1 : 0) - S.h) * (1 - Math.exp(-10 * dt))
       S.press = Math.max(0, S.press - dt * 4)
       S.turn += (S.turnT - S.turn) * (1 - Math.exp(-6 * dt))
@@ -714,17 +928,25 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
       // R6.88 ATOM (Shifat 10:31–10:32 PM: the stone INSIDE the ring, near parts passing in front of it): on phones the ring's
       // near side runs 0.6 m lower and its far side 0.6 m higher (a tilted orbit), so the near parts cross the stone's face
       // instead of passing above it; the hero pass hides the stone wherever they are in front. Eases out as the push begins.
-      ky += ORBIT_TILT * Math.cos(it.a + s.rotation.y) * portrait() * (1 - ss(0.2, 0.5, pw))
+      // SHADE-REAL2: no tilted orbit any more — the stone stays clear inside the ring (rows above / below it)
       it.g.position.set(Math.sin(it.a) * rr + sideX + kx, iy + dodge + ky + Math.sin(t * 0.6 + it.ph) * 0.05, Math.cos(it.a) * rr + sideZ + kz)
       // each part turns halfway toward the lens from its place on the drum (no edge-on slivers at the sides)
       let off = Math.PI - (it.a + s.rotation.y); off = Math.atan2(Math.sin(off), Math.cos(off))
-      it.g.rotation.set(Math.sin(t * 0.5 + it.ph) * 0.04 * (1 - S.h), it.a + off * (0.55 + 0.45 * S.h) + S.turn, Math.sin(t * 0.4 + it.ph * 1.3) * 0.03 * (1 - S.h))
-      it.g.scale.setScalar((1 + S.h * 0.08) * (1 - 0.45 * pw) * (0.9 + 0.1 * pf))
-      if (A.kind === 'toggle') { const x = A.on ? 0.22 : -0.22; A.knob.position.x += (x - A.knob.position.x) * (1 - Math.exp(-14 * dt)) }
+      // SHADE-REAL2: near the front a part turns almost square to the lens (0.9), so it reads whole as it passes
+      const fw = 0.9 + 0.1 * S.h
+      it.g.rotation.set(Math.sin(t * 0.5 + it.ph) * 0.04 * (1 - S.h), it.a + off * fw + S.turn, Math.sin(t * 0.4 + it.ph * 1.3) * 0.03 * (1 - S.h))
+      // SHADE-REAL2: one scale (it was set twice and the phone shrink was overwritten, so wide parts cropped at the edge)
+      // SHADE-REAL2: the far side of the ring stays clear — a part shrinks away as it turns behind the stone (≈ 100° → 150°
+      // from the front) and grows back as it comes round, so the one in front reads alone with its two neighbours at the
+      // edges. Only while the drum stands formed: the beads still form and leave every part at full size (morph targets).
+      const ao = Math.abs(off) / Math.PI
+      const back = 1 - (0.4 * ss(0.12, 0.42, ao) + 0.6 * ss(0.5, 0.84, ao)) * ss(0.6, 0.97, pf) * (1 - S.h)   // the neighbours at ±72° at ~0.62
+      it.g.scale.setScalar(it.sc * (DS_S[0] + (DS_S[1] - DS_S[0]) * pt) * back * (1 + S.h * 0.08) * (1 - 0.45 * pw) * (0.9 + 0.1 * pf))
+      if (A.kind === 'toggle' || A.kind === 'toggle2') { const x = A.kx0 + (A.on ? A.kx : -A.kx); A.knob.position.x += (x - A.knob.position.x) * (1 - Math.exp(-14 * dt)) }
       else if (A.kind === 'slider') {
         A.v += (A.vT - A.v) * (1 - Math.exp(-9 * dt))
-        A.fill.scale.x = A.L * A.v; A.fill.position.x = -A.L / 2 + (A.L / 2) * A.v; A.thumb.position.x = -A.L / 2 + A.L * A.v
-      } else if (A.kind === 'segmented') { const x = A.step * (A.i - 1); A.pill.position.x += (x - A.pill.position.x) * (1 - Math.exp(-12 * dt)) }
+        A.fill.scale.x = A.L * A.v / A.fillUnit; A.fill.position.x = A.x0 + (A.L / 2) * A.v; A.thumb.position.x = A.x0 + A.L * A.v
+      } else if (A.kind === 'segmented') { const e = 1 - Math.exp(-12 * dt); A.pill.position.x += (A.px - A.pill.position.x) * e; A.pb.position.x = A.pill.position.x }
     }
     // W20 (root 00:0xZ, keyboard): the Shade DS controls are real DOM buttons (Systems.tsx). They are always tab stops (W26);
     // once the drum has formed each one sits over its drum part (a ≥44 px box, so the focus ring

@@ -7,7 +7,7 @@ import { clip } from '../systems/clip'
 import { diveRays } from '../stages/dive/diveState'
 import { props, shared } from '../../state/props'
 import { settings } from '../../services/settings'
-import { quality, paintState } from '../quality' // PERF HOOK
+import { quality, paintState, PHONE_SHARP } from '../quality' // PERF HOOK
 import { warmGate } from '../../services/preload'
 import { InlineSharpenEffect } from './perfEffects' // PERF HOOK
 import type { Look } from '../../state/props'
@@ -91,7 +91,11 @@ export class PostChain {
     this.postUfx = new RenderPass(ufxOver, ufxCamera); this.postUfx.clear = false; this.postUfx.ignoreBackground = true
     // W22 (scorer-r614 #3, the stepped stone outline at 390): MEDIUM searches 8 px along an edge, so the stone's long, shallow
     // silhouette (upscaled ~2x on phones) kept its stair steps. HIGH searches 16: same three passes, more taps on edge pixels only
-    const smaa = new SMAAEffect({ preset: SMAAPreset.HIGH })
+    // R6.95 QUALITY: SMAA ULTRA on every tier: edge threshold 0.1 -> 0.05 and a 32 px search, so the low-contrast silhouettes
+    // (the stone's long rim, kelp, the card edges) lose their last stair steps. Same three passes, at the background's own
+    // density (0.1-1 Mpx on phones and weak PCs); only edge pixels pay the longer search. ?aa=high = the R6.94 preset.
+    const AA_Q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('aa') : null
+    const smaa = new SMAAEffect({ preset: AA_Q === 'high' || (PHONE_SHARP && AA_Q !== 'ultra') ? SMAAPreset.HIGH : SMAAPreset.ULTRA })   // R7.00: budget phones HIGH (16 search steps, was ULTRA 32 + corners): the cost moves into pixels, not edge searches
     const fxaa = new FXAAEffect()
     const renderScale = () => props.dpr / Math.max(1, Math.min(window.devicePixelRatio || 1, 2))
     // sharpen (convolution) first, then the grade on its result: one pass instead of two when below native size
@@ -192,6 +196,9 @@ void main(){
     const bw = Math.max(1, Math.round(w * props.dpr)), bh = Math.max(1, Math.round(h * props.dpr))
     this.bw = bw; this.bh = bh
     this.composer.inputBuffer.setSize(bw, bh); this.composer.outputBuffer.setSize(bw, bh)
+    // R7.00 PHONE SHARP: the bloom keeps its absolute size when the phone's background refines (quarter-res post, like
+    // lusion.co): 0.5 of a 0.5 background = 0.25 of the css size, so a 1.0 background blooms at 0.25
+    if (PHONE_SHARP && !settings.BLOOM_HQ) (this.bloom as any).resolution.scale = Math.max(0.25, Math.min(0.5, 0.25 / Math.max(0.01, props.dpr)))
     for (const e of this.entries) e.pass.setSize(bw, bh)
     this.text.resize(w, h)
     const pw = Math.max(1, (w * props.paintDpr) >> 2), ph = Math.max(1, (h * props.paintDpr) >> 2)

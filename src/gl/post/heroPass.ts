@@ -194,9 +194,14 @@ class HeroPass {
     const bg = scene.background, mask = camera.layers.mask, su = gl.shadowMap.autoUpdate
     rt.scissor.set(B.x, B.y, B.w, B.h); rt.scissorTest = true
     rt.viewport.set(0, 0, rt.width, rt.height)
-    gl.setRenderTarget(rt)
+    // R7.03 FOREST LINE: clear the WHOLE target, not just this frame's box. The composite's scissor rounds up to the
+    // canvas grid and its bilinear read / trail smear reach a texel past the box; rows outside the box kept whatever an
+    // earlier frame drew there, so while the trail was awake (bigger box) a stale half-alpha row showed as a thin dark
+    // line across the forest sky. A full clear is one cheap fill; the draw below stays scissored to the box.
+    rt.scissorTest = false; gl.setRenderTarget(rt)
     gl.setClearColor(0x000000, 0); gl.autoClear = false
     gl.clear(true, true, false)
+    rt.scissorTest = true; gl.setRenderTarget(rt)
     // the background's depth at canvas density
     const sd = this.sceneDepth()
     if (sd) { this.depthMat.uniforms.u_depth.value = sd; this.quad.material = this.depthMat; gl.render(this.qscene, this.qcam) }

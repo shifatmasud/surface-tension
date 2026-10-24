@@ -131,6 +131,21 @@ const PHONE_HERO_DPR = 1  // R6.89 (Shifat 4:09 AM Oct 23): phone heroes at 1.0 
 /** R6.89 (Shifat 4:10 AM Oct 23 "keep the TEXT at 1.5 while heroes go to 1.0"): the phone canvas (the GPU text layer) has
  *  its own density now; the hero pass renders into its own target at PHONE_HERO_DPR and is composited up onto it */
 const PHONE_TEXT_DPR = 1.5
+/** R7.00 PHONE SHARP (Shifat 4:18 AM Oct 24: "0 pixelation + smooth fast performance"; lusion.co draws its whole scene at
+ *  1.5x with cheap quarter-res post). A budget phone's background ran at 0.5 (a 3x stretch onto the 1.5x canvas) all the
+ *  time. Now, outside the hero above the water, it refines to SHARP_BG whenever the scroll is still or slow, drops back
+ *  to the governor's moving DPR only during a fast fling, and returns within a few frames once the fling slows. The post
+ *  effects stay on the governor's cheapest rung (render-target scales, sample counts), so the pixels are paid for by
+ *  effects, not the other way round. A sharp frame that cannot hold ~30 fps steps itself down (×0.8) and finally backs
+ *  off, like the rest refinement on other devices. Hero above water: unchanged density (Shifat 4:20 AM: "No need hi res
+ *  on that. Just performance boost"). ?res=old = the R6.99 behaviour; ?bgdpr=1.25 tries another sharp density (QA). */
+const RES_OLD = q.get('res') === 'old'
+export const PHONE_SHARP = SPLIT && LOW_END_GPU && tier === 'low' && !settings.WEAK_GPU && !RES_OLD
+const SHARP_BG = Math.max(0.5, Math.min(1.5, parseFloat(q.get('bgdpr') || '') || 1.0))
+const SHARP_FAST_V = 18        // css px per 60 Hz frame (~1100 px/s): faster is a fling, the frame may drop
+const SHARP_SLOW_V = 9         // below this for SHARP_ENTER_MS the frame refines back to sharp
+const SHARP_ENTER_MS = 120
+const SHARP_BUDGET_MS = 1000 / 30
 
 /** PERFGOV: set bits in a small history mask */
 function bits(x: number) { let n = 0; while (x) { n += x & 1; x >>>= 1 } return n }
@@ -187,7 +202,7 @@ class Quality {
   /** R6.87 SPLIT: the hero subjects' density — the device's own (canvas cap), phones at most 2x. Never moved by the governor. */
   heroDprFor(w: number, h: number) { const n = this.nativeFor(w, h); return tier === 'low' ? Math.min(n, PHONE_HERO_DPR) : n }
   /** the rest target before the rest judge: native within 1.2x the scene pixel cap */
-  private restTarget(w: number, h: number) { return Math.min(this.nativeFor(w, h), Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h)) * 1.2, tier === 'low' ? PHONE_SCENE_DPR : DESKTOP_SCENE_DPR) }
+  private restTarget(w: number, h: number) { if (PHONE_SHARP) return Math.min(this.nativeFor(w, h), SHARP_BG, PHONE_TEXT_DPR, props.bgCeil > 0 ? props.bgCeil : 9); return Math.min(this.nativeFor(w, h), Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h)) * 1.2, tier === 'low' ? PHONE_SCENE_DPR : DESKTOP_SCENE_DPR) }
   /** the canvas density a rest frame refines to: native, phones capped at PHONE_CANVAS_DPR */
   private textCeil(w: number, h: number) { const n = this.nativeFor(w, h); return tier === 'low' ? Math.min(n, PHONE_CANVAS_DPR, PHONE_SCENE_DPR) : n } // TUNE: phones max 1.0
   /** DPR for a window size: the level's step, clipped by the device DPR and the total-pixel cap, floored at 0.6.
@@ -232,6 +247,7 @@ class Quality {
   private restN = 0
   private restBuf = new Float32Array(REST_WINDOW)
   restTick(moving: boolean, now: number) {
+    if (PHONE_SHARP) return this.sharpTick(now)
     // PERFGOV-3: a known low-end phone GPU settles with rest suspended (the native-DPR + SMAA still costs ~4–5x its
     // moving frame on an Adreno 50x and is judged straight back down, a few dropped frames every 30–120 s of idle), so it
     // starts there and never pays those detection frames; its moving frame is unchanged. Normal devices: untouched.
@@ -259,6 +275,28 @@ class Quality {
       this.setRest(true, now)
     }
   }
+  /** R7.00 PHONE SHARP: the budget phone's rest = still or slow scroll, outside the hero above the water */
+  private sharpSlowSince = 0
+  private sharpCeil = 0
+  private sharpTick(now: number) {
+    const can = this.enabled && this.judging && this.probing === -99 && now >= this.restBlockedUntil && !q.has('norest') && !props.aboveWater && !props.overlayOpen
+    if (!can) { this.sharpSlowSince = now; this.movingRun = 0; if (this.rest) { this.stats.restOut.gate++; this.setRest(false, now) } return }
+    const v = Math.abs(props.scrollVel) * (1000 / 60) / Math.max(8, this.lastDelta)   // px per 60 Hz frame, frame-rate independent
+    if (v > SHARP_FAST_V) {
+      this.sharpSlowSince = now
+      if (this.rest && ++this.movingRun >= 2) { this.stats.restOut.hard++; this.setRest(false, now) }
+      return
+    }
+    this.movingRun = 0
+    if (v > SHARP_SLOW_V) { if (!this.rest) this.sharpSlowSince = now; return }   // hysteresis: a medium speed keeps whatever it has
+    if (this.rest && props.bgCeil !== this.sharpCeil) { this.sharpCeil = props.bgCeil; this.setRest(true, now); return }   // the stage's own ceiling moved (journey ↔ dive)
+    if (!this.rest && now - this.sharpSlowSince > SHARP_ENTER_MS) {
+      const mv = this.dprFor(this.w, this.h, true)
+      this.sharpCeil = props.bgCeil
+      if (Math.min(this.restTarget(this.w, this.h), this.restCap) <= mv + 0.01) return
+      this.setRest(true, now)
+    }
+  }
   private setRest(v: boolean, now: number) {
     // eng review #4: rest does not touch the governor's lastStep (it used to mute the governor for 1.5 s after every
     // pause); only the re-allocation frames right after it are skipped
@@ -277,10 +315,11 @@ class Quality {
     if (this.restN < REST_WINDOW && !(this.restN >= 3 && sum > 500)) return
     const n = this.restN; this.restN = 0
     const s = Array.from(this.restBuf.subarray(0, n)).sort((a, b) => a - b), med = s[n >> 1]
-    if (med <= REST_BUDGET_MS * 1.15) { this.restBackoff = REST_BACKOFF_MS; return }
+    const budget = PHONE_SHARP ? SHARP_BUDGET_MS : REST_BUDGET_MS
+    if (med <= budget * 1.15) { this.restBackoff = REST_BACKOFF_MS; return }
     const moving = this.dprFor(this.w, this.h, true)
     const cur = this.dprFor(this.w, this.h)
-    const next = med > REST_BUDGET_MS * 3 ? moving : cur * REST_STEP     // hopeless (3x over) → straight back
+    const next = med > budget * 3 ? moving : cur * REST_STEP     // hopeless (3x over) → straight back
     if (next <= moving * 1.05) {
       this.stats.restSuspends++
       this.restBlockedUntil = now + this.restBackoff
@@ -300,7 +339,10 @@ class Quality {
   state(): QualityState { return { level: this.level, dpr: this.stepAt(this.level), aa: this.aa } }
   on(fn: Listener) { this.listeners.add(fn); return () => { this.listeners.delete(fn) } }
   /** phones only, and only at the very bottom of the ladder while moving: SMAA (3 passes) → FXAA (1 pass). Rest is SMAA. */
-  private aaFor(level: number): 'smaa' | 'fxaa' { return tier === 'low' && !settings.WEAK_GPU && level >= this.maxLevel && !this.rest && !q.has('smaa') ? 'fxaa' : 'smaa' }   // R6.92: a weak desktop keeps SMAA (FXAA's blur read as a soft halo on the stone's edge)
+  // R6.95 (Shifat: a VISIBLE gain on his phone): phones no longer swap SMAA for FXAA at the floor while moving. The swap saved
+  // little there (SMAA runs at the background's own density: ~0.1 Mpx at the phone floor) but FXAA's blur on a 3x-upscaled
+  // background was the softest frame on the page, and the sharpness changed when the scroll stopped. ?aa=fxaa = the old swap.
+  private aaFor(level: number): 'smaa' | 'fxaa' { return q.get('aa') === 'fxaa' && tier === 'low' && !settings.WEAK_GPU && level >= this.maxLevel && !this.rest ? 'fxaa' : 'smaa' }   // R6.92: a weak desktop keeps SMAA (FXAA's blur read as a soft halo on the stone's edge)
   set(level: number, now = performance.now()) {
     level = Math.max(this.minLevel, Math.min(this.maxLevel, level))
     if (level === this.level) return

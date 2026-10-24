@@ -124,6 +124,13 @@ export const PORTAL0 = 0.64
 /** the push where the glass covers the frame and the camera stops (a beat before the switch, so springs settle on it) */
 export const PORTAL1 = 0.97
 export function tabletUpright() { return portrait() > 0.5 }
+/** R6.99: the portal zoom's progress (0 → 1, smoothstep) on the systems section's own scroll (dive.sys): it starts where the
+ *  push reaches PORTAL0 and ends at full cover just before the stage switch (sys = 1). Shared by the lens (Dive.tsx) and
+ *  the glass's fill (TabletWindow), so the screen's glow, sheen and edge clear at the pace of the zoom. */
+export const SYS_P0 = (() => { let lo = 0, hi = 1; for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (m * m * (3 - 2 * m) < PORTAL0) lo = m; else hi = m } return 0.56 + 0.44 * (lo + hi) / 2 })()
+export const SYS_P1 = 0.985
+export function portalKe(sys: number) { const t = Math.min(1, Math.max(0, (sys - SYS_P0) / (SYS_P1 - SYS_P0))); return t * t * (3 - 2 * t) }
+
 /** the lens distance at which the whole slab is presented: ~60 % of the frame's width, at most ~56 % of its height */
 export function tabletPresentDist(fovDeg: number, aspect: number, upright: boolean) {
   const t = Math.tan((fovDeg * Math.PI) / 360), hw = upright ? 0.485 : 0.735, hh = upright ? 0.735 : 0.485

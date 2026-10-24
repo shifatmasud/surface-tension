@@ -23,7 +23,7 @@ export class CrewLayer {
   private depthMat = new THREE.ShaderMaterial({ uniforms: { u_depth: { value: null }, u_dscale: { value: new THREE.Vector2(1, 1) } }, vertexShader: VS, fragmentShader: FS, depthTest: true, depthWrite: true, depthFunc: THREE.AlwaysDepth, colorWrite: false })
   private quad: THREE.Mesh; private qs = new THREE.Scene(); private qc = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
   private lit = new WeakSet<THREE.Scene>()
-  private bb = new THREE.Box3(); private v = new THREE.Vector3()
+  private bb = new THREE.Box3(); private v = new THREE.Vector3(); private cc = new THREE.Color()   // R6.95: reused (was a new Color every frame)
   stats = { w: 0, h: 0, box: [0, 0, 0, 0] as number[] }
   /** the crewmate's part of the drawn area, in its uv (0..1): x0, y0, x1, y1; x1 <= x0 = nothing drawn */
   uvBox = new THREE.Vector4(0, 0, 0, 0)
@@ -88,7 +88,7 @@ export class CrewLayer {
     if (full) { x0 = -1; y0 = -1; x1 = 1; y1 = 1 }
     const m = 0.04
     x0 = Math.max(-1, x0 - m); y0 = Math.max(-1, y0 - m); x1 = Math.min(1, x1 + m); y1 = Math.min(1, y1 + m)
-    const prev = gl.getRenderTarget(), auto = gl.autoClear, ca = gl.getClearAlpha(), cc = gl.getClearColor(new THREE.Color())
+    const prev = gl.getRenderTarget(), auto = gl.autoClear, ca = gl.getClearAlpha(), cc = gl.getClearColor(this.cc)
     const mask = cam.layers.mask, bgd = scene.background
     this.rt.viewport.set(0, 0, w, h)
     // the whole drawn part is cleared (the overlay samples all of it); only the crewmate's box is drawn
@@ -111,5 +111,9 @@ export class CrewLayer {
     }
     gl.setClearColor(cc, ca); gl.autoClear = auto; gl.setRenderTarget(prev)
   }
+  /** R6.95: the depth-copy quad's program, for the warm-up (prewarm.ts). It is drawn only from render() into this target,
+   *  so it was the one program left to compile on the scroll path (the rig's scroll-through linked it at the journey
+   *  with the warm-up finished, on the phone and the weak-PC paths) */
+  warmJob() { return { roots: [this.quad] as THREE.Object3D[], scene: this.qs, camera: this.qc as THREE.Camera, target: this.rt } }
   dispose() { this.rt.dispose(); this.depthMat.dispose() }
 }

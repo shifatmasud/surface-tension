@@ -84,11 +84,13 @@ export function buildCanopy() {
   g.instanceCount = N
   const material = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, fog: false, side: THREE.DoubleSide,
+    defines: (typeof location !== 'undefined' && /[?&]oldcanopy/.test(location.search)) ? { OLD_CANOPY: 1 } : {}, // R7.05 A/B
+    extensions: { derivatives: true } as any,
     uniforms: { u_time: { value: 0 }, u_on: { value: 0 }, u_rim: { value: new THREE.Color('#b9d870') }, u_leaf: { value: new THREE.Color('#163a20') }, u_leaf2: { value: new THREE.Color('#3f7a33') } },
     vertexShader: /* glsl */ `
       attribute vec4 aOff; attribute float aRnd;
       uniform float u_time;
-      varying vec2 vUv; varying float vR; varying float vD;
+      varying vec2 vUv; varying float vR; varying float vD; varying float vK;
       void main(){
         vUv = uv; vR = aRnd;
         // camera-facing card (cylindrical about y would show the edge from above; full billboard)
@@ -99,10 +101,20 @@ export function buildCanopy() {
         c.xy += q;
         vD = -c.z;
         gl_Position = projectionMatrix * c;
+        // R7.05 CANOPY (falling through the trees read as big blurry leaf blobs over the whole frame): a crown that would
+        // fill a big share of the frame, or that sits over the middle of the picture, fades out before it gets there;
+        // the crowns rush past round the edges and the fall stays clean
+        vec4 cc = projectionMatrix * vec4(c.xyz - vec3(q, 0.0), 1.0);
+        vec2 ndc = cc.xy / max(cc.w, 0.001);
+        float span = aOff.w / max(vD, 0.001);                 // crown size / distance ~ share of the frame it covers
+        vK = (1.0 - smoothstep(0.4, 0.85, span)) * smoothstep(0.35, 0.85, max(abs(ndc.x), abs(ndc.y) * 0.8));
+        #ifdef OLD_CANOPY
+        vK = 1.0;
+        #endif
       }`,
     fragmentShader: /* glsl */ `
       uniform float u_on; uniform vec3 u_rim, u_leaf, u_leaf2;
-      varying vec2 vUv; varying float vR; varying float vD;
+      varying vec2 vUv; varying float vR; varying float vD; varying float vK;
       float h(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
       void main(){
         vec2 p = vUv - 0.5;
@@ -115,8 +127,15 @@ export function buildCanopy() {
           float a = h(id + o + 3.1) * 6.283; c = mat2(cos(a), -sin(a), sin(a), cos(a)) * c;
           leaf = max(leaf, smoothstep(0.02, -0.02, length(c * vec2(1.0, 2.1)) - 0.42));
         }
+        #ifdef OLD_CANOPY
         float body = smoothstep(0.04, -0.12, edge);
         float a = max(body * 0.94, leaf * smoothstep(0.12, -0.02, edge)) * u_on;
+        #else
+        // R7.05: a crisp crown edge (one pixel of antialias, not a wide soft falloff that read as blur)
+        float aa = max(fwidth(edge), 1e-4) * 1.2;
+        float body = smoothstep(aa, -aa, edge + 0.05);
+        float a = max(body * 0.97, leaf * smoothstep(0.1, 0.0, edge)) * u_on * vK;
+        #endif
         a *= smoothstep(0.6, 2.2, vD);                     // never a flat card filling the lens
         if (a < 0.01) discard;
         // backlit by the low sky: the outer leaves glow warm, the mass stays dark

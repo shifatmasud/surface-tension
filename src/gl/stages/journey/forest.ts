@@ -116,6 +116,13 @@ export function* buildForestSteps(low: boolean, material: THREE.Material, ground
   const seg = low ? 48 : 80
   const ground = ni(new THREE.PlaneGeometry(360, 360, seg, seg).rotateX(-Math.PI / 2))
   const pos = ground.attributes.position as THREE.BufferAttribute
+  // R7.05 GROUND: from high up the square's edge (180 out) stood against the sky as a jagged line. The outer band of
+  // the grid is stretched out to ~1500 (inside the 2000 far plane), so the land runs on under the haze to a smooth
+  // horizon; everything inside 150 is exactly where it was
+  if (!(typeof location !== 'undefined' && /[?&]oldground/.test(location.search))) {
+    const st = (v: number) => { const av = Math.abs(v); if (av <= 150) return v; const t = (av - 150) / 30; return Math.sign(v) * (150 + 30 * t + 1320 * t * t * t) }
+    for (let i = 0; i < pos.count; i++) pos.setXYZ(i, st(pos.getX(i)), pos.getY(i), st(pos.getZ(i)))
+  }
   const col = new Float32Array(pos.count * 3), r = rng(7)
   const g0 = C('#2a8040'), g1 = C('#4aa34e'), g2 = C('#1d5a38'), tmp = new THREE.Color()
   for (let i = 0; i < pos.count; i += 3) {

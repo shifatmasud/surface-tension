@@ -135,7 +135,10 @@ void main(){
   // ≥ 0.22 vh above the copy at 1440 and ≥ 0.3 vh at 390 — and stands clear in the last 0.04 vh of the climb)
   // (deepWater() is the volume's colour before the backdrop's own absorption; scaled to what the deep reads behind the
   // shelf at this depth — measured 0/36/65 sRGB at 1440 — so the fogged slide sits in the water, not as a lighter slab)
-  col = mix(col, deepWater(normalize(v_dir)) * vec3(0.25, 0.34, 0.52), smoothstep(0.04, 0.22, u_rise) * 0.98);
+  // R6.98 (Shifat: the cards rose fogged for most of the climb, then cleared in ~2 frames): the fog now thins evenly over
+  // the whole visible climb (the slide enters the bottom of the screen at u_rise ≈ 0.8) and is gone by the time it pins
+  // (the picture's weight is squared-ish so the reveal reads even on screen: the mix is linear light, the eye is not)
+  col = mix(col, deepWater(normalize(v_dir)) * vec3(0.25, 0.34, 0.52), (1.0 - pow(1.0 - smoothstep(0.02, 0.8, u_rise), 2.2)) * 0.98);
   vec2 px = (v_uv - 0.5) * u_size;
   float sd = rbox(px, u_size * 0.5, u_radius);
   float a = 1.0 - smoothstep(-1.0, 0.5, sd);

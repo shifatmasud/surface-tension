@@ -39,6 +39,11 @@ export const props = {
   look: makeLook(),
   // stage weights (Visuals switcher): which stage owns the camera
   stage: 'hero' as string,
+  /** R7.00: the camera is in the hero/statement/dive above the water (visuals.ts) — the phone keeps its light density there */
+  aboveWater: true,
+  /** R7.00: a stage whose picture comes from its own fixed target (the journey's 512 world) caps the phone's sharp
+   *  background near that target's density (0 = no cap): more background pixels there would only magnify it */
+  bgCeil: 0,
   // section-local progress values written by DOM sections, read by GL stages
   heroPin: 0, statement: 0, lab: 0, labVel: 0, systems: 0, dive: 0, journey: 0, resurface: 0, overscroll: 0,
   introDrop: 0, introDone: false,

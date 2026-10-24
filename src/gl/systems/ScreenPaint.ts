@@ -68,6 +68,13 @@ function blurInPlace(radius: number, src: THREE.WebGLRenderTarget, scratch: THRE
 // at 108/255, which leaves a permanent -0.076 velocity everywhere (a 1.9-texel diagonal push on the whole field, the
 // trail slid down-left instead of curling in place, and a constant smear direction in the distortion). The reference
 // clears with raw gl.clearColor, so rest is 128/255. A tiny fill pass writes the exact value.
+/** R7.04 (Shifat 9:50–9:51 AM Oct 24: "Fluid cursor trail layer must stay fixed. It moves now." / "slides when I scroll"): the
+ *  trail lives in viewport space. The field used to be advected by the page scroll every frame (and the scroll was added to
+ *  the brush), so a stroke slid up/down with the page. Now a stroke stays on the screen pixels it was drawn on and fades in
+ *  place; it paints only where the finger / cursor moves on screen. Brush, sim, smear and fade are untouched (R6.47 look).
+ *  ?trailscroll = the old scrolling field. */
+const TRAIL_SCROLL = typeof location !== 'undefined' && /[?&]trailscroll/.test(location.search)
+
 const FILL = new THREE.ShaderMaterial({
   vertexShader: FS_VERT,
   fragmentShader: `precision highp float; varying vec2 v_uv; void main(){ gl_FragColor = vec4(0.5, 0.5, 0.0, 0.0); }`,
@@ -251,7 +258,7 @@ export class ScreenPaint {
     const ratio = props.look.paintOffsetRatio
     const scrollView = props.height > 0 ? props.scrollDelta / props.height : 0 // viewport fractions
     const offY = scrollView * ratio        // added to the -1..1 pointer as the reference does (one viewport = 1.0)
-    u.u_scrollOffset.value.set(0, Math.abs(props.scrollDelta) > props.height * 0.5 ? 0 : scrollView * ratio)   // POLISH: a jump does not drag the field
+    u.u_scrollOffset.value.set(0, !TRAIL_SCROLL || Math.abs(props.scrollDelta) > props.height * 0.5 ? 0 : scrollView * ratio)   // POLISH: a jump does not drag the field; R7.04: the field no longer scrolls at all
 
     // pointer source: the mouse (input service), or the finger (own touch listeners) once a touch has been seen
     if (this.touchMoved) { this.touchMode = true; this.hasTouched = true }
@@ -277,7 +284,7 @@ export class ScreenPaint {
     // W25 R6.47 (Shifat 2:28 AM Oct 21, LOCKED FOREVER: the lusion-decoded-source DESKTOP trail on every device): the finger drives
     // the desktop brush exactly as the mouse does, scroll term included; only a jump (more than half a screen in one frame: the
     // loop wrap, a deep link; the reference has none) never paints
-    const scrollTerm = jump ? 0 : props.scrollDelta
+    const scrollTerm = jump || !TRAIL_SCROLL ? 0 : props.scrollDelta
 
     // 2) radius from speed: px moved this frame, the scroll added to the pointer ×3 viewports (the reference adds
     // scrollViewDelta × viewportHeight × 3 to the y-down pixel position), so a scroll paints even with a still pointer
@@ -293,7 +300,7 @@ export class ScreenPaint {
     // 4) the brush is a segment: from = last to (pointer in -1..1, y up, plus the scroll in viewport units)
     this.from.copy(this.to)
     const mx = ever ? (px.x / props.width) * 2 - 1 : 0
-    const my = (ever ? 1 - (px.y / props.height) * 2 : 0) + (jump ? 0 : offY)
+    const my = (ever ? 1 - (px.y / props.height) * 2 : 0) + (jump || !TRAIL_SCROLL ? 0 : offY)
     this.to.set(((mx + 1) * pw) / 2, ((my + 1) * ph) / 2, radius, 1)
     if (!this.started) { this.from.copy(this.to); this.started = true }
 

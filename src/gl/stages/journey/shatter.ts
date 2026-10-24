@@ -166,7 +166,7 @@ export function buildShatterGeometry(o: ShatterOpts) {
 }
 
 const COMMON = /* glsl */ `
-  uniform float u_t, u_crackR, u_ringR, u_tilt, u_hole, u_k, u_time;
+  uniform float u_t, u_crackR, u_ringR, u_tilt, u_hole, u_k, u_time, u_out;
   uniform vec2 u_impact;
   mat3 rotAxis(vec3 a, float ang){ float s = sin(ang), c = cos(ang), oc = 1.0 - c;
     return mat3(oc*a.x*a.x + c, oc*a.x*a.y + a.z*s, oc*a.z*a.x - a.y*s,
@@ -180,7 +180,7 @@ export function shatterMaterial(tex: THREE.Texture) {
     uniforms: {
       u_map: { value: tex }, u_t: { value: -1 }, u_crackR: { value: 0 }, u_ringR: { value: 0 }, u_tilt: { value: 0 },
       u_hole: { value: 4 }, u_k: { value: 1 }, u_time: { value: 0 }, u_impact: { value: new THREE.Vector2() },
-      u_bright: { value: 1 }, u_gloss: { value: 0 }, u_frost: { value: 0 },
+      u_bright: { value: 1 }, u_gloss: { value: 0 }, u_frost: { value: 0 }, u_out: { value: 0 },
     },
     vertexShader: /* glsl */ `
       ${COMMON}
@@ -210,6 +210,10 @@ export function shatterMaterial(tex: THREE.Texture) {
           R = rotAxis(ax, spin * tt * fly + tl * 3.0) * R;
           move = clamp(tt * fly * 3.0 + tl * 2.0, 0.0, 1.0);
         }
+        // R6.98: as the camera glides to the CTA the pieces shrink to glass dust instead of all vanishing in one frame
+        // (pieces still at rest in the frame mirror the screen exactly, so they are not shrunk: their crack lines and frost
+        // fade instead, and they leave without a visible change; their thin edge walls tuck in behind the face)
+        p *= 1.0 - u_out * max(smoothstep(0.0, 0.25, move), step(3.5, aKind));
         p = R * p; n = R * n;
         vec3 lp = vec3(c, 0.0) + p + off;
         vec4 mv = modelViewMatrix * vec4(lp, 1.0);
@@ -255,16 +259,16 @@ export function shatterMaterial(tex: THREE.Texture) {
           float sheen = smoothstep(0.55, 1.25, vUv.y * 0.8 + (1.0 - vUv.x) * 0.6);
           col = img * (1.0 - 0.12 * sheen * u_gloss) + vec3(0.75, 0.8, 0.9) * sheen * 0.05 * u_gloss;
           // the crushed spot at the impact: a white frosted star
-          float fr = u_frost * smoothstep(0.42 * u_k, 0.0, dist) * (0.55 + 0.45 * vRand.x);
+          float fr = u_frost * (1.0 - u_out) * smoothstep(0.42 * u_k, 0.0, dist) * (0.55 + 0.45 * vRand.x);
           col = mix(col, vec3(0.92, 0.95, 1.0), fr * 0.85);
           // cracks: drawn along the piece's own outline (constant pixel width), once the fracture front has passed
           float w = fwidth(vEdge);
           float line = (1.0 - smoothstep(0.0, w * 1.05, vEdge)) * (0.55 + 0.45 * fract(sin(dot(floor(vRest * 9.0), vec2(12.9898, 78.233))) * 43758.5453));
           float halo = 1.0 - smoothstep(0.0, w * 5.0, vEdge);
           float reach = vKind < 0.5 ? step(dist, u_crackR) : vKind < 1.5 ? step(dist, u_ringR) : 0.0;
-          float lineA = line * reach * (1.0 - vMove);
+          float lineA = line * reach * (1.0 - vMove) * (1.0 - u_out);
           vec3 tf = thinFilm(cosT, 0.4 + dist * 0.35);
-          col = mix(col, col * 0.7, halo * reach * 0.3 * (1.0 - vMove));
+          col = mix(col, col * 0.7, halo * reach * 0.3 * (1.0 - vMove) * (1.0 - u_out));
           col += (vec3(0.85, 0.9, 1.0) * 0.5 + tf * 0.28) * lineA;
           // in flight: the face trades its picture for the studio as it turns away, with a thin-film fringe on the grazing angle
           float flight = vMove;

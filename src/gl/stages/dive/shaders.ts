@@ -43,7 +43,7 @@ vec3 deepWater(vec3 dir){
   vec3 c = mix(vec3(0.002, 0.012, 0.028), vec3(0.008, 0.055, 0.105), smoothstep(0.0, 0.55, up));
   c = mix(c, vec3(0.030, 0.150, 0.230), smoothstep(0.5, 1.0, up));
   c += vec3(0.020, 0.110, 0.150) * pow(up, 6.0);                    // the faint glow of the surface, far overhead
-  return c * (1.0 - 0.3 * u_abyss) * (1.0 - 0.72 * u_sinkK);
+  return c * (1.0 - 0.3 * u_abyss) * (1.0 - 0.42 * u_sinkK); // R7.04: 0.72 took the sink to near-black (PC ~5% luma); a deep navy now
 }
 /** FogExp2: density thickens with depth (u_abyss) */
 float deepFog(float dist){
@@ -210,7 +210,10 @@ void main(){
       vec3 r = reflect(dir, n);
       // W18-DIVE OVER-UNDER: at grazing angles (the view just under the line) total internal reflection mirrors the
       // near-horizontal water, a silvery teal, not the deep (it read as a black band across the top of the frame)
-      float gz = smoothstep(0.0, 0.45, dir.y);
+      // R6.97 (phones): a tall portrait frame reaches dir.y ≈ 0.6 at its top edge, still outside the window, and that
+      // stretch mirrored the deep (a near-black band for ~6 frames right after the lens went under, then the bright
+      // window). Just under the surface the mirror sees the lit shallows, so the deep look comes in with depth.
+      float gz = smoothstep(0.0, 0.45, dir.y) * smoothstep(0.5, 3.0, dc);
       vec3 mirror = inscatter(r, dc + 12.0 * gz) * mix(0.95, 0.55, gz) + vec3(0.05, 0.11, 0.12) * (1.0 - gz) * exp(-K * dc);
       float dance = 0.78 + 0.42 * caustic(hp * 1.15);              // the window shimmers as the swell focuses light
       vec3 surf = sky * win * tr * mix(1.0, dance, clamp(4.0 / (t + 2.0), 0.0, 1.0)) + mirror * (1.0 - win * tr);
