@@ -5,6 +5,7 @@ import { ufx } from '../ufx/ufx'
 import { paintState } from '../quality'
 import { journey } from '../stages/journey/journeyState'
 import type { ScreenPaintDistortionEffect } from './effects'
+const TXT_SPLIT = !/[?&]txtold\b/.test(location.search)   // R7.06
 const TEXT_BEND = /[?&]textbend\b/.test(location.search)   // W21: QA only
 
 /**
@@ -102,13 +103,25 @@ export class SharpText {
     const x = Math.max(0, x0 - m), y = Math.max(0, y0 - m)
     this.box = { x, y, w: Math.min(this.w, x1 + m) - x, h: Math.min(this.h, y1 + m) - y }
   }
+  /** R7.06 PERF: the type is drawn into its own target BEFORE the scene goes onto the canvas (prepare), and only
+   *  composited after it (draw). Before, the canvas was bound for the upscale and the hero composite, left for this
+   *  target, then bound again for the text, which on a phone GPU stores the whole canvas out and loads it back each frame.
+   *  Same target, same draws, same composite: only the order of the two targets changed. ?txtold = 7.05 order */
+  private pre: { b: { x: number; y: number; w: number; h: number } | null } | null = null
+  prepare(gl: THREE.WebGLRenderer) { this.pre = null; if (TXT_SPLIT) this.pre = this.drawText(gl) }
   draw(gl: THREE.WebGLRenderer) {
+    const p = TXT_SPLIT ? this.pre : this.drawText(gl)
+    this.pre = null
+    if (!p) return
+    this.compose(gl, p.b)
+  }
+  private drawText(gl: THREE.WebGLRenderer): { b: { x: number; y: number; w: number; h: number } | null } | null {
     const slot = ufx.slot
     let any = false
     for (let i = 0; i < slot.children.length; i++) if (slot.children[i].visible) { any = true; break }
     let ext = false
     for (let i = 0; i < this.extras.length; i++) if (this.extras[i].active()) { ext = true; break }
-    if (!any && !ext) return
+    if (!any && !ext) return null
     if ((++this.n & 63) === 0) this.measure()   // fonts / late layout: re-read the slot box every 64 frames
     const prev = gl.getRenderTarget(), auto = gl.autoClear, ca = gl.getClearAlpha()
     gl.getClearColor(this.cc)
@@ -139,6 +152,14 @@ export class SharpText {
     gl.autoClear = false
     if (any) gl.render(slot, ufx.slotCamera)
     if (ext) for (const e of this.extras) if (e.active()) e.draw(gl)
+    gl.autoClear = auto
+    gl.setClearColor(this.cc, ca)
+    gl.setRenderTarget(prev)
+    return { b }
+  }
+  private compose(gl: THREE.WebGLRenderer, b: { x: number; y: number; w: number; h: number } | null) {
+    const prev = gl.getRenderTarget(), auto = gl.autoClear
+    gl.autoClear = false
     // 2) composite over the finished frame on the canvas, through the trail
     // W21 (scorer-r610/r614: the pointer trail refracted 'PORTFOLIO' and the name, so the type wobbled under the cursor):
     // the copy sits ABOVE the trail now; the trail bends the scene under it, never the words. (?textbend restores it)
@@ -151,7 +172,6 @@ export class SharpText {
     gl.render(this.scene, this.cam)
     if (b) gl.setScissorTest(false)
     gl.autoClear = auto
-    gl.setClearColor(this.cc, ca)
     gl.setRenderTarget(prev)
   }
 }

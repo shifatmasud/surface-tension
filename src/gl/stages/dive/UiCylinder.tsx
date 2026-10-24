@@ -177,8 +177,11 @@ function pal(hex: string, k = 1) {
   }
   return m
 }
-const SOLID_LIFT = (() => { const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('dmlift') : null; return q ? +q : 1.3 })() // ?dmlift=1 = 7.03
-const SOLID_NEUTRAL = SOLID_LIFT === 1 ? new THREE.Color(1, 1, 1) : new THREE.Color(1, 0.99, 0.965) // the deep's grade leaves a cool cast on white
+// R7.06: measured fully formed and square to the lens (PC + phone, headless) lift 1.0 gives #efefef and 7.05's 1.3 clips to
+// #ffffff; 7.04's 1.3 had been tuned on a frame where the drum was still fading in. 1.01 lands #f0f0f0. ?dmlift=1.3 = 7.05
+const SOLID_LIFT = (() => { const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('dmlift') : null; return q ? +q : 1.01 })()
+const DM_LEAD = !(typeof location !== 'undefined' && /[?&]dmlead=0/.test(location.search)) // ?dmlead=0 = 7.05 fade timing
+const SOLID_NEUTRAL = SOLID_LIFT < 1.2 ? new THREE.Color(1, 1, 1) : new THREE.Color(1, 0.99, 0.965) // the deep's grade leaves a cool cast on white
 /** R7.02: an unlit token colour with no fog at all (the Do Magic face: the demo's solid #f0f0f0) */
 function palSolid(hex: string) {
   const key = hex + '|solid'
@@ -631,9 +634,15 @@ function* buildCylSteps(gl: THREE.WebGLRenderer, u: Record<string, THREE.IUnifor
   atom.setTargets(items.map((it) => it.g))
   // the parts fade in as the particles settle on them: every part material can be faded (opaque ones keep depth)
   for (const k of ['black', 'white', 'silver'] as const) { M[k].transparent = true; M[k].depthWrite = true }
-  const fades: { m: THREE.Material & { opacity: number }; base: number }[] = []
+  const fades: { m: THREE.Material & { opacity: number }; base: number; lead?: boolean }[] = []
   const seen = new Set<THREE.Material>()
-  for (const it of items) it.g.traverse((o) => { const mm = (o as THREE.Mesh).material as (THREE.Material & { opacity: number }) | (THREE.Material & { opacity: number })[]; if (!mm) return; for (const m of Array.isArray(mm) ? mm : [mm]) if (!seen.has(m)) { seen.add(m); fades.push({ m, base: m.opacity }) } })
+  // R7.06 (Do Magic exact #f0f0f0): the button is the first part to reach the front, while the beads are still settling
+  // (the drum ~85–93 % faded in during its hold), so its face read grey-blue (~#bec7ce on PC). Materials only the button
+  // uses (its solid face, label, sparkle) finish fading in a little ahead of the rest, so it holds the front fully solid.
+  const owner = new Map<THREE.Material, Set<string>>()
+  for (const it of items) { const kd = (it.g.userData.act as any)?.kind as string; it.g.traverse((o) => { const mm = (o as THREE.Mesh).material as THREE.Material | THREE.Material[]; if (!mm) return; for (const m of Array.isArray(mm) ? mm : [mm]) { let st = owner.get(m); if (!st) owner.set(m, (st = new Set())); st.add(kd) } }) }
+  const leadOf = (m: THREE.Material) => { const st = owner.get(m); return !!st && st.size === 1 && st.has('button') && DM_LEAD }
+  for (const it of items) it.g.traverse((o) => { const mm = (o as THREE.Mesh).material as (THREE.Material & { opacity: number }) | (THREE.Material & { opacity: number })[]; if (!mm) return; for (const m of Array.isArray(mm) ? mm : [mm]) if (!seen.has(m)) { seen.add(m); fades.push({ m, base: m.opacity, lead: leadOf(m) }) } })
   // R6.88 SINK: the parts' points (every slab, disc and ring of every part; the text labels go with the front only) and
   // the diamond's (its own facets, object space), sampled once here, behind the preloader
   const glow = new Map<THREE.Material, THREE.Color>([[M.black, new THREE.Color(0.42, 0.5, 0.6)], [M.white, new THREE.Color(1.05, 1.08, 1.12)], [M.silver, new THREE.Color(0.8, 0.88, 1.0)], [M.glass, new THREE.Color(0.55, 0.9, 1.0)]])
@@ -807,7 +816,7 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
     // the parts are eaten by the dissolve front and fall away as points (disintegrate.ts); gone by dive.dis = 1
     const fv = pf
     s.visible = fv > 0.002
-    if (Math.abs(fv - built.fade.v) > 1e-3) { built.fade.v = fv; for (const f of built.fades) f.m.opacity = f.base * fv }
+    if (Math.abs(fv - built.fade.v) > 1e-3) { built.fade.v = fv; const fl = ss(0, 0.72, fv); for (const f of built.fades) f.m.opacity = f.base * (f.lead ? fl : fv) }
     atom.mat.uniforms.u_amb.value = dive.abyss
     // R6.88 SINK: the dissolve's uniforms. The front lives in DRUM space (the spin group's frame, the ring's breath taken
     // out), so it stays on the parts as they turn; the points read the same frame, so a fragment and its points agree

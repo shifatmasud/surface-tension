@@ -62,6 +62,10 @@ class HeroPass {
   private qscene = new THREE.Scene()
   stats = { heroes: 0, ui: 0, box: [0, 0, 0, 0] as number[], w: 0, h: 0 }
 
+  /** R7.06: the background-depth copy as a scene object (drawn first inside the heroes' render; screen-space VS) */
+  private depthQuad = (() => { const m = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.depthMat); m.frustumCulled = false; m.renderOrder = -1e9; m.layers.mask = 0xffffffff; m.matrixAutoUpdate = false; return m })()
+  /** R7.06: the lake's depth (HeroStage) as a scene object for the same single render; null = not needed this frame */
+  depthFixMesh: ((cam: THREE.Camera) => THREE.Object3D | null) | null = null
   constructor() { this.quad.frustumCulled = false; this.qscene.add(this.quad) }
 
   /** register a hero root (scene heroes are graded; ui heroes ride the 'under' GL-text layer). Returns the unregister. */
@@ -115,7 +119,7 @@ class HeroPass {
     const k = Math.min(1, (props.heroDpr || gl.getPixelRatio()) / Math.max(1e-3, gl.getPixelRatio()))
     const w = Math.max(1, Math.round(v.x * k)), h = Math.max(1, Math.round(v.y * k))
     if (!this.rt) {
-      this.rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, depthBuffer: true, stencilBuffer: false, samples: (LOW_END_GPU || settings.TIER === 'low') && (props.heroDpr || 2) > 1.01 ? 0 : 4, generateMipmaps: false })
+      this.rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, depthBuffer: true, stencilBuffer: false, samples: (LOW_END_GPU || settings.TIER === 'low') && (props.heroDpr || 2) > 1.01 ? 0 : 4, generateMipmaps: false, resolveDepthBuffer: !HP_ONE })
       // R6.89: at the 1.0 phone hero density the silhouettes (the crewmate's rim, the stone's girdle) stepped and read as a
       // thin fringe once upsampled onto the 1.5 canvas; 4x MSAA on this small target (resolved on-chip on tile GPUs) smooths them
       this.rt.texture.minFilter = this.rt.texture.magFilter = THREE.LinearFilter
@@ -203,16 +207,25 @@ class HeroPass {
     gl.clear(true, true, false)
     rt.scissorTest = true; gl.setRenderTarget(rt)
     // the background's depth at canvas density
-    const sd = this.sceneDepth()
-    if (sd) { this.depthMat.uniforms.u_depth.value = sd; this.quad.material = this.depthMat; gl.render(this.qscene, this.qcam) }
+    // R7.06 PERF (his Galaxy M02s): the depth copy and the lake's depth used to be two gl.render calls of their own before
+    // the heroes'. On a multisampled target three resolves (blits) the whole MSAA colour + depth after EVERY render call,
+    // so the hero pass paid three full-target resolves a frame (each a tile flush + reload on a phone GPU) where one is
+    // needed. Both depth writes now ride inside the heroes' single render as the first two opaque draws (renderOrder),
+    // same materials, same order, same pixels; and the target no longer resolves depth nobody reads.
+    const sd = this.sceneDepth(), extra: THREE.Object3D[] = []
+    if (sd) { this.depthMat.uniforms.u_depth.value = sd; extra.push(this.depthQuad) }
+    if (HP_ONE && this.depthFixMesh) { const fm = this.depthFixMesh(camera); if (fm) extra.push(fm) }
+    if (!HP_ONE && sd) { this.quad.material = this.depthMat; gl.render(this.qscene, this.qcam); extra.length = 0 }
     // R6.92b WATERLINE (Shifat 9:59–10:02 AM: the line where the stone pierces the water was jagged and crawled on his
     // weak-GPU PC and his phone): the depth above is the background's, upsampled from ITS density (0.5 on the low path),
     // so the smooth plane of the lake arrived as 2x2 depth steps and the stone's cut along it was a sawtooth that shifted
     // as the stone moved. The stage redraws just the lake's depth here at the canvas density (same vertex shader, an
     // empty fragment), so the cut is computed per canvas pixel, as on desktop high.
-    if (this.depthFix) this.depthFix(gl, camera)
+    if (!HP_ONE && this.depthFix) this.depthFix(gl, camera)
     scene.background = null; camera.layers.set(HERO_LAYER); gl.shadowMap.autoUpdate = false
+    for (const o of extra) scene.add(o)
     try { gl.render(scene, camera) } finally {
+      for (const o of extra) scene.remove(o)
       scene.background = bg; camera.layers.mask = mask; gl.shadowMap.autoUpdate = su
       gl.setClearColor(cc, ca); gl.autoClear = auto; gl.setRenderTarget(prev)
     }
@@ -463,6 +476,7 @@ export const heroPass = new HeroPass()
 if (typeof window !== 'undefined') (window as any).__hero = heroPass
 
 /** order -1 / order 1 passes for the post chain (no swap, the input buffer is untouched) */
+const HP_ONE = !/[?&]hpold\b/.test(location.search) // R7.06: ?hpold = 7.05 hero pass (three render calls, depth resolved)
 export class HeroHidePass extends Pass {
   constructor() { super('HeroHide'); this.needsSwap = false; this.renderToScreen = false }
   render() { heroPass.hide() }

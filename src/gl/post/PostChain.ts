@@ -291,6 +291,7 @@ void main(){
       ;(window as any).__chain = this.entries.filter((e) => e.on).map((e) => `${e.order}:${e.name}`)
     }
     this.composer.render(dt)
+    this.text.prepare(this.gl) // R7.06 PERF: the type's own target first, so the canvas is bound once (blit, heroes, type)
     this.blit()
     heroPass.composite(this.gl, this.grade, this.distortion, this.footer ? this.footer.uniforms : null, this.ufxUnderRef, this.ufxCameraRef) // R6.87 SPLIT
     this.text.draw(this.gl)

@@ -364,7 +364,18 @@ export function HeroStage() {
       const mask = cam.layers.mask; cam.layers.mask = 0xffffffff
       try { r.render(sc, cam) } finally { cam.layers.mask = mask }
     }
-    return () => { heroPass.depthFix = null; mat.dispose() }
+    // R7.06 PERF: the same lake depth, handed to the hero pass as an object drawn inside its single render (right after the
+    // background-depth copy), so the multisampled hero target is resolved once a frame instead of three times
+    proxy.renderOrder = -1e9 + 1
+    heroPass.depthFixMesh = (cam) => {
+      const wm = waterMesh.current
+      if (!wm || !wm.visible) return null
+      if ((props.dpr || 1) >= (props.heroDpr || 1)) return null
+      if (cam.position.y < 0.02 || dive.under || dive.split >= 0 || Math.abs(gem.pos.y) > gem.radius * 1.25) return null
+      proxy.matrix.copy(wm.matrixWorld); proxy.matrixWorld.copy(wm.matrixWorld)
+      return proxy
+    }
+    return () => { heroPass.depthFix = null; heroPass.depthFixMesh = null; mat.dispose() }
   }, [water, waterGeo])
   // R6.87 SPLIT RESOLUTION: the stone (and its sheen shell) is a hero subject — drawn at the canvas density in its own
   // pass over the low-res scene (post/heroPass.ts); its reflection in the lake keeps coming from the mirror pass
