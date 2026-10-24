@@ -3,6 +3,7 @@ import { BlendFunction, Effect } from 'postprocessing'
 import { WL_EDGE } from '../water/waterline'
 import { journey } from '../stages/journey/journeyState'
 import { props } from '../../state/props'
+import { viewport } from '../../core/viewport'
 
 /**
  * FOOTER MOCKUP (Shifat 13:23Z "Footer feels outside whole site. How to make it seamless", 13:24Z "cursor trail must work
@@ -27,6 +28,7 @@ export class FooterWorldEffect extends Effect {
     super('FooterWorld', /* glsl */ `
       #define FOOT_MODE ${mode}
       uniform float u_fk;      // lift as a fraction of the screen height (0 = curtain down)
+      uniform float u_fb;      // R7.07: the canvas below the visible bottom (address bar showing), as a fraction of its height
       uniform float u_ft;      // seconds
       uniform float u_fasp;    // width / height
       uniform float u_fvel;    // smoothed scroll speed, 0..1 (B: the line sloshes)
@@ -90,7 +92,7 @@ export class FooterWorldEffect extends Effect {
       void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor){
         outputColor = inputColor;
         if (u_fk <= 0.0) return;
-        float sy = vUv.y;                     // screen y (0 bottom .. 1 top), unshifted
+        float sy = vUv.y - u_fb;              // screen y (0 = the VISIBLE bottom .. 1 top), unshifted
         float e = fEdge(vUv.x);
         // R6.92b (Shifat 9:03 AM: the footer water's top edge read hard and jaggy, worst on the phone's 0.5–0.75 background):
         // the curtain edge is drawn with analytic coverage over one drawn pixel (along its slope), not a hard step
@@ -124,7 +126,7 @@ export class FooterWorldEffect extends Effect {
       }`, {
       blendFunction: BlendFunction.NORMAL,
       uniforms: new Map<string, THREE.Uniform<any>>([
-        ['u_fk', new THREE.Uniform(0)], ['u_ft', new THREE.Uniform(0)], ['u_fasp', new THREE.Uniform(1)], ['u_fvel', new THREE.Uniform(0)],
+        ['u_fk', new THREE.Uniform(0)], ['u_fb', new THREE.Uniform(0)], ['u_ft', new THREE.Uniform(0)], ['u_fasp', new THREE.Uniform(1)], ['u_fvel', new THREE.Uniform(0)],
         ['u_bar', new THREE.Uniform(new THREE.Vector4(0, 0, 0, 0))], ['u_bfill', new THREE.Uniform(new THREE.Vector3(0, 1, 1))],
       ]),
     })
@@ -132,7 +134,7 @@ export class FooterWorldEffect extends Effect {
     if (typeof document !== 'undefined') {
       document.documentElement.classList.add('foot-glbar')
       const dirty = () => { this.barDirty = true }
-      window.addEventListener('resize', dirty)
+      window.addEventListener('resize', dirty) // the bar's rect follows the visible bottom (address bar too): re-read it (a rect read, no re-allocation)
       if (typeof ResizeObserver !== 'undefined') {
         const ro = new ResizeObserver(dirty)
         const hook = () => { const root = document.querySelector('.site-footer'); if (!root) return false; for (const el of Array.from(root.children)) ro.observe(el); return true }
@@ -168,6 +170,7 @@ export class FooterWorldEffect extends Effect {
     const u = this.uniforms
     const h = Math.max(1, props.height)
     u.get('u_fk')!.value = Math.max(0, journey.lift || 0) / h
+    u.get('u_fb')!.value = Math.max(0, h - (viewport.vis || h)) / h   // R7.07
     if (!this.reduced) this.t += Math.min(dt, 0.1)
     u.get('u_ft')!.value = this.t
     u.get('u_fasp')!.value = (props.width || h) / h

@@ -4,9 +4,9 @@
 /* R6.88b CRISP TYPE: the card's vector type (CSS3D, over the GL canvas, under the hit targets); it comes and goes with the GL */
 .gift__type { position: absolute !important; inset: 0; pointer-events: none; opacity: 0; transition: opacity .6s var(--ease-sine); }
 .gift--ready .gift__type { opacity: 1; }
-.gift--leaving .gift__type { opacity: 0; transform: translate3d(0, 22vh, 0); transition: opacity .6s var(--ease-sine), transform .7s cubic-bezier(.55, 0, .75, .3); }
+.gift--leaving .gift__type { opacity: 0; transform: translate3d(0, calc(22 * var(--vu)), 0); transition: opacity .6s var(--ease-sine), transform .7s cubic-bezier(.55, 0, .75, .3); }
 /* leaving: the last frame sinks back down and fades (the GL has already stopped drawing) */
-.gift--leaving .gift__gl { opacity: 0; transform: translate3d(0, 22vh, 0); transition: opacity .6s var(--ease-sine), transform .7s cubic-bezier(.55, 0, .75, .3); }
+.gift--leaving .gift__gl { opacity: 0; transform: translate3d(0, calc(22 * var(--vu)), 0); transition: opacity .6s var(--ease-sine), transform .7s cubic-bezier(.55, 0, .75, .3); }
 /* the box's keyboard / screen-reader stand-in: sits exactly over the box, invisible until focused */
 .gift__hit { position: absolute; left: 0; top: 0; width: 1px; height: 1px; padding: 0; border: 0; margin: 0; background: transparent; color: transparent; border-radius: 24px; cursor: pointer; visibility: hidden; -webkit-tap-highlight-color: transparent; }
 .gift__hit:focus { outline: none; }

@@ -3,6 +3,9 @@ import { props } from '../../../state/props'
 import { browser } from '../../../services/settings'
 import { journey } from './journeyState'
 import { createStickerInteraction, type StickerInteraction } from './stickerInteract'
+import { DIS_GLSL } from '../dive/disintegrate'
+import { settings } from '../../../services/settings'
+import { LOW_END_GPU } from '../../quality'
 
 /**
  * W18 — THE ENDING (STRUCTURE v3, Shifat 13:27Z–13:33Z). After the crewmate breaks out of the tablet the camera pulls
@@ -112,7 +115,9 @@ attribute vec4 aInt;     // (Shifat 15:29Z) drag lift 0..1, peel 0..1, grabbed c
 uniform float u_z, u_shadow, u_away;
 uniform vec3 u_light;
 varying vec2 vUv; varying vec3 vN; varying vec3 vW; varying float vA; varying float vLift; varying float vCurl;
+varying vec2 vQ; varying float vSeed;
 void main(){
+  vQ = position.xy + 0.5; vSeed = aCell.x + 3.0 * aCell.y;   // R7.07 #8: the morph front's own coordinates
   float s = clamp(aProg.x, 0.0, 1.0);
   // slap: from a curled sheet a little off the wall, pressed flat with a tiny squash, then settled
   float press = smoothstep(0.0, 0.62, s);
@@ -155,12 +160,22 @@ void main(){
   vW = wp;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(wp, 1.0);
 }`
+/** R7.07 #8 (Shifat: "particle morph in/out, never a solo fade"): the sticker's order in the Shade DS front (top first) */
+const ST_MORPH_GLSL = /* glsl */ `
+${DIS_GLSL}
+float stF(vec2 q, float seed){ return clamp(0.62 * disN(vec3(q * 3.2, seed * 7.31)) + 0.38 * clamp(1.0 - q.y, 0.0, 1.0), 0.0, 1.0); }
+`
 const ST_FRAG = /* glsl */ `
-uniform sampler2D u_atlas; uniform float u_shadow, u_time; uniform vec3 u_light, u_cam;
+uniform sampler2D u_atlas; uniform float u_shadow, u_time, u_morph; uniform vec3 u_light, u_cam;
 varying vec2 vUv; varying vec3 vN; varying vec3 vW; varying float vA; varying float vLift; varying float vCurl;
+varying vec2 vQ; varying float vSeed;
+${ST_MORPH_GLSL}
 float h21(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 void main(){
   if (vA < 0.5) discard;
+  // R7.07 #8: the Shade DS front eats the sheet (its points are born exactly here: STM_VERT reads the same function)
+  float mraw = u_morph > 0.0 ? disRawUi(u_morph, stF(vQ, vSeed)) : -1.0;
+  if (mraw >= 0.0) discard;
   if (u_shadow > 0.5) {
     float a = texture2D(u_atlas, vUv, 2.5 + vLift * 6.0).a;
     a *= 0.75 - min(vLift * 0.9, 0.5);
@@ -179,7 +194,53 @@ void main(){
   float spec = pow(max(dot(n, H), 0.0), 220.0) * 0.4 + pow(max(dot(n, H), 0.0), 30.0) * 0.025;
   vec3 col = t.rgb * diff * 0.92 + vec3(spec);
   col *= 1.0 - vLift * 0.25;
+  col += disEmber(mraw);   // the thin lime ember line running ahead of the front (Shade DS)
   gl_FragColor = vec4(col, 1.0);
+}`
+/** R7.07 #8: the sticker's points. Grid samples of each sheet (jittered), placed by the same flat-sheet transform as
+ *  ST_VERT; each is born where the front passes its sample and drifts off, cooling from the lime ember to the printed
+ *  colour under it. One Points draw, all on the GPU, scroll-driven and reversible (a pure function of u_k). */
+const STM_VERT = /* glsl */ `
+${ST_MORPH_GLSL}
+uniform vec4 u_st[6]; uniform vec2 u_cell[6];
+uniform float u_k, u_away, u_z, u_px, u_time;
+attribute vec4 aP; attribute vec4 aR;
+varying vec2 vUv; varying float vA; varying float vE;
+void main(){
+  int i = int(aP.x + 0.5);
+  vec4 st = u_st[0]; vec2 cell = u_cell[0];
+  for (int j = 1; j < 6; j++) if (j == i) { st = u_st[j]; cell = u_cell[j]; }
+  vec2 q = aP.yz;
+  float raw = disRawUi(u_k, stF(q, cell.x + 3.0 * cell.y));
+  float e = clamp(raw, 0.0, 1.0);
+  float ca = cos(st.w), sa = sin(st.w);
+  vec2 lp = (q - 0.5) * st.z;
+  vec3 p = vec3(st.x + ca * lp.x - sa * lp.y, st.y + sa * lp.x + ca * lp.y, u_z + 0.004);
+  p.y += u_away; p.x += sign(st.x) * u_away * 1.1;
+  vec3 rd = normalize(aR.xyz * 2.0 - 1.0 + vec3(1e-3));
+  float out1 = (1.0 - exp(-1.4 * e)) / (1.0 - exp(-1.4)) * st.z * 0.75 * (0.35 + 0.9 * aR.w);
+  p += (vec3(0.0, 0.0, 0.5) + rd * 0.7) * out1;
+  p += vec3(sin(u_time * 0.45 + aR.x * 40.0), cos(u_time * 0.4 + aR.y * 40.0), 0.0) * 0.1 * st.z * e;
+  p.y -= st.z * 0.6 * pow(e, 2.4) * (0.55 + 0.9 * aR.y);
+  vec4 mv = modelViewMatrix * vec4(p, 1.0);
+  vA = smoothstep(0.0, 0.05, raw) * (1.0 - smoothstep(0.3, 1.0, e)) * step(raw, 1.0);
+  vE = e;
+  vUv = (cell + q) / vec2(3.0, 2.0);
+  gl_PointSize = vA > 0.002 ? max(1.0, u_px * st.z * aP.w * (0.7 + 0.6 * aR.z) * (1.0 - 0.35 * e) / max(0.05, -mv.z)) : 0.0;
+  gl_Position = vA > 0.002 ? projectionMatrix * mv : vec4(2.0, 2.0, 2.0, 1.0);
+}`
+const STM_FRAG = /* glsl */ `
+uniform sampler2D u_atlas;
+varying vec2 vUv; varying float vA; varying float vE;
+void main(){
+  vec2 c = gl_PointCoord * 2.0 - 1.0; float r2 = dot(c, c);
+  if (r2 > 1.0) discard;
+  vec4 t = texture2D(u_atlas, vUv);
+  if (t.a < 0.5) discard;
+  float a = vA * (exp(-r2 * 3.2) * 0.85 + 0.15 * (1.0 - r2));
+  if (a < 0.2) discard;
+  vec3 col = mix(vec3(0.64, 1.0, 0.07) * 1.25, t.rgb, smoothstep(0.0, 0.3, vE));
+  gl_FragColor = vec4(col * a, a);
 }`
 
 // ---------------------------------------------------------------- the odometer type
@@ -293,7 +354,7 @@ export function buildCta(portrait: boolean) {
   sGeo.setAttribute('aSt', aSt); sGeo.setAttribute('aCell', aCell); sGeo.setAttribute('aProg', aProg); sGeo.setAttribute('aInt', aInt); sGeo.instanceCount = N
   const base = new Float32Array(N * 4)   // STICKERS HOOK: the laid-out x, y, size, tilt (aSt = base + the visitor's moves)
   const atlas = stickerAtlas(LOGO_PATHS)
-  const sU = { u_atlas: { value: atlas }, u_away: { value: 0 }, u_z: { value: WALL_Z + 0.03 }, u_light: { value: light }, u_cam: { value: new THREE.Vector3() }, u_time: { value: 0 } }
+  const sU = { u_atlas: { value: atlas }, u_morph: { value: 0 }, u_away: { value: 0 }, u_z: { value: WALL_Z + 0.03 }, u_light: { value: light }, u_cam: { value: new THREE.Vector3() }, u_time: { value: 0 } }
   const sMat = new THREE.ShaderMaterial({ vertexShader: ST_VERT, fragmentShader: ST_FRAG, toneMapped: false, fog: false, side: THREE.DoubleSide, uniforms: { ...sU, u_shadow: { value: 0 } } })
   const sShadowMat = new THREE.ShaderMaterial({ vertexShader: ST_VERT, fragmentShader: ST_FRAG, toneMapped: false, fog: false, transparent: true, depthWrite: false, uniforms: { ...sU, u_shadow: { value: 1 } } })
   const stickers = new THREE.Mesh(sGeo, sMat); stickers.frustumCulled = false; stickers.renderOrder = -4
@@ -316,6 +377,31 @@ export function buildCta(portrait: boolean) {
     return x1 > x0 ? [x0, y0, x1, y1] : null
   }
   const stickerShadows = new THREE.Mesh(sGeo, sShadowMat); stickerShadows.frustumCulled = false; stickerShadows.renderOrder = -5
+  // R7.07 #8: the stickers' particle morph (see STM_VERT); lowend caps the grid
+  const MG = settings.TIER === 'low' || LOW_END_GPU ? 16 : 26
+  const mCount = N * MG * MG
+  const mP = new Float32Array(mCount * 4), mR = new Float32Array(mCount * 4)
+  { let sd = 977; const rnd = () => { sd = (sd * 16807) % 2147483647; return sd / 2147483647 }
+    let o = 0
+    for (let i = 0; i < N; i++) for (let y = 0; y < MG; y++) for (let x = 0; x < MG; x++, o++) {
+      mP.set([i, (x + 0.15 + 0.7 * rnd()) / MG, (y + 0.15 + 0.7 * rnd()) / MG, 1.15 / MG], o * 4)
+      mR.set([rnd(), rnd(), rnd(), rnd()], o * 4)
+    } }
+  const mGeo = new THREE.BufferGeometry()
+  mGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(mCount * 3), 3))
+  mGeo.setAttribute('aP', new THREE.BufferAttribute(mP, 4)); mGeo.setAttribute('aR', new THREE.BufferAttribute(mR, 4))
+  const mU = { u_atlas: sU.u_atlas, u_k: sU.u_morph, u_away: sU.u_away, u_z: sU.u_z, u_time: sU.u_time, u_px: { value: 800 },
+    u_st: { value: Array.from({ length: 6 }, () => new THREE.Vector4()) }, u_cell: { value: Array.from({ length: 6 }, (_, i) => new THREE.Vector2(i % 3, 1 - Math.floor(i / 3))) } }
+  const mMat = new THREE.ShaderMaterial({ vertexShader: STM_VERT, fragmentShader: STM_FRAG, toneMapped: false, fog: false, transparent: true, depthWrite: false,
+    blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, uniforms: mU })
+  const morphPts = new THREE.Points(mGeo, mMat); morphPts.frustumCulled = false; morphPts.renderOrder = -3; morphPts.visible = false
+  const dbs = new THREE.Vector2()
+  morphPts.onBeforeRender = (r, _s, cam) => {
+    r.getDrawingBufferSize(dbs)
+    const pc = cam as THREE.PerspectiveCamera
+    mU.u_px.value = dbs.y / (2 * Math.tan(((pc.fov || 50) * Math.PI) / 360)) / Math.max(1e-3, pc.zoom ? 1 / pc.zoom : 1)
+    for (let i = 0; i < Math.min(6, N); i++) mU.u_st.value[i].set(aSt.getX(i), aSt.getY(i), aSt.getZ(i), aSt.getW(i))
+  }
   // type + its shadow
   const tU = { u_atlas: { value: null as THREE.Texture | null }, u_time: { value: 0 }, u_em: { value: 1 }, u_gap: { value: 0.9 }, u_still: { value: browser.reducedMotion ? 1 : 0 }, u_enter: { value: browser.reducedMotion ? 1 : 0 }, u_off: { value: new THREE.Vector2() }, u_c: { value: new THREE.Vector2() }, u_desc: { value: 0.55 } }
   const tMat = new THREE.ShaderMaterial({ vertexShader: TX_VERT, fragmentShader: TX_FRAG, toneMapped: false, fog: false, transparent: true, depthWrite: false,
@@ -331,7 +417,7 @@ export function buildCta(portrait: boolean) {
   // depth: it lives outside the scene graph in its own root (placed at the journey origin by the stage)
   const typeRoot = new THREE.Group()
   typeRoot.add(type)
-  group.add(wall, stickerShadows, stickers, typeShadow)
+  group.add(wall, stickerShadows, stickers, morphPts, typeShadow)
 
   let built = false
   const buildType = () => {
@@ -469,7 +555,11 @@ export function buildCta(portrait: boolean) {
   }
   /** R6.89 (option C): as the footer comes up the type glides (dy, world units) and eases to its settled size (s); t = 0..1 */
   let footDy = 0, footS = 1, footT = 0, typeT = 0, lastT = -1
-  const setFoot = (dy: number, s: number, ft: number, away = 0) => { footDy = dy; footS = s; footT = ft; sU.u_away.value = away }
+  const setFoot = (dy: number, s: number, ft: number, away = 0, morph = 0) => {
+    footDy = dy; footS = s; footT = ft; sU.u_away.value = away
+    // R7.07 #8: the stickers leave (and on the way back up return) as the Shade DS particle morph, never a pop
+    sU.u_morph.value = morph; morphPts.visible = morph > 0.001 && morph < 0.999; stickers.visible = stickerShadows.visible = morph < 0.999
+  }
   /** the type's anchor (first line's slot origin) and its em, before the footer's glide (the stage plans the glide from them) */
   const typeAnchor = () => ({ y: typeY, em: lay.em, top: typeY + 1.05 * lay.em, z: lay.textZ })
   // STICKERS HOOK: drag / peel / keyboard (stickerInteract.ts), bound to the real camera by the stage

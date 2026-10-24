@@ -3,6 +3,7 @@ import { audio } from '../../services/audio'
 import { scroll } from '../../services/scroll'
 import { Logo } from '../../assets/logo/Logo'
 import { bindInk } from '../../services/inkButton'
+import { scrollHost } from '../../services/scrollHost'
 const go = (id: string) => { scroll.scrollTo('#' + id, { duration: 2 }); audio.swell(true) } // original logo click (Shifat 9:53: keep og click)
 // R6.89 (Shifat Oct 23 3:43 AM "No need double click to trigger"): the logo no longer opens the gift (the footer's gift sticker does)
 
@@ -87,9 +88,9 @@ export function Header() {
     }
     const run = () => { raf = 0; const t = tone(Math.max(8, Math.min(60, innerHeight * 0.05))); if (html.dataset.bg !== t) html.dataset.bg = t }
     const on = () => { if (!raf) raf = requestAnimationFrame(run) }
-    run(); addEventListener('scroll', on, { passive: true }); addEventListener('resize', on)
+    run(); scrollHost.target().addEventListener('scroll', on, { passive: true }); addEventListener('resize', on)
     const iv = window.setInterval(on, 400)   // the virtual scroller moves the page without native scroll events
-    return () => { removeEventListener('scroll', on); removeEventListener('resize', on); clearInterval(iv); if (raf) cancelAnimationFrame(raf) }
+    return () => { scrollHost.target().removeEventListener('scroll', on); removeEventListener('resize', on); clearInterval(iv); if (raf) cancelAnimationFrame(raf) }
   }, [])
   return (
     <header className="header">

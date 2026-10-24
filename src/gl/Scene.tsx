@@ -34,6 +34,8 @@ import { journey } from './stages/journey/journeyState'
 import { Spring, Spring3 } from '../core/spring'
 import { GpuFrameTimer } from './systems/perfGovernor' // SHARP HOOK: the governor's GPU frame timer
 import { installShaderGuard, ShaderGuard } from './systems/shaderGuard'
+import { scrollHost } from '../services/scrollHost'
+import { applyRenderScale } from './renderScale'
 
 // PRELOAD: code-split per scene. The hero is in this chunk; each later stage is its own chunk, mounted and
 // shader-warmed when its block enters the ±1 window around the current block (LaterStages below).
@@ -168,6 +170,7 @@ function Renderer() {
     // 'Say hi on X' pill, which sits ~20 px under its feet. The curtain lifts rigidly again; the slab is no longer empty
     // because the CTA scene now keeps drawing through the runway, Contact.tsx)
     { const cam = camera as THREE.PerspectiveCamera; if (cam.view && cam.view.enabled) cam.clearViewOffset() }
+    applyRenderScale(gl, size.width, size.height, wrapFade.want || !!engine.grab) // R7.07 #10: crisp at rest, zero re-allocation
     sys.chain.render(dt)
     if (wrapFade.want) wrapFade.grab(gl.domElement)
     if (engine.grab) { const g = engine.grab; engine.grab = null; g(gl.domElement) }   // R6.83 GIFT: the gift's blurred still   // W21: the loop wrap freezes this exact frame (services/wrapFade.ts)
@@ -603,7 +606,7 @@ export function Scene() {
         const back = Number(sessionStorage.getItem('st-gl-scroll') || 0); sessionStorage.removeItem('st-gl-scroll')
         if (back > 0) setTimeout(() => (window as any).__scroll?.scrollTo(back, { immediate: true }), 1800)
         const rec = ((window as any).__glRecovery = { losses: 0, action: '', lastLossAt: Number(sessionStorage.getItem('st-gl-loss-at') || 0) })
-        const saveScroll = () => sessionStorage.setItem('st-gl-scroll', String(Math.round(((window as any).__props?.scroll as number) || window.scrollY || 0)))
+        const saveScroll = () => sessionStorage.setItem('st-gl-scroll', String(Math.round(((window as any).__props?.scroll as number) || scrollHost.y() || 0)))
         el.addEventListener('webglcontextlost', (e) => {
           e.preventDefault(); rec.losses++
           H.classList.add('gl-lost')

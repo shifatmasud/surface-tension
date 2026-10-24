@@ -190,7 +190,7 @@ export function createStickerInteraction(c: Ctx): StickerInteraction {
     }
     const ppu = screenOf(i, c.base[i * 4] + S[i].tx, c.base[i * 4 + 1] + S[i].ty)
     const r = s * R_FACE * ppu                                   // the die-cut face radius in pixels
-    const pad = r + 12, W = innerWidth, H = innerHeight, m = r + 6 + parallax()
+    const pad = r + 12, W = props.width, H = props.height, m = r + 6 + parallax()
     const over = (x: number, y: number) => {   // overlap score: padded-box intersection area + a dominant off-screen term
       let a = 0
       for (const R of rects) {
@@ -403,7 +403,7 @@ export function createStickerInteraction(c: Ctx): StickerInteraction {
     // layout reads only when the page actually moved (scroll, resize, the footer curtain), never per frame at rest
     if (active) {
       const host = canvasHost()
-      const key = `${Math.round(props.scroll)}|${innerWidth}|${innerHeight}|${host?.style.transform ?? ''}`
+      const key = `${Math.round(props.scroll)}|${props.width}|${props.height}|${host?.style.transform ?? ''}`
       if (key !== rectKey && host && mounted) {
         rectKey = key
         const r = host.getBoundingClientRect(); host0.left = r.left; host0.top = r.top - (FOOT_MODE ? journey.lift || 0 : 0); host0.width = r.width; host0.height = r.height   // FOOTER MOCKUP: the in-frame curtain

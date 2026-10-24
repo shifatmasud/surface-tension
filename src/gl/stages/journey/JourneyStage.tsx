@@ -21,6 +21,7 @@ import { buildTunnelBlur } from './tunnelBlur' // TUNNEL DRAMA: half-res zoom bl
 const OLDT = typeof location !== 'undefined' && /[?&]oldtrans/.test(location.search) // R7.04 QA: ?oldtrans = 7.03 transitions
 
 // R7.05 GROUND: ?oldground = the 7.04 land during the descent (A/B)
+const STK_OLD = typeof location !== 'undefined' && /[?&]stkold/.test(location.search) // R7.07 #8 QA: the 7.06 sticker lift-away
 const OLD_GROUND = typeof location !== 'undefined' && /[?&]oldground/.test(location.search)
 const _tN = new THREE.Color(0.1, 0.17, 0.3), _tD = new THREE.Color(1.0, 0.7, 0.55)
 const _hz = new THREE.Color(), _hzA = new THREE.Color(), _hzB = new THREE.Color()
@@ -44,6 +45,7 @@ import { heroPass } from '../../post/heroPass' // R6.87 SPLIT
 import { SPLIT } from '../../quality'
 import { CrewLayer } from './crewLayer'
 import { audio } from '../../../services/audio' // W29 R6.74: mute the primed cue calls
+import { viewport } from '../../../core/viewport'
 
 /** Where the stage lives in the main world (the pool owns the origin). */
 export const JOURNEY_ORIGIN = new THREE.Vector3(200, 0, 0)
@@ -102,7 +104,7 @@ export function JourneyStage(): JSX.Element {
       active: () => journey.active && S.cta.type.visible && S.cta.group.visible,
       // the scissor for the full-density pass: the type's box projected to the screen (CSS px), plus a trail margin
       box: () => {
-        const r = S.cta.typeRect(), W = innerWidth, H = innerHeight
+        const r = S.cta.typeRect(), W = props.width, H = props.height
         let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9
         for (let i = 0; i < 4; i++) {
           v.set((i & 1 ? r.x1 : r.x0) + JOURNEY_ORIGIN.x, (i & 2 ? r.y1 : r.y0) + JOURNEY_ORIGIN.y, r.z + JOURNEY_ORIGIN.z).project(mainCam)
@@ -378,7 +380,7 @@ export function JourneyStage(): JSX.Element {
         // under the header, the crewmate above the button; where the two cannot both fit above the footer the type keeps its
         // place under the header and the feet go behind the curtain). One cubic of scroll: starts at the page's own speed,
         // lands with zero speed, never overshoots. ?ctaglide brings back the R6.89 option-C settle (with its scale).
-        const ft = fh > 0 && g > 0.999 ? Math.min(1, lift / fh) : 0
+        const ft = fh > 0 && g > 0.999 ? Math.min(1, lift / fh) : 0; (window as any).__ctaFt = ft
         if (ft > 0) {
           const tanH = Math.tan((O.fov * Math.PI) / 360), cz = O.camPos.z, cy = O.camPos.y
           const hAt = (z: number) => 2 * Math.max(0.01, cz - z) * tanH                 // world units per screen height at depth z
@@ -386,7 +388,7 @@ export function JourneyStage(): JSX.Element {
           const A = S.cta.typeAnchor()
           const top0 = fr(A.top, A.z), feetY = L.crewY - CREW_CENTER_Y * L.crewScale, bot0 = fr(feetY, L.crewZ)
           // R6.89: the heroes settle above the CTA button, which lifts off the footer with the page
-          const edge = 1 - fh / H, bot1 = edge - Math.max(0.06, ((journey.pillRes || 0) + 6) / H), span = Math.max(0.05, bot0 - top0)
+          const edge = (Math.min(H, viewport.vis || H) - fh) / H, bot1 = edge - Math.max(0.06, ((journey.pillRes || 0) + 6) / H), span = Math.max(0.05, bot0 - top0)
           const hdr = CTA_GLIDE ? (H > props.width ? 0.12 : 0.095) : (H > props.width ? 0.085 : 0.075)   // R6.92b B: the type may sit closer under the header (full size)
           let s: number, top1: number
           if (CTA_GLIDE) { s = Math.min(0.85, (bot1 - hdr) / span); top1 = bot1 - s * span }   // R6.89: clear air under the header too
@@ -406,7 +408,7 @@ export function JourneyStage(): JSX.Element {
           }
           const ty0 = fr(A.y, A.z)
           // the stickers ride the curtain and lift on away past the top (the lower pair would otherwise end under the type)
-          S.cta.setFoot(-dFrac(ty0) * hAt(A.z), sc, ft, ft * 0.8 * hAt(WALL_Z))   // R6.89: far enough that no sticker edge is left at the top (1440 check)
+          S.cta.setFoot(-dFrac(ty0) * hAt(A.z), sc, ft, (STK_OLD ? 0.8 : 0.3) * ft * hAt(WALL_Z), STK_OLD ? 0 : Math.min(1, ft / 0.45))   // R7.07 #8: a gentler lift; the stickers particle-morph out over the first 45 % of the footer (?stkold = 7.06)   // R6.89: far enough that no sticker edge is left at the top (1440 check)
           const cy0 = fr(O.crew.y, O.crew.z)
           O.crew.y -= dFrac(cy0) * hAt(O.crew.z)
           O.crewScale *= sc
@@ -414,7 +416,7 @@ export function JourneyStage(): JSX.Element {
         } else S.cta.setFoot(0, 1, 0)
       }
       S.rimU.u_rim.value = 0.55 * ss(0.3, 0.9, g)
-      S.cta.update(time, cta, O.camPos, p > 0.55)
+      S.cta.update(time, cta, O.camPos, p > 0.55); (window as any).__ctaDbg = { p, cta, ft: (window as any).__ctaFt }
     }
     journey.pose.pos.copy(O.camPos).add(JOURNEY_ORIGIN)
     journey.pose.target.copy(O.camTarget).add(JOURNEY_ORIGIN)

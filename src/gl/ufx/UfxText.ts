@@ -3,6 +3,7 @@ import { SplitText } from 'gsap/SplitText'
 import gsap from 'gsap'
 import { ufx, textMaterial, type UfxItem } from './ufx'
 import { settings } from '../../services/settings'
+import { scrollHost } from '../../services/scrollHost'
 
 gsap.registerPlugin(SplitText)
 const GEO = new THREE.PlaneGeometry(1, 1, 1, 24)
@@ -61,7 +62,7 @@ export function ufxText(el: HTMLElement, opts: { color?: string; sheen?: string;
       el: line, mesh, layer: opts.layer ?? 'under', docTop: 0, docLeft: 0, w: 0, h: 0,
       measure() {
         const rr = line.getBoundingClientRect()
-        it.docTop = rr.top - padY + window.scrollY; it.docLeft = rr.left - padX; it.w = rr.width + padX * 2; it.h = rr.height + padY * 2
+        it.docTop = rr.top - padY + scrollHost.y(); it.docLeft = rr.left - padX; it.w = rr.width + padX * 2; it.h = rr.height + padY * 2
       },
     }
     if (sticky) it.live = () => { const rr = line.getBoundingClientRect(); return { top: rr.top - padY, left: rr.left - padX, w: rr.width + padX * 2, h: rr.height + padY * 2 } }

@@ -30,6 +30,9 @@
   --dur-ui: .6s;
   --dur-fade: .24s;
   --vh: 1vh;
+  /* R7.07 VIEWPORT (Shifat 12:02/12:03): every layout height is N * var(--vu). Base dvh (desktop), vh where dvh is missing;
+     touch phones use svh (one fixed height: Shifat 1:17 PM "100svh"). */
+  --vu: 1vh;
   /* Three sizes only, Inter Regular 400 only: giant display vs tiny labels, no timid middle. */
   --fs-display: clamp(96px, 14vw, 240px);
   --fs-body: clamp(17px, 1.25vw, 20px);
@@ -40,3 +43,7 @@
 @media (max-width: 380px) { :root { --pad-x: 16px; } }
 @media (min-aspect-ratio: 21/9) { :root { --pad-x: 9vw; } }
 html[data-bg='dark'] { --c-fg: var(--c-white); --c-bg: #050506; }
+
+/* R7.07 VIEWPORT: base unit dvh (vh above is the fallback); touch = svh (stable scroll lengths) */
+@supports (height: 1dvh) { :root { --vu: 1dvh; } }
+@supports (height: 1svh) { html.vp-phone { --vu: 1svh; } }   /* phones only (core/viewport.ts PHONE); tablets stay dvh */

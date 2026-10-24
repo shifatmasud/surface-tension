@@ -11,6 +11,7 @@ import { startClock } from './clock'
 import { sections } from './sections'
 import { tilt } from '../services/tilt'
 import { ufx } from '../gl/ufx/ufx'
+import { viewport, readViewport, onViewport } from '../core/viewport'
 import interUrl from '@fontsource-variable/inter/files/inter-latin-wght-normal.woff2?url'
 
 /**
@@ -37,13 +38,14 @@ export const boot = {
     tilt.init()
     startClock()
     const setVh = () => {
-      document.documentElement.style.setProperty('--vh', `${window.innerHeight * 0.01}px`)
-      props.width = window.innerWidth; props.height = window.innerHeight
-      props.useMobileLayout = window.innerWidth <= settings.MOBILE_WIDTH
+      readViewport() // R7.07 VIEWPORT: the stable size (touch: the address bar is not a resize)
+      document.documentElement.style.setProperty('--vh', `${viewport.h * 0.01}px`)
+      props.width = viewport.w; props.height = viewport.h
+      props.useMobileLayout = viewport.w <= settings.MOBILE_WIDTH
     }
     setVh()
     let rt = 0
-    window.addEventListener('resize', () => { setVh(); clearTimeout(rt); rt = window.setTimeout(() => { sections.resize(); ufx.measureAll() }, 120) })
+    onViewport(() => { setVh(); clearTimeout(rt); rt = window.setTimeout(() => { sections.resize(); ufx.measureAll() }, 120) }) // R7.07: real resizes only
     // click on the water drops a big droplet
     window.addEventListener('click', (e) => {
       if (!props.introDone || props.overlayOpen) return

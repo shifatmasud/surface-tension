@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { BloomEffect, EffectComposer, EffectPass, FXAAEffect, KernelSize, Pass, RenderPass, SMAAEffect, SMAAPreset } from 'postprocessing'
-import { GradeEffect, ScreenPaintDistortionEffect } from './effects'
+import { GradeEffect, ScreenPaintDistortionEffect, trailFilterMode } from './effects'
 import { DiveGodRaysPass } from './DiveGodRays'
 import { ClipCompositeEffect } from './ClipComposite'
 import { clip } from '../systems/clip'
@@ -51,7 +51,7 @@ export class PostChain {
   composer: EffectComposer
   entries: Entry[] = []
   grade = new GradeEffect()
-  distortion = new ScreenPaintDistortionEffect()
+  distortion = new ScreenPaintDistortionEffect(trailFilterMode(settings.TIER === 'low' || !!settings.WEAK_GPU)) // R7.07 HI-RES TRAIL
   bloom: BloomEffect
   private signature = -1
   /** PERF HOOK: set once behind the preloader curtain — the next render runs every pass this tier can use, so each
@@ -260,9 +260,9 @@ void main(){
     ud.value += (((window as any).__trailDark ?? wantDark) - ud.value) * kd
     // W23: the stickers keep out of the trail's smear (stickerInteract.ts writes where they sit)
     d('u_stkOn').value = stickerMask.on && !(window as any).__stkSmear ? 1 : 0
-    if (stickerMask.on) { const v = d('u_stk').value as THREE.Vector4[]; for (let i = 0; i < 4; i++) v[i].fromArray(stickerMask.c, i * 4); (d('u_view').value as THREE.Vector2).set(innerWidth, innerHeight) }
+    if (stickerMask.on) { const v = d('u_stk').value as THREE.Vector4[]; for (let i = 0; i < 4; i++) v[i].fromArray(stickerMask.c, i * 4); (d('u_view').value as THREE.Vector2).set(props.width, props.height) }
     // W23: and so does the hero stone (HeroStage.tsx writes where it sits)
-    { const W = window as any; const on = gemMask.on && !W.__gemSmear ? 1 : 0; (d('u_gem').value as THREE.Vector4).set(gemMask.x, gemMask.y, gemMask.r, on); if (on) (d('u_view').value as THREE.Vector2).set(innerWidth, innerHeight) }
+    { const W = window as any; const on = gemMask.on && !W.__gemSmear ? 1 : 0; (d('u_gem').value as THREE.Vector4).set(gemMask.x, gemMask.y, gemMask.r, on); if (on) (d('u_view').value as THREE.Vector2).set(props.width, props.height) }
   }
   render(dt: number) {
     if (this.gl.getContext().isContextLost()) return   // R6.92: nothing to draw into while the context is lost (the loss handler reloads or goes static)

@@ -12,7 +12,7 @@
 .lab .card__media, .lab .card.is-active .card__media, .lab .card:hover .card__media { filter: none; transition: none; }
 /* phone: a slightly narrower slide, so its neighbours peek in at both edges and the arc reads */
 @media (max-width: 812px) {
-  html.slot-on .lab .lab__track .card, .lab .lab__track .card { width: min(72vw, (100vh - var(--lab-top, 0px) - var(--lab-bot, 0px) - 24px) * 1.6); }
+  html.slot-on .lab .lab__track .card, .lab .lab__track .card { width: min(72vw, (calc(100 * var(--vu)) - var(--lab-top, 0px) - var(--lab-bot, 0px) - 24px) * 1.6); }
 }
 /* Shifat 18:52Z, no duplicate labels: with the global text slot on, its "Work · 0n / 03" line is the one count */
 html.slot-on .lab .lab__count { display: none; }

@@ -5,6 +5,7 @@ import { ufx } from '../ufx/ufx'
 import { paintState } from '../quality'
 import { journey } from '../stages/journey/journeyState'
 import type { ScreenPaintDistortionEffect } from './effects'
+import { viewport } from '../../core/viewport'
 const TXT_SPLIT = !/[?&]txtold\b/.test(location.search)   // R7.06
 const TEXT_BEND = /[?&]textbend\b/.test(location.search)   // W21: QA only
 
@@ -26,6 +27,7 @@ uniform sampler2D u_text;
 uniform sampler2D u_screenPaintTexture;
 uniform vec2 u_screenPaintTexelSize;
 uniform float u_amount, u_rgbShift, u_multiplier, u_colorMultiplier, u_shade, u_on;
+uniform float u_fb;     // R7.07: the canvas below the visible bottom (address bar showing), fraction of its height
 uniform float u_lift;   // W28: the footer curtain's lift, fraction of the screen height (footerWorld.ts u_fk)
 ${BLUE_NOISE}
 varying vec2 vUv;
@@ -35,7 +37,7 @@ void main(){
   // curtain inside the frame (footerWorld.ts shifts the picture up by u_fk and draws the footer under the edge), but this
   // pass composites after it, so a beat still rolling out after a jump into the footer was drawn over the footer's own
   // text. It now rides up with the picture and stops at the curtain's edge, as it did when the whole canvas slid (R6.63).
-  if (vUv.y < u_lift) discard;
+  if (vUv.y - u_fb < u_lift) discard;
   vec2 tUv = vec2(vUv.x, vUv.y - u_lift);
   vec4 data = texture2D(u_screenPaintTexture, vUv);
   float weight = (data.z + data.w) * 0.5;
@@ -75,7 +77,7 @@ export class SharpText {
       blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
       blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
       uniforms: {
-        u_text: { value: this.rt.texture }, u_on: { value: 0 }, u_lift: { value: 0 },
+        u_text: { value: this.rt.texture }, u_on: { value: 0 }, u_lift: { value: 0 }, u_fb: { value: 0 },
         u_screenPaintTexture: d('u_screenPaintTexture'), u_screenPaintTexelSize: d('u_screenPaintTexelSize'),
         u_amount: d('u_amount'), u_rgbShift: d('u_rgbShift'), u_multiplier: d('u_multiplier'), u_colorMultiplier: d('u_colorMultiplier'), u_shade: d('u_shade'),
         u_blueNoise: shared.u_blueNoise as any, u_blueNoiseOffset: shared.u_blueNoiseOffset as any, u_blueNoiseSize: shared.u_blueNoiseSize as any,
@@ -166,6 +168,7 @@ export class SharpText {
     this.mat.uniforms.u_on.value = TEXT_BEND && props.look.paintAmount > 0 && !paintState.asleep ? 1 : 0
     const lift = Math.max(0, journey.lift || 0)
     this.mat.uniforms.u_lift.value = lift / Math.max(1, this.h)
+    this.mat.uniforms.u_fb.value = Math.max(0, this.h - (viewport.vis || this.h)) / Math.max(1, this.h)   // R7.07
     if (b && lift > 0) b = { x: b.x, y: b.y - lift, w: b.w, h: b.h }   // the scissor rides up with the type
     gl.setRenderTarget(null)
     if (b) { gl.setScissorTest(true); gl.setScissor(b.x, this.h - b.y - b.h, b.w, b.h) }

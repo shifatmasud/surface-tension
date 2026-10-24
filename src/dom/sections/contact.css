@@ -1,25 +1,25 @@
 /* STRUCTURE v2 — the CTA: a plain black wall, huge flat white type (drawn in GL behind the crewmate from these DOM
    line boxes; the DOM type stays for screen readers, selection and the no-GL page), stickers, the flat CTA. */
-.contact { height: 200vh; padding: 0; color: #fff; }
+.contact { height: calc(200 * var(--vu)); padding: 0; color: #fff; }
 .contact__inner { display: block; }
-.contact__grid { position: absolute; left: var(--pad-x); right: var(--pad-x); bottom: 5vh; display: grid; grid-template-columns: repeat(var(--grid-cols), minmax(0, 1fr)); column-gap: var(--grid-gap); align-items: end; pointer-events: none; }
+.contact__grid { position: absolute; left: var(--pad-x); right: var(--pad-x); bottom: calc(5 * var(--vu)); display: grid; grid-template-columns: repeat(var(--grid-cols), minmax(0, 1fr)); column-gap: var(--grid-gap); align-items: end; pointer-events: none; }
 .contact__title { grid-column: 1 / -1; margin: 0 0 0 -0.055em; font-size: calc(var(--fs-display) * 1.12); font-weight: 400; letter-spacing: -0.065em; line-height: .88; color: #fff; }
 .contact__line { display: block; white-space: nowrap; }
 html.cta-gl .contact__title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 /* W18: the CTA row sits centred under the crewmate (the stickers frame the corners) */
 html.cta-gl .contact__row { grid-column: 1 / -1; justify-self: center; }
-.contact__row { grid-column: 9 / -1; justify-self: end; pointer-events: auto; margin-bottom: 0.6vh; }
+.contact__row { grid-column: 9 / -1; justify-self: end; pointer-events: auto; margin-bottom: calc(0.6 * var(--vu)); }
 .contact__cta { display: flex; flex-direction: column; gap: 14px; align-items: stretch; width: clamp(280px, 24vw, 420px); }
 .contact .big-btn { background: #fff; color: #000; }
 .contact .big-btn i { background: #000; color: #fff; }
-html.no-gl .contact { height: auto; min-height: 100vh; background: #000; }
-html.no-gl .contact__inner { position: relative; height: auto; min-height: 100vh; }
+html.no-gl .contact { height: auto; min-height: calc(100 * var(--vu)); background: #000; }
+html.no-gl .contact__inner { position: relative; height: auto; min-height: calc(100 * var(--vu)); }
 @media (min-width: 1200px) and (min-aspect-ratio: 13/10) {
   .contact__title { grid-column: 1 / span 8; }
   .contact__row { grid-row: 1; }
 }
 @media (max-width: 1199px), (max-aspect-ratio: 13/10) {
-  .contact__grid { row-gap: 4vh; }
+  .contact__grid { row-gap: calc(4 * var(--vu)); }
   .contact__row { grid-column: 1 / -1; justify-self: stretch; }
   .contact__cta { width: 100%; max-width: 460px; }
 }
@@ -27,8 +27,8 @@ html.no-gl .contact__inner { position: relative; height: auto; min-height: 100vh
 
 /* sticky footer: the CTA (canvas + DOM) slides up over it like a curtain; it never moves */
 .footer-spacer { height: calc(var(--footer-h) + var(--loop-runway) + 4px); }  /* W19 (Shifat 19:49Z "must scroll longer to loop back to top"): the reveal, then a runway where the footer holds and the bar fills */
-:root { --loop-runway: 100vh; }
-:root { --footer-h: 50vh; }   /* W19 (Shifat 19:06Z): half the viewport, not full */
+:root { --loop-runway: calc(100 * var(--vu)); }
+:root { --footer-h: calc(50 * var(--vu)); }   /* W19 (Shifat 19:06Z): half the viewport, not full */
 @media (max-width: 760px) { :root { --footer-h: 50svh; --loop-runway: 120svh; } .site-footer { padding-top: var(--s5, 32px); } .site-footer__top { row-gap: var(--s3, 16px); } }
 .site-footer { position: fixed; left: 0; right: 0; bottom: 0; height: var(--footer-h); z-index: -1; background: var(--c-paper); color: var(--c-ink);
   display: flex; flex-direction: column; justify-content: space-between; padding: calc(var(--s7) * 0.7) var(--pad-x) var(--pad-y); font-size: var(--fs-small); }
@@ -41,6 +41,7 @@ html.no-gl .contact__inner { position: relative; height: auto; min-height: 100vh
 @media (prefers-reduced-motion: reduce) { .site-footer .overscroll__fill { transition: none; } }
 .site-footer .overscroll__label { margin: 0; font-size: var(--fs-small); line-height: 1.45; }
 html:not(.is-lifted) .site-footer { visibility: hidden; }
+html.vp-phone .site-footer { bottom: auto; top: calc(var(--app-h, 100svh) - var(--footer-h)); }   /* R7.07: phones anchor the footer to the canvas's 100svh bottom, never to a moving screen edge */
 .site-footer__top { display: grid; grid-template-columns: repeat(var(--grid-cols), minmax(0, 1fr)); column-gap: var(--grid-gap); row-gap: var(--s4); align-items: start; }
 .site-footer__name { grid-column: 1 / span 5; margin: 0; font-size: var(--fs-body); line-height: 1.3; }
 .site-footer__name span { color: var(--c-silver-3); }
@@ -59,7 +60,7 @@ html.no-gl .footer-spacer { display: none; }
 #canvas { will-change: transform; }
 
 /* stickers (scene objects on the CTA wall; the white die-cut edge is the vinyl's paper margin, not a CSS border) */
-.stickers { position: absolute; inset: 9vh var(--pad-x) 40vh; pointer-events: none; z-index: 2; }
+.stickers { position: absolute; inset: calc(9 * var(--vu)) var(--pad-x) calc(40 * var(--vu)); pointer-events: none; z-index: 2; }
 .sticker { position: absolute; left: var(--x); top: var(--y); pointer-events: auto; padding: 7px; background: #fff; color: var(--fg); font: 400 var(--fs-body)/1 var(--font); letter-spacing: -0.02em;
   cursor: grab; touch-action: none; transform-style: preserve-3d; -webkit-tap-highlight-color: transparent; }
 .sticker:active { cursor: grabbing; }
@@ -82,8 +83,8 @@ html.no-gl .footer-spacer { display: none; }
 .sticker--star .sticker__curl { display: none; }
 .sticker--s { font-size: var(--fs-small); }
 .sticker--l.sticker--drop { width: 8em; height: 8em; }
-@media (max-width: 812px) { .stickers { inset: 11vh var(--pad-x) 46vh; } .sticker { left: var(--mx); top: var(--my); } .sticker--wide-only { display: none; } .sticker { font-size: var(--fs-small); } .sticker--l.sticker--drop { width: 6.6em; height: 6.6em; } }
-html.no-gl .stickers { position: relative; inset: auto; height: 50vh; }
+@media (max-width: 812px) { .stickers { inset: calc(11 * var(--vu)) var(--pad-x) calc(46 * var(--vu)); } .sticker { left: var(--mx); top: var(--my); } .sticker--wide-only { display: none; } .sticker { font-size: var(--fs-small); } .sticker--l.sticker--drop { width: 6.6em; height: 6.6em; } }
+html.no-gl .stickers { position: relative; inset: auto; height: calc(50 * var(--vu)); }
 
 /* W19 (Shifat 20:30Z m:f9db1b48 "center it, a bit bigger"): the one CTA sits on the page's centre line at every size and is
    ~18 % bigger (height, padding, type, arrow), still white with the black invert on hover */
@@ -101,7 +102,7 @@ html.no-gl .stickers { position: relative; inset: auto; height: 50vh; }
    It never drifts while the CTA is on screen; when the scene slides up to uncover the footer it rides the CTA's bottom
    edge, so it never sits over the footer's text */
 .contact__inner { position: sticky; }
-.contact__cta { position: absolute; left: 50%; bottom: calc(clamp(28px, 6vh, 64px) + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); width: auto; z-index: 2; }
+.contact__cta { position: absolute; left: 50%; bottom: calc(clamp(28px, calc(6 * var(--vu)), 64px) + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); width: auto; z-index: 2; }
 @media (max-width: 760px) { .contact__cta { width: auto; max-width: calc(100vw - 40px); bottom: calc(clamp(24px, 5svh, 48px) + env(safe-area-inset-bottom, 0px)); } }
 
 /* W19 (Shifat 20:50Z m:a3a8c617, phone only): the CTA label stays on ONE line */
@@ -109,7 +110,7 @@ html.no-gl .stickers { position: relative; inset: auto; height: 50vh; }
 
 /* W21 (scorer-r610 side note): on the no-GL page the project list rides inside the pinned CTA box, so the box grew up
    over the centred headline. There the headline stands clear above the box (button + list), and the list centres. The no-GL CTA is plain flow: headline, then the button and the list under it. */
-html.no-gl .contact__grid { position: relative; left: auto; right: auto; bottom: auto; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 5vh; padding: 18vh var(--pad-x) 10vh; }
+html.no-gl .contact__grid { position: relative; left: auto; right: auto; bottom: auto; min-height: calc(100 * var(--vu)); display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: calc(5 * var(--vu)); padding: calc(18 * var(--vu)) var(--pad-x) calc(10 * var(--vu)); }
 html.no-gl .contact__cta { position: static; transform: none; }
 html.no-gl .a11y-work ul { justify-content: center; }
 
@@ -162,3 +163,7 @@ html.stk-gl:not(.no-gl):not(.gl-lost) .gift-sticker__cv { opacity: 0; }   /* R6.
 .gift-sticker:focus-visible { outline: 2px solid #ff2e93; outline-offset: 6px; }   /* R6.89: the sticker's own hot pink */
 @media (max-width: 760px) { .gift-sticker { width: 76px; height: 76px; border-radius: 22px; right: calc(var(--pad-x) + 2px); bottom: calc(var(--s5, 32px) + 96px); } }
 html.no-gl .gift-sticker { visibility: visible; }
+
+/* R7.07 #9: the pill is fixed to the screen and placed per frame with the WebGL picture (Contact.tsx PILL_FIXED); off screen until the first frame places it */
+html.pill-fixed .contact__cta { position: fixed; transform: translateX(-50%) translate3d(0, 200vh, 0); bottom: calc(5 * var(--vu) + clamp(28px, calc(6 * var(--vu)), 64px) + env(safe-area-inset-bottom, 0px)); }   /* + the grid's own 5vu (it was the pill's box) */
+@media (max-width: 760px) { html.pill-fixed .contact__cta { bottom: calc(5 * var(--vu) + clamp(24px, 5svh, 48px) + env(safe-area-inset-bottom, 0px)); } }

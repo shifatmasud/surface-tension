@@ -9,6 +9,19 @@ html.vs-hold { overflow: hidden; }   /* R6.81: the 0.8 s hold at the top after a
 /* an open project card keeps the page layout as it is (overflow hidden on html breaks the lab's sticky track and
    removes the scrollbar, so the slide the card came from would jump); the overlay itself swallows touch + wheel */
 html.overlay-open.vs-stopped { overflow: visible; }
+/* R7.07 PHONE SCROLLER (Shifat 1:20 PM "Don't let phone address bar hide"; 2:52 PM "Root div should be 100 svh"): on phones
+   html and body are a fixed 100svh that never scrolls, and #root is the page's one scroller (services/scrollHost.ts), so the
+   browser's address bar stays put and pull-to-refresh is off.
+   Why the bar still hid (2:52 PM): Chrome promotes a scroller that fills the viewport to the "implicit root scroller" and
+   moves the bar for it as if the document scrolled. Chromium's RootScrollerController::IsValidImplicit refuses an element
+   whose containing-block ancestor clips overflow (ShouldClipOverflowAlongEitherAxis; the LayoutView itself is exempt):
+   body is overflow:hidden and html is not overflow:visible, so body's overflow is NOT propagated to the viewport and body
+   really clips: #root can never be promoted. (The 1 px trick failed: FillsViewport allows 1 px at fractional DPR, his 1.75.) */
+html.vp-inner, html.vp-inner.overlay-open.vs-stopped { height: 100vh; height: 100svh; overflow: hidden; overscroll-behavior: none; }
+html.vp-inner body { height: 100vh; height: 100svh; margin: 0; overflow: hidden; overscroll-behavior: none; }
+html.vp-inner #root { height: 100vh; height: 100svh; overflow-x: hidden; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; overscroll-behavior-x: none; }
+html.vp-phone.is-lifted { background-color: #e2eaef; }   /* under the footer water, should anything ever show below the canvas */
+html.vp-inner.vs-stopped #root, html.vp-inner.vs-hold #root { overflow-y: hidden; }
 .overlay { overscroll-behavior: contain; touch-action: none; }
 .overlay__panel { touch-action: pan-y; }
 html { background: var(--c-paper); }
@@ -24,6 +37,16 @@ button { font: inherit; color: inherit; }
 #canvas { position: fixed; inset: 0; z-index: 0; opacity: 0; transition: opacity var(--dur-in) var(--ease); }
 html.is-ready #canvas { opacity: 1; }
 html.no-gl #canvas { display: none; }
+/* R7.07 VIEWPORT: on touch the fixed 3D canvas has one stable height (the large viewport, set by core/viewport.ts), so the
+   address bar sliding never resizes it (no re-allocation) and never leaves a gap when it hides */
+/* R7.07 (Shifat 12:03 "Dvh looked best in desktop"; 3:11 PM "Desktop must have 100 dvh"): everything that is not a phone
+   (desktop, his PC, tablets) is sized by 100dvh (vh first for old browsers): the page boxes' min-height and every
+   full-screen fixed layer, top-anchored. On a desktop 100dvh is the window, so the picture is the same pixels. */
+html:not(.vp-phone), html:not(.vp-phone) body, html:not(.vp-phone) #root { min-height: 100vh; min-height: 100dvh; }
+html:not(.vp-phone) #canvas, html:not(.vp-phone) canvas.ink, html:not(.vp-phone) .gift, html:not(.vp-phone) .wrap-fade,
+html:not(.vp-phone) .intro, html:not(.vp-phone) .overlay, html:not(.vp-phone) .menu-scrim { top: 0; bottom: auto; height: 100vh; height: 100dvh; }
+html.vp-phone #canvas, html.vp-phone canvas.ink, html.vp-phone .gift { top: 0; bottom: auto; height: 100vh; height: 100svh; }   /* phones: one fixed 100svh */
+html.vp-phone #canvas { overflow: hidden; }   /* R7.07 #10: a moving frame's sub-rectangle is scaled up by CSS (gl/renderScale.ts) */
 #root { position: relative; z-index: 1; }
 main { position: relative; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -86,7 +109,7 @@ html[data-bg='dark'] .pill { background: rgba(30, 31, 34, .55);  color: #fff; }
 @media (hover: none) { .cursor { display: none; } }
 
 /* water level (scroll progress) */
-.level { position: fixed; right: calc(var(--pad-x) * .35); top: 50%; height: 34vh; width: 2px; transform: translateY(-50%); z-index: 40; border-radius: 2px; background: rgba(0,0,0,.08); overflow: hidden; }
+.level { position: fixed; right: calc(var(--pad-x) * .35); top: 50%; height: calc(34 * var(--vu)); width: 2px; transform: translateY(-50%); z-index: 40; border-radius: 2px; background: rgba(0,0,0,.08); overflow: hidden; }
 html[data-bg='dark'] .level { background: rgba(255,255,255,.12); }
 .level__fill { position: absolute; left: 0; right: 0; bottom: 0; height: 100%; transform-origin: 50% 100%; background: currentColor; }
 .level__tick { position: absolute; left: -3px; width: 8px; height: 1px; background: currentColor; opacity: .35; }
@@ -108,11 +131,11 @@ html[data-bg='dark'] .level { background: rgba(255,255,255,.12); }
 
 /* ── sections ───────────────────────────────────────── */
 .section { position: relative; padding: 0 var(--pad-x); }
-.sticky { position: sticky; top: 0; height: 100vh; height: 100svh; overflow: hidden; }
+.sticky { position: sticky; top: 0; height: 100vh; height: calc(100 * var(--vu)); overflow: hidden; }
 .eyebrow { font-size: var(--fs-small); font-weight: 400; letter-spacing: .08em; text-transform: uppercase; color: var(--c-silver-3); display: inline-flex; gap: 10px; align-items: center; }
 .eyebrow::before { content: ''; width: 18px; height: 1px; background: currentColor; }
 
-.hero { height: 250vh; }
+.hero { height: calc(250 * var(--vu)); }
 .hero__inner { display: flex; flex-direction: column; justify-content: flex-end; padding: 0 0 var(--s5); pointer-events: none; }
 .hero__title { grid-column: 1 / span 8; margin: 0 0 0 -0.055em; font-size: var(--fs-display); line-height: .86; font-weight: 400; letter-spacing: -0.065em; color: var(--c-black); }
 .hero__row { display: grid; grid-template-columns: repeat(var(--grid-cols), minmax(0, 1fr)); column-gap: var(--grid-gap); align-items: last baseline; }
@@ -123,7 +146,7 @@ html[data-bg='dark'] .level { background: rgba(255,255,255,.12); }
 @keyframes hint { 0%,100% { transform: translateY(-4px); opacity: .4 } 50% { transform: translateY(4px); opacity: 1 } }
 
 html.gl-cards .card__dom { visibility: hidden; }
-.systems { min-height: 120vh; padding-top: 18vh; padding-bottom: 12vh; display: grid; grid-template-columns: repeat(var(--grid-cols), 1fr); gap: var(--grid-gap); align-items: center; }
+.systems { min-height: calc(120 * var(--vu)); padding-top: calc(18 * var(--vu)); padding-bottom: calc(12 * var(--vu)); display: grid; grid-template-columns: repeat(var(--grid-cols), 1fr); gap: var(--grid-gap); align-items: center; }
 .systems__copy { grid-column: 1 / span 5; }
 .systems__copy h2 { font-size: var(--fs-body); letter-spacing: -0.05em; line-height: 1; font-weight: 400; margin: 18px 0 22px; }
 .systems__copy p { font-size: var(--fs-body); letter-spacing: -0.015em; color: var(--c-graphite); max-width: 34ch; margin: 0 0 14px; }
@@ -133,8 +156,8 @@ html.gl-cards .card__dom { visibility: hidden; }
 @media (max-width: 812px) { .systems__copy, .systems__tray { grid-column: 1 / -1; } }
 
 
-.journey { height: 720vh; }  /* W19 (Shifat 20:42Z m:7c736af5 "Crewmate tunnel scroll section must be longer"): 420 → 720vh (1.71×), same pacing curve (progress is normalised), same speed per notch */  /* SECTION CUT (Shifat 15:41Z): 600 → 420vh, every beat kept (progress is normalised) */
-.journey__inner { display: flex; align-items: flex-start; padding-top: 16vh; pointer-events: none; }
+.journey { height: calc(720 * var(--vu)); }  /* W19 (Shifat 20:42Z m:7c736af5 "Crewmate tunnel scroll section must be longer"): 420 → calc(720 * var(--vu)) (1.71×), same pacing curve (progress is normalised), same speed per notch */  /* SECTION CUT (Shifat 15:41Z): 600 → calc(420 * var(--vu)), every beat kept (progress is normalised) */
+.journey__inner { display: flex; align-items: flex-start; padding-top: calc(16 * var(--vu)); pointer-events: none; }
 .journey__cap { font-size: var(--fs-body); font-weight: 400; letter-spacing: -0.02em; color: #fff; opacity: .8; }
 
 .big-btn { display: inline-flex; align-items: center; justify-content: space-between; gap: 18px; height: 64px; padding: 0 10px 0 26px; border-radius: 999px; background: var(--c-ink); color: #fff; text-decoration: none; font-size: var(--fs-body); font-weight: 400; letter-spacing: -0.02em; max-width: 420px; border: 0; cursor: pointer; }
@@ -155,7 +178,7 @@ html.gl-cards .card__dom { visibility: hidden; }
    white title >= 10:1, #d6d9de text >= 7:1 (measured on the 1440/390 frames). */
 .overlay__bg { position: absolute; inset: 0; background: rgba(6, 8, 10, .34); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
 .overlay { perspective: 1400px; }
-.overlay__panel { position: relative; width: min(500px, 100%); max-height: 88vh; border-radius: 28px; color: #fff; padding: 12px 12px 22px; display: flex; flex-direction: column;
+.overlay__panel { position: relative; width: min(500px, 100%); max-height: calc(88 * var(--vu)); border-radius: 28px; color: #fff; padding: 12px 12px 22px; display: flex; flex-direction: column;
   transform: rotateX(var(--tx, 0deg)) rotateY(var(--ty, 0deg)); transform-style: preserve-3d; transition: transform var(--dur-ui) var(--ease); animation: card-float 7s var(--ease-sine) infinite; }
 @keyframes card-float { 0%, 100% { translate: 0 0 } 50% { translate: 0 -6px } }
 .overlay__glass { position: absolute; inset: 0; border-radius: 28px; background: linear-gradient(to bottom, rgba(6,9,14,0) 38%, rgba(6,9,14,.38) 70%), linear-gradient(160deg, rgba(255,255,255,.2), rgba(255,255,255,.08) 48%, rgba(255,255,255,.13)); backdrop-filter: blur(30px) saturate(180%) brightness(.92); -webkit-backdrop-filter: blur(30px) saturate(180%) brightness(.92); clip-path: inset(0 round 28px); }
@@ -190,7 +213,7 @@ canvas.ink { position: fixed; inset: 0; z-index: 69; pointer-events: none; }
 
 /* reduced motion / no-GL: the same content, nothing breaks */
 html.no-gl .hero { height: auto; }
-html.no-gl .hero .sticky { position: relative; height: 100vh; }
+html.no-gl .hero .sticky { position: relative; height: calc(100 * var(--vu)); }
 html.no-gl body { background: var(--c-paper); }
 html.no-gl .poster { position: absolute; inset: 0; background-size: cover; background-position: center; z-index: -1; filter: grayscale(1); }
 
@@ -206,7 +229,7 @@ html.no-gl .poster { position: absolute; inset: 0; background-size: cover; backg
 /* skip link: see the A11Y block at the end of this file */
 
 /* ---- Lab (north-star frame: centred reel = star, giant name bottom-left, small caption right) ---- */
-.lab { height: 280vh; }  /* SECTION CUT: the dive's work tail, 3 slides (was its own 560vh chapter of 5) */
+.lab { height: calc(280 * var(--vu)); }  /* SECTION CUT: the dive's work tail, 3 slides (was its own calc(560 * var(--vu)) chapter of 5) */
 .lab__inner { display: grid; grid-template-rows: 1fr auto; grid-template-columns: minmax(0, 1fr); padding: calc(var(--s7) * 0.6) 0 var(--s5); overflow: hidden; }
 /* SECTION CUT (REVIEW-visual #9): the global text slot draws the work's title + blurb at the bottom (W19 17:12Z text
    block: 56px title row + 20px blurb, eyebrow above), so the card lives in the band above it: the track centres between
@@ -215,10 +238,10 @@ html.no-gl .poster { position: absolute; inset: 0; background-size: cover; backg
    nor the title ever runs under the card. */
 html.slot-on .lab__inner { --lab-top: calc(var(--s7) * 0.45); --lab-bot: calc(var(--s5) + 160px); padding: var(--lab-top) 0 var(--lab-bot); }
 @media (max-width: 640px) { html.slot-on .lab__inner { --lab-bot: calc(var(--s4) + 200px); } }
-html.slot-on .lab .card { width: clamp(240px, min(46vw, 92vh, (100vh - var(--lab-top) - var(--lab-bot) - 24px) * 1.6), 860px); }
+html.slot-on .lab .card { width: clamp(240px, min(46vw, calc(92 * var(--vu)), (calc(100 * var(--vu)) - var(--lab-top) - var(--lab-bot) - 24px) * 1.6), 860px); }
 .lab__count { position: absolute; top: calc(var(--s7) * 0.55); left: 0; margin: 0; font-size: var(--fs-small); color: var(--c-silver-2); font-variant-numeric: tabular-nums; display: flex; gap: 6px; }
 .lab__track { align-self: center; display: flex; align-items: center; gap: clamp(24px, 3vw, 56px); will-change: transform; }
-.card { flex: 0 0 auto; width: clamp(280px, min(46vw, 92vh), 860px); aspect-ratio: 16 / 10; border-radius: 14px; position: relative; cursor: pointer; outline: none; }
+.card { flex: 0 0 auto; width: clamp(280px, min(46vw, calc(92 * var(--vu))), 860px); aspect-ratio: 16 / 10; border-radius: 14px; position: relative; cursor: pointer; outline: none; }
 .card__dom { position: absolute; inset: 0; border-radius: inherit; overflow: hidden; background: #e9eaec; }
 .card__media { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: grayscale(1); transition: filter var(--dur-ui) var(--ease); }
 .card.is-active .card__media, .card:hover .card__media, .card:focus-visible .card__media { filter: none; }
@@ -240,11 +263,11 @@ html.lab-gl .lab .card__dom { opacity: 0; }
 .lab__cap { grid-column: 10 / -1; margin: 0; font-size: var(--fs-small); line-height: 1.45; color: var(--c-white); max-width: 34ch; }
 .lab__cap span { color: var(--c-silver-2); }
 @media (max-width: 1000px) { .lab__names { grid-column: 1 / -1; } .lab__cap { grid-column: 4 / -1; margin-top: var(--s3); } }
-@media (max-width: 812px) { .card, html.slot-on .lab .card { width: min(80vw, (100vh - var(--lab-top, 0px) - var(--lab-bot, 0px) - 24px) * 1.6); } .lab__cap { grid-column: 2 / -1; } .lab__name { white-space: normal; max-width: 7ch; } }
+@media (max-width: 812px) { .card, html.slot-on .lab .card { width: min(80vw, (calc(100 * var(--vu)) - var(--lab-top, 0px) - var(--lab-bot, 0px) - 24px) * 1.6); } .lab__cap { grid-column: 2 / -1; } .lab__name { white-space: normal; max-width: 7ch; } }
 
 
 /* ===== S4 · Systems — the glass stack (GL star) + its real controls. Appended block; overrides the earlier .systems rules. ===== */
-.systems { display: block; min-height: 0; height: 392vh; padding: 0; }  /* R6.89 (Shifat Oct 23 3:43 AM, +50 % for the Shade DS ring and for the sink to the tablet; the diamond + portal keep their scroll): 310 → 392vh, mapped back onto the R6.88d phases by sysWarp (Dive.tsx) */  /* Shifat 3:25 AM Oct 23 "B": Shade DS zone +50% (pin 140 → 210vh) */  /* POLISH-2: 200 → 240vh (pin 140vh) so the tablet visibly comes to the lens before the hand-off */  /* SECTION CUT: 260 → 200vh (pin 160 → 100vh: atom → drum → tablet push still reads) */
+.systems { display: block; min-height: 0; height: calc(392 * var(--vu)); padding: 0; }  /* R6.89 (Shifat Oct 23 3:43 AM, +50 % for the Shade DS ring and for the sink to the tablet; the diamond + portal keep their scroll): 310 → calc(392 * var(--vu)), mapped back onto the R6.88d phases by sysWarp (Dive.tsx) */  /* Shifat 3:25 AM Oct 23 "B": Shade DS zone +50% (pin 140 → calc(210 * var(--vu))) */  /* POLISH-2: 200 → calc(240 * var(--vu)) (pin calc(140 * var(--vu))) so the tablet visibly comes to the lens before the hand-off */  /* SECTION CUT: 260 → calc(200 * var(--vu)) (pin 160 → calc(100 * var(--vu)): atom → drum → tablet push still reads) */
 .systems .systems__inner { padding: calc(var(--pad-y) + 56px) var(--pad-x) var(--s5); display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
 .systems .systems__eyebrow { pointer-events: auto; }
 .systems .systems__row { display: grid; grid-template-columns: repeat(var(--grid-cols), minmax(0, 1fr)); column-gap: var(--grid-gap); align-items: end; position: relative; z-index: 1; }
@@ -271,7 +294,7 @@ html.lab-gl .lab .card__dom { opacity: 0; }
 @media (prefers-reduced-motion: reduce) { .systems .systems__line > span { transform: none; transition: none; } }
 /* no WebGL / reduced motion: the same parts as a plain, usable row of controls */
 .systems--dom { height: auto; }
-.systems--dom .systems__inner { position: relative; height: auto; min-height: 100vh; gap: var(--s5); }
+.systems--dom .systems__inner { position: relative; height: auto; min-height: calc(100 * var(--vu)); gap: var(--s5); }
 .systems--dom .systems__parts { position: relative; inset: auto; display: flex; flex-wrap: wrap; gap: var(--s2); pointer-events: auto; }
 .systems--dom .systems__hit { position: relative; width: auto; height: 44px; padding: 0 var(--s3); background: rgba(10,10,11,.06); color: var(--c-ink); font: inherit; font-size: var(--fs-small); display: inline-flex; align-items: center; }
 .systems--dom .systems__hit[aria-checked='true'], .systems--dom .systems__hit[aria-pressed='true'] { background: var(--c-ink); color: var(--c-white); }
@@ -281,7 +304,7 @@ html.lab-gl .lab .card__dom { opacity: 0; }
 
 
 /* ---- Dive (S5): the light through the surface is the star; one line early, then only tools in the water ---- */
-.dive { height: 280vh; padding: 0; }  /* v2: the stone's descent + the original under-the-sea beat. SECTION CUT: 400 → 280vh */
+.dive { height: calc(280 * var(--vu)); padding: 0; }  /* v2: the stone's descent + the original under-the-sea beat. SECTION CUT: 400 → calc(280 * var(--vu)) */
 .dive .dive__inner { display: grid; grid-template-rows: 1fr auto; align-items: end; padding: 0 0 var(--s5); overflow: hidden; color: var(--c-white); }
 .dive .dive__foot { display: grid; grid-template-columns: repeat(var(--grid-cols), minmax(0, 1fr)); column-gap: var(--grid-gap); align-items: last baseline; padding: 0 var(--pad-x); }
 .dive .dive__title { grid-column: 1 / span 9; margin: 0; overflow: hidden; padding-bottom: .08em; font-size: var(--fs-display); font-weight: 400; line-height: .9; letter-spacing: -0.065em; color: var(--c-white); max-width: none; }
@@ -294,7 +317,7 @@ html.lab-gl .lab .card__dom { opacity: 0; }
 @media (max-width: 812px) { .dive .dive__cap { grid-column: 2 / -1; } .dive .dive__title { letter-spacing: -0.06em; } }
 /* no WebGL / reduced motion: a still of the same idea — light above, ink below, the tools as a quiet list */
 html.no-gl .dive { height: auto; background: linear-gradient(180deg, #5fa7b4 0%, #1d6473 22%, #0a3340 50%, #03121a 78%, #000 100%); }
-html.no-gl .dive .dive__inner { position: relative; height: auto; min-height: 100vh; grid-template-rows: auto auto; align-content: end; gap: var(--s6); padding-top: var(--s7); }
+html.no-gl .dive .dive__inner { position: relative; height: auto; min-height: calc(100 * var(--vu)); grid-template-rows: auto auto; align-content: end; gap: var(--s6); padding-top: var(--s7); }
 html.no-gl .dive .dive__line { transform: none !important; }
 html.no-gl .dive .dive__cap { opacity: 1 !important; }
 html.no-gl .dive .dive__tools { position: static; display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); padding: 0 var(--pad-x); }
@@ -319,7 +342,7 @@ html.gl-lost canvas { visibility: hidden; }
 
 /* no-WebGL (no GPU, reduced motion): the journey shows its still */
 html.no-gl .journey { height: auto; background: #020203; }
-html.no-gl .journey .journey__inner { position: relative; height: 100vh; background: #020203 url(/media/journey-still-d.jpg) center / cover no-repeat; }
+html.no-gl .journey .journey__inner { position: relative; height: calc(100 * var(--vu)); background: #020203 url(/media/journey-still-d.jpg) center / cover no-repeat; }
 @media (max-aspect-ratio: 4/5) { html.no-gl .journey .journey__inner { background-image: url(/media/journey-still-m.jpg); } }
 html.no-gl .journey .journey__beat:nth-of-type(2) { display: none; }
 html.no-gl .journey .journey__beat:nth-of-type(3) > span > span { transform: none; opacity: .88; }

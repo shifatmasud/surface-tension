@@ -3,6 +3,7 @@ import { useEffect, useMemo } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { props } from '../../../state/props'
 import { journey } from './journeyState'
+import { onViewport } from '../../../core/viewport'
 
 /**
  * CTA wall (STRUCTURE v2, Shifat 08:32Z): after the crewmate breaks out of the tablet it lands in front of a plain
@@ -46,9 +47,9 @@ export function CtaWall() {
   useEffect(() => {
     scene.add(S.mesh)
     const onResize = () => { ctaWall.dirty = true }
-    window.addEventListener('resize', onResize)
+    const offVp = onViewport(onResize) // R7.07: real resizes only (not the address bar)
     document.fonts?.ready.then(() => { ctaWall.dirty = true })
-    return () => { scene.remove(S.mesh); window.removeEventListener('resize', onResize) }
+    return () => { scene.remove(S.mesh); offVp() }
   }, [scene, S])
 
   const draw = () => {

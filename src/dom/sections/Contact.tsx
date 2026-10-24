@@ -21,11 +21,16 @@ import { lineRoll, type LineRoll } from '../ui/maskedRoll'
 import { bindInk } from '../../services/inkButton'
 import { FOOT_MODE } from '../../gl/post/footerWorld'
 import { loopPull } from '../../services/loopPull'
+import { viewport } from '../../core/viewport'
+import { scrollHost } from '../../services/scrollHost'
 const RM = window.matchMedia('(prefers-reduced-motion: reduce)')
 let footEl: HTMLElement | null = null
 
 /** W19: the fixed footer's height (50vh / 50svh since 19:06Z), cached by a ResizeObserver so the frame loop reads no layout */
 let footH = 0
+// R7.07 #9: the CTA pill is fixed to the screen and placed per frame (?pillold = 7.06, carried by the sticky frame)
+const PILL_FIXED = settings.USE_GL && typeof location !== 'undefined' && !/[?&]pillold\b/.test(location.search)
+if (PILL_FIXED && typeof document !== 'undefined') document.documentElement.classList.add('pill-fixed')
 let footObs: ResizeObserver | null = null
 function footerH(vh: number) {
   if (!footObs && typeof ResizeObserver !== 'undefined') {
@@ -81,7 +86,7 @@ export function Contact() {
       },
       dispose() { btnRoll?.destroy(); btnRoll = null; journey.ctaOut = 0; footRoll(0) },
       update(dt = 0.016) {
-        const vh = props.height
+        const vh = viewport.vis // R7.07: the footer / curtain / pill are anchored to the VISIBLE bottom (address bar shown or not)
         const top = range.docTop - props.scroll
         // 0 when the wall's edge enters at the bottom → 1 when it reaches the top (then the CTA holds, pinned)
         journey.cta = clamp((vh - top) / vh)
@@ -116,15 +121,19 @@ export function Contact() {
         // the type keep room above it (a scroll-tied glide, no fade, no scale)
         let pillDown = 0
         if (ctaEl && k > 0 && settings.USE_GL) {
-          if (vh !== pillVh || pillGap < 0) { const r = ctaEl.getBoundingClientRect(); pillVh = vh; pillGap = (vh - k) - (r.bottom - pillCur); pillH = r.height }
+          if (vh !== pillVh || pillGap < 0) { const r = ctaEl.getBoundingClientRect(); pillVh = vh; pillGap = PILL_FIXED ? vh - (r.bottom - lastExtra) : (vh - k) - (r.bottom - pillCur); pillH = r.height }
           // R6.92b option B: the pill keeps its R6.89 translate-only glide toward the edge (the heroes settle above it)
           pillDown = Math.round((k / Math.max(1, fh)) * Math.max(0, pillGap - 18))   // R6.92b B: settles 18 px above the edge (was 50): full-size heroes need the room
           // the room it takes above the curtain's edge, for the crewmate and the type settling above it (JourneyStage)
           journey.pillRes = pillGap - pillDown + pillH + 18
         } else if (k <= 0) pillGap = -1
         pillCur = pillDown
-        const pillY = extra + pillDown
-        if (ctaEl && pillY !== lastExtra) { lastExtra = pillY; ctaEl.style.transform = pillY !== 0 ? `translateX(-50%) translate3d(0, ${pillY}px, 0)` : '' }
+        // R7.07 #9 (Shifat: on a hard fling the CTA block slid over the big headline): the pill was carried by the browser's
+        // own scroll (the sticky frame) while the headline and crewmate move with the WebGL frame, which lands a frame or more
+        // later on a fast fling. The pill is now fixed to the screen and placed by this same frame from the same scroll
+        // value the GL used (where the sticky frame would put it, plus the curtain glide), so the two can no longer part.
+        const pillY = PILL_FIXED ? Math.round(Math.min(vh + 40, Math.max(0, top)) - k + pillDown) : extra + pillDown
+        if (ctaEl && pillY !== lastExtra) { lastExtra = pillY; ctaEl.style.transform = pillY !== 0 || PILL_FIXED ? `translateX(-50%) translate3d(0, ${pillY}px, 0)` : '' }
 
         // once the footer is fully uncovered, keep scrolling: the flat bar fills and floats you back to the surface
         // W19: the bar fills over the second half of the footer's reveal and wraps as it lands (no empty band above a half-height footer)
@@ -229,10 +238,10 @@ export function Footer() {
         // Back to the surface link is gone) took focus behind the clip, no ring on screen) jumps to where the footer is fully uncovered and the bar is
         // still empty (k0 = fh + 2, f = 0: no wrap), the same jump-cut Systems.tsx uses for its drum controls
         if (!settings.USE_GL || !FOOT_MODE) return
-        const sec = document.getElementById('contact'), vh = props.height || window.innerHeight
+        const sec = document.getElementById('contact'), vh = viewport.vis || props.height
         const fh = footerH(vh)
         if (!sec || (journey.lift || 0) >= fh) return
-        const y = window.scrollY + sec.getBoundingClientRect().bottom - vh + fh + 2
+        const y = scrollHost.y() + sec.getBoundingClientRect().bottom - vh + fh + 2
         scroll.scrollTo(y, { immediate: true })
       }}>
       <div className="site-footer__top">

@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { props, shared } from '../../state/props'
 import { BICUBIC } from '../shaders/chunks'
 import { clip } from '../systems/clip'
+import { scrollHost } from '../../services/scrollHost'
 
 /**
  * Ufx — DOM → WebGL sync (handbook ch.4), written fresh. Real HTML elements stay the layout truth
@@ -58,7 +59,7 @@ class UfxSystem {
   measure(it: UfxItem) {
     if (it.measure) return it.measure()
     const r = it.el.getBoundingClientRect()
-    it.docTop = r.top + (it.fixed ? 0 : window.scrollY); it.docLeft = r.left; it.w = r.width; it.h = r.height
+    it.docTop = r.top + (it.fixed ? 0 : scrollHost.y()); it.docLeft = r.left; it.w = r.width; it.h = r.height
   }
   add(it: UfxItem) {
     this.items.push(it); this.measure(it)

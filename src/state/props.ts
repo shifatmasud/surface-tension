@@ -1,4 +1,6 @@
 import * as THREE from 'three'
+import { initViewport, viewport } from '../core/viewport'
+initViewport() // R7.07 VIEWPORT: one stable size before any reader
 /**
  * Layer 2 — the blackboard ("properties", handbook ch.11). One mutable bag every system reads and
  * writes inside the frame. No React re-renders: React state is only for UI (menu, overlay, sound).
@@ -24,7 +26,7 @@ export const makeLook = (o: Partial<Record<keyof Look, any>> = {}): Look => ({
 
 export const props = {
   time: 0, dt: 1 / 60, frame: 0,
-  width: window.innerWidth, height: window.innerHeight, dpr: 1,
+  width: viewport.w, height: viewport.h, dpr: 1,
   renderW: 1, renderH: 1,
   /** Shifat 14:01Z: the canvas runs at the device's own density (cap 3) for the text layer; the 3D scene and the post
    *  chain render at `dpr` (the governor's 0.75–1.25 ladder) and are upscaled once in the final pass */

@@ -1,3 +1,4 @@
+import { PHONE } from '../../../core/viewport'
 import * as THREE from 'three'
 import { useEffect, useMemo, useRef } from 'react'
 import { useThree } from '@react-three/fiber'
@@ -179,7 +180,8 @@ function pal(hex: string, k = 1) {
 }
 // R7.06: measured fully formed and square to the lens (PC + phone, headless) lift 1.0 gives #efefef and 7.05's 1.3 clips to
 // #ffffff; 7.04's 1.3 had been tuned on a frame where the drum was still fading in. 1.01 lands #f0f0f0. ?dmlift=1.3 = 7.05
-const SOLID_LIFT = (() => { const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('dmlift') : null; return q ? +q : 1.01 })()
+const PHONE_DM = PHONE   // R7.07 C
+const SOLID_LIFT = (() => { const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('dmlift') : null; return q ? +q : PHONE_DM ? 0.991 : 1.002 })()   // R7.07 (C): measured facing the front: phone #f2f2f2 → 0.991 lands #f0f0f0; PC #f1f1f1 → 1.002
 const DM_LEAD = !(typeof location !== 'undefined' && /[?&]dmlead=0/.test(location.search)) // ?dmlead=0 = 7.05 fade timing
 const SOLID_NEUTRAL = SOLID_LIFT < 1.2 ? new THREE.Color(1, 1, 1) : new THREE.Color(1, 0.99, 0.965) // the deep's grade leaves a cool cast on white
 /** R7.02: an unlit token colour with no fog at all (the Do Magic face: the demo's solid #f0f0f0) */
@@ -694,7 +696,7 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
   }), [])
   useEffect(() => {
     ia.ray.layers.set(SYSUI_LAYER)
-    const setNdc = (e: PointerEvent) => { ia.ndc.set((e.clientX / innerWidth) * 2 - 1, 1 - (e.clientY / innerHeight) * 2); ia.moved = true }
+    const setNdc = (e: PointerEvent) => { ia.ndc.set((e.clientX / props.width) * 2 - 1, 1 - (e.clientY / props.height) * 2); ia.moved = true }
     const interactive = (e: Event) => !!(e.target as HTMLElement | null)?.closest?.('a,button,input,textarea,select,[role=button],[role=dialog]')
     const move = (e: PointerEvent) => { if (e.pointerType !== 'touch') setNdc(e) }
     const down = (e: PointerEvent) => { ia.down = { x: e.clientX, y: e.clientY, t: performance.now() } }
@@ -740,7 +742,7 @@ export function UiCylinder({ u }: { u: Record<string, THREE.IUniform> }) {
     if (!nb.active && !(window as any).__cyl) (window as any).__cyl = {
       get hover() { return ia.hover }, n: built.items.length,
       // QA: the screen point (CSS px) of each part's centre, nearest the camera first
-      front: () => built.items.map((it, i) => { const v = it.g.getWorldPosition(new THREE.Vector3()); const d = v.distanceTo(state.camera.position); v.project(state.camera); return { i, kind: (it.g.userData.act as any).kind, x: Math.round((v.x + 1) / 2 * innerWidth), y: Math.round((1 - v.y) / 2 * innerHeight), d: +d.toFixed(2) } }).sort((p, q) => p.d - q.d),
+      front: () => built.items.map((it, i) => { const v = it.g.getWorldPosition(new THREE.Vector3()); const d = v.distanceTo(state.camera.position); v.project(state.camera); return { i, kind: (it.g.userData.act as any).kind, x: Math.round((v.x + 1) / 2 * props.width), y: Math.round((1 - v.y) / 2 * props.height), d: +d.toFixed(2) } }).sort((p, q) => p.d - q.d),
     }
     const on = dive.abyss > 0.02
     r.visible = on

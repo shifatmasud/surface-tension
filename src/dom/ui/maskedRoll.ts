@@ -1,4 +1,5 @@
 import { HOUSE, cssBezier } from '../../core/house'
+import { onViewport } from '../../core/viewport'
 
 /**
  * MASKED ROLL (Shifat 19:15Z: "Masked Rolling is our signature move in this text & number case in this page"; 19:16Z: "For
@@ -180,7 +181,7 @@ export function lineRoll(el: HTMLElement, o: { stagger?: number; pad?: number; s
   const onResize = () => { clearTimeout(rt); rt = window.setTimeout(() => { if (!destroyed) build() }, 160) }
   build()
   if (typeof document !== 'undefined' && document.fonts) document.fonts.ready.then(() => { if (!destroyed) build() })
-  window.addEventListener('resize', onResize)
+  const offVp = onViewport(onResize) // R7.07: real resizes only (not the address bar)
   return {
     set(next) { cancelAnimationFrame(raf); if (next === p) return; p = next; paint() },
     get: () => p,
@@ -195,6 +196,6 @@ export function lineRoll(el: HTMLElement, o: { stagger?: number; pad?: number; s
       }
       raf = requestAnimationFrame(step)
     },
-    destroy() { destroyed = true; cancelAnimationFrame(raf); clearTimeout(rt); window.removeEventListener('resize', onResize); unwrap() },
+    destroy() { destroyed = true; cancelAnimationFrame(raf); clearTimeout(rt); offVp(); unwrap() },
   }
 }

@@ -241,13 +241,14 @@ class HeroPass {
     dist.uniforms.forEach((u, k) => { if (!un[k]) un[k] = u })
     const fk = foot?.get('u_fk') ?? new THREE.Uniform(0), ft = foot?.get('u_ft') ?? new THREE.Uniform(0)
     const fa = foot?.get('u_fasp') ?? new THREE.Uniform(1), fv = foot?.get('u_fvel') ?? new THREE.Uniform(0)
+    const fb = foot?.get('u_fb') ?? new THREE.Uniform(0) // R7.07: the canvas below the visible bottom
     const common = (graded: boolean) => ({
-      ...un, u_fk: fk, u_ft: ft, u_fasp: fa, u_fvel: fv,
+      ...un, u_fk: fk, u_ft: ft, u_fasp: fa, u_fvel: fv, u_fb: fb,
       tHero: { value: null as THREE.Texture | null }, u_trail: { value: 0 }, u_curtain: { value: foot ? 1 : 0 },
     })
     // the grade's own functions (mainUv, mainImage) are spliced in as written; `inputBuffer` is never read by them
     const body = (graded: boolean) => /* glsl */ `
-uniform sampler2D tHero; uniform float u_trail, u_curtain; uniform float u_fk, u_ft, u_fasp, u_fvel;
+uniform sampler2D tHero; uniform float u_trail, u_curtain; uniform float u_fk, u_ft, u_fasp, u_fvel, u_fb;
 uniform float u_fadeIn;
 uniform sampler2D u_screenPaintTexture; uniform vec2 u_screenPaintTexelSize;
 uniform float u_amount, u_rgbShift, u_multiplier, u_colorMultiplier, u_shade;
@@ -270,7 +271,7 @@ vec4 heroAt(vec2 p){
   return vec4(min(h_enc(c), 1.0), h.a);
 }
 void main(){
-  if (u_curtain > 0.5 && u_fk > 0.0 && vUv.y < hEdge(vUv.x)) discard;   // the footer curtain covers the picture there
+  if (u_curtain > 0.5 && u_fk > 0.0 && vUv.y - u_fb < hEdge(vUv.x)) discard;   // the footer curtain covers the picture there
   vec4 acc;
   float fr = 0.0; vec2 vel = vec2(0.0); float weight = 0.0;
   if (u_trail > 0.5) {

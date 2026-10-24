@@ -11,6 +11,8 @@ import { noOrphan, noOrphanLines } from '../a11y/noOrphans'
 import { dive } from '../../gl/stages/dive/diveState'
 import { ufx, textMaterial, type UfxItem } from '../../gl/ufx/ufx'
 import { rasterLine } from '../../gl/ufx/UfxText'
+import { onViewport } from '../../core/viewport'
+import { scrollHost } from '../../services/scrollHost'
 
 gsap.registerPlugin(SplitText)
 
@@ -239,7 +241,7 @@ export function TextLayer() {
       // ink follows the UI tone (black on the light water, white in the deep, in space and on the CTA wall)
       // W19 (rv-visual P0-3): during the over-under shot the copy sits BELOW the rising waterline (teal) while the header
       // is still in the air: the slot flips to white once the line passes the middle of the active beat
-      const H = window.innerHeight
+      const H = props.height
       const lineOver = props.stage === 'dive' && dive.split >= 0 && dive.split * H > H - (slotBox.top + 60)
       const dark = document.documentElement.dataset.bg === 'dark' || lineOver
       want.title.set(dark ? '#ffffff' : '#0a0a0b'); want.body.set(dark ? '#f2f4f6' : '#0a0a0b'); want.eyebrow.set(dark ? '#d3d7dc' : '#5f646b')
@@ -286,14 +288,14 @@ export function TextLayer() {
     document.fonts.ready.then(() => buildSliced()).then(() => {
       if (gone) return
       measure(); built = true
-      ro = new ResizeObserver(() => { measure() }); ro.observe(document.body)
+      ro = new ResizeObserver(() => { measure() }); scrollHost.observe(ro)
     })
     let rt = 0
     const onResize = () => { clearTimeout(rt); rt = window.setTimeout(() => { measure(); const a = active; active = -1; build(); set(a); slotBox.top = a >= 0 ? beatsEl[a].getBoundingClientRect().top : 1e5; st.forEach((s, i) => { if (i === a) { s.on = true; s.dir = 1; s.t0 = -10 } }) }, 180) }
-    window.addEventListener('resize', onResize)
+    const offVp = onViewport(onResize) // R7.07: real resizes only (not the address bar)
     return () => {
       gone = true; gen++
-      gsap.ticker.remove(tick); window.removeEventListener('resize', onResize); window.removeEventListener('st:drop', onDrop); ro?.disconnect()
+      gsap.ticker.remove(tick); offVp(); window.removeEventListener('st:drop', onDrop); ro?.disconnect()
       st.forEach((s) => s.lines.forEach((l) => ufx.remove(l.it))); splits.forEach((s) => s.revert())
       document.documentElement.classList.remove('slot-on')
     }

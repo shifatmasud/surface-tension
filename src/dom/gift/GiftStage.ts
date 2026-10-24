@@ -12,6 +12,7 @@
  */
 import * as THREE from 'three'
 import { browser } from '../../services/settings'
+import { viewport, onViewport } from '../../core/viewport'
 import { blurFadeIn, blurFadeOut } from '../../services/blurFade'
 import './gift.css'
 import { giftSound } from './giftSound'
@@ -552,7 +553,7 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
   const reduced = opts.reduced
   // the shared uniforms outlive a close: a second open starts wrapped again
   U.uD.value = 0; U.uDR.value = 0; U.uForm.value = 0; U.uGlow.value = 0; U.uHit.value.set(0, TOP, 0)
-  const phone = browser.isMobile || (innerWidth <= 812 && matchMedia('(pointer: coarse)').matches)
+  const phone = browser.isMobile || (viewport.w <= 812 && matchMedia('(pointer: coarse)').matches)
   const dprMax = phone ? Math.min(devicePixelRatio || 1, 1) : Math.min(devicePixelRatio || 1, 1.2)
   const dprMin = phone ? 0.6 : 0.8
   let dpr = dprMax
@@ -580,13 +581,13 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
   }
   renderer.setClearColor(0x000000, 0)
   const css = new CSS3DRenderer(); css.domElement.className = 'gift__type'; css.domElement.setAttribute('aria-hidden', 'true') // R6.88b CRISP TYPE
-  css.setSize(innerWidth, innerHeight); root.insertBefore(css.domElement, sr)
+  css.setSize(viewport.w, viewport.h); root.insertBefore(css.domElement, sr)
   renderer.toneMapping = TONE; renderer.toneMappingExposure = TONE === THREE.ACESFilmicToneMapping ? 1.12 : 1.0
   renderer.outputColorSpace = THREE.SRGBColorSpace
-  renderer.setPixelRatio(dpr); renderer.setSize(innerWidth, innerHeight, false)
+  renderer.setPixelRatio(dpr); renderer.setSize(viewport.w, viewport.h, false)
 
   const scene = new THREE.Scene()
-  const camera = new THREE.PerspectiveCamera(30, innerWidth / innerHeight, 0.1, 40)
+  const camera = new THREE.PerspectiveCamera(30, viewport.w / viewport.h, 0.1, 40)
   const PITCH = 0.3
   let dist = 4
   // film: a slow push-in while the box arrives (and a breath of drift after), always aimed at the gift
@@ -597,7 +598,7 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
     camera.lookAt(0, -0.02, 0)
   }
   const frame = () => {
-    const a = innerWidth / innerHeight, tf = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))
+    const a = viewport.w / viewport.h, tf = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))
     dist = Math.max(1.02 / tf, 0.86 / (tf * a))
     camera.aspect = a; camera.updateProjectionMatrix()
     aim(1)
@@ -731,7 +732,7 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
   if (reduced) { boxParts.forEach((o) => { o.visible = false }); shadow.visible = false }
 
   const hitTest = (cx: number, cy: number): 'box' | 'card' | null => {
-    ndc.set((cx / innerWidth) * 2 - 1, -(cy / innerHeight) * 2 + 1)
+    ndc.set((cx / viewport.w) * 2 - 1, -(cy / viewport.h) * 2 + 1)
     ray.setFromCamera(ndc, camera)
     const test = (o: THREE.Object3D, b: THREE.Box3) => { inv.copy(o.matrixWorld).invert(); lray.copy(ray.ray).applyMatrix4(inv); return lray.intersectsBox(b) }
     if (!opened) return test(boxYaw, boxBounds) ? 'box' : null
@@ -743,7 +744,7 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
     opened = true; openAt = QA ? qaT : (performance.now() - t0) / 1000
     // the dissolve spreads from where the box was touched (its top centre from the keyboard)
     if (cx !== undefined && cy !== undefined) {
-      ndc.set((cx / innerWidth) * 2 - 1, -(cy / innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera)
+      ndc.set((cx / viewport.w) * 2 - 1, -(cy / viewport.h) * 2 + 1); ray.setFromCamera(ndc, camera)
       inv.copy(boxYaw.matrixWorld).invert(); lray.copy(ray.ray).applyMatrix4(inv)
       if (lray.intersectBox(boxBounds, v3)) U.uHit.value.copy(v3)
     }
@@ -755,7 +756,7 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
 
   // ---------- input ----------
   const onMove = (e: PointerEvent) => {
-    ptr.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1)
+    ptr.set((e.clientX / viewport.w) * 2 - 1, -(e.clientY / viewport.h) * 2 + 1)
     if (!ready) return
     const h = hitTest(e.clientX, e.clientY)
     hoverWant = !opened && h === 'box' ? 1 : 0
@@ -793,11 +794,11 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
     list[(i + (e.shiftKey ? -1 : 1) + list.length) % list.length].focus()
   }
   root.addEventListener('keydown', onKey)
-  const onResize = () => { renderer.setSize(innerWidth, innerHeight, false); css.setSize(innerWidth, innerHeight); frame() }
-  addEventListener('resize', onResize)
+  const onResize = () => { renderer.setSize(viewport.w, viewport.h, false); css.setSize(viewport.w, viewport.h); frame() }
+  const offVp = onViewport(onResize) // R7.07: real resizes only (not the address bar)
 
   // ---------- frame ----------
-  const proj = (o: THREE.Object3D, x: number, y: number, z: number) => { v3.set(x, y, z).applyMatrix4(o.matrixWorld).project(camera); return [(v3.x * 0.5 + 0.5) * innerWidth, (-v3.y * 0.5 + 0.5) * innerHeight] }
+  const proj = (o: THREE.Object3D, x: number, y: number, z: number) => { v3.set(x, y, z).applyMatrix4(o.matrixWorld).project(camera); return [(v3.x * 0.5 + 0.5) * viewport.w, (-v3.y * 0.5 + 0.5) * viewport.h] }
   let ctaOn = false, hitShown = false
   const place = (el: HTMLElement, l: number, t: number, w: number, h: number) => {
     el.style.transform = `translate3d(${l.toFixed(1)}px, ${t.toFixed(1)}px, 0)`
@@ -924,7 +925,7 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
       // phones: step the density down on slow frames (never below 0.6), never up
       if (++frames > 40) {
         ema = ema * 0.93 + dt * 1000 * 0.07
-        if (ema > 21 && dpr > dprMin + 0.01) { dpr = Math.max(dprMin, dpr - 0.1); renderer.setPixelRatio(dpr); renderer.setSize(innerWidth, innerHeight, false); frames = 20; ema = 16.7 }
+        if (ema > 21 && dpr > dprMin + 0.01) { dpr = Math.max(dprMin, dpr - 0.1); renderer.setPixelRatio(dpr); renderer.setSize(viewport.w, viewport.h, false); frames = 20; ema = 16.7 }
       }
     }
     if (!reduced || !ready) raf = requestAnimationFrame(tick)
@@ -964,7 +965,7 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
       root.classList.add('gift--leaving')
       cta.classList.remove('is-on'); hit.style.display = 'none'
       await Promise.all([blurFadeOut(closeBtn), new Promise((r) => setTimeout(r, reduced ? 160 : 700))])
-      removeEventListener('resize', onResize); removeEventListener('resize', onResizeStill)
+      offVp(); removeEventListener('resize', onResizeStill)
       root.removeEventListener('keydown', onKey)
       scene.traverse((o) => {
         const m = o as THREE.Mesh

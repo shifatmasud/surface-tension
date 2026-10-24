@@ -10,6 +10,7 @@ import { dive } from '../dive/diveState'
 import { DIVE_COMMON } from '../dive/shaders'
 import { SlideFluid, FLUID_GLSL } from './slideFluid'
 import { heroPass } from '../../post/heroPass' // R6.87 SPLIT
+import { scrollHost } from '../../../services/scrollHost'
 
 /**
  * SLIDES (Shifat 17:49Z): "Project slides no need appear animation. Over animation is bad. They should naturally live in
@@ -257,14 +258,14 @@ export const labGL = {
     const ri = inner.getBoundingClientRect(), rs = sec.getBoundingClientRect(), rt = tr.getBoundingClientRect()
     const cs = getComputedStyle(sec)
     this._tl = rt.left
-    this.sec = { top: rs.top + window.scrollY, h: rs.height, padT: parseFloat(cs.paddingTop) || 0, padB: parseFloat(cs.paddingBottom) || 0, pinH: ri.height, trackTop: rt.top - ri.top }
+    this.sec = { top: rs.top + scrollHost.y(), h: rs.height, padT: parseFloat(cs.paddingTop) || 0, padB: parseFloat(cs.paddingBottom) || 0, pinH: ri.height, trackTop: rt.top - ri.top }
     for (const c of this.cards) {
       const r = c.el.getBoundingClientRect()
       c.geo = { baseX: r.left + r.width / 2, relY: r.top - ri.top + r.height / 2, w: r.width, h: r.height }
       if (c.item) { c.item.w = r.width; c.item.h = r.height }
       c.css = ''
     }
-    const vh = window.innerHeight, vw = window.innerWidth
+    const vh = props.height, vw = props.width
     // the lens: ufx's pixel-true camera distance (z = 0 maps 1 CSS px to 1 px)
     this.D = (vh / 2) / Math.tan(THREE.MathUtils.degToRad(15))
     this.R = LAB_ARC_ORIGIN.radius ?? this.D
@@ -287,7 +288,7 @@ export const labGL = {
   },
   /** the cylinder: each slide's angle, and the DOM card's matching CSS 3D transform (write-only, only on change) */
   place() {
-    const vw = window.innerWidth, vh = window.innerHeight
+    const vw = props.width, vh = props.height
     const shelf = this.shelfTop()
     // CSS perspective = the same lens, its eye at the viewport centre (in the track's own box)
     const po = `${(vw / 2 - this.trackLeft()).toFixed(1)}px ${(vh / 2 - shelf - this.sec.trackTop).toFixed(1)}px`

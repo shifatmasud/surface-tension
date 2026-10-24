@@ -1,4 +1,6 @@
 import { props } from '../state/props'
+import { viewport } from '../core/viewport'
+import { scrollHost } from './scrollHost'
 import { clamp, damp } from '../core/math'
 import { houseInOut } from '../core/house'
 import { wrapFade } from './wrapFade'
@@ -16,7 +18,7 @@ import { wrapFade } from './wrapFade'
  *   finger up                           v = time-weighted mean of those samples;
  *                                       v += −mix(2.1, 1.9, |v / vh / 5|)·v·dt          ← Lusion friction 2.1 → 1.9
  *
- * Carrier. Lusion moves #page-container with translate3d and keeps window.scrollY at 0. This page pins its
+ * Carrier. Lusion moves #page-container with translate3d and keeps scrollHost.y() at 0. This page pins its
  * scenes with position: sticky and relies on native focus / find-in-page / screen-reader scrolling, so the same
  * value is written to the document's own scroll offset instead (overflow stays native, user scrolling is
  * cancelled at the event). Identical curve and frame timing; sticky, a11y and anchors keep working.
@@ -95,7 +97,7 @@ class ScrollService {
       this.bindTouch()
     }
     apply()
-    const onChange = () => { apply(); this.tween = null; this.resetScroll(window.scrollY) }
+    const onChange = () => { apply(); this.tween = null; this.resetScroll(scrollHost.y()) }
     mq.addEventListener?.('change', onChange); tq.addEventListener?.('change', onChange)
     document.documentElement.classList.add('vscroll')
     if ('scrollRestoration' in history) history.scrollRestoration = 'manual'
@@ -104,14 +106,14 @@ class ScrollService {
     window.addEventListener('touchend', this.onTouchEnd, { passive: true })
     window.addEventListener('touchcancel', this.onTouchEnd, { passive: true })
     window.addEventListener('keydown', this.onKey)
-    window.addEventListener('scroll', this.onNativeScroll, { passive: true })
+    scrollHost.target().addEventListener('scroll', this.onNativeScroll, { passive: true })
     window.addEventListener('focusin', () => { this.lastFocusAt = performance.now() })
     document.addEventListener('click', this.onClick)
     window.addEventListener('hashchange', () => this.toHash(location.hash, false))
     window.addEventListener('resize', () => { this.needsMeasure = true })
-    if (window.ResizeObserver) new ResizeObserver(() => { this.needsMeasure = true }).observe(document.body)
+    if (window.ResizeObserver) scrollHost.observe(new ResizeObserver(() => { this.needsMeasure = true }))
     this.measure(true)
-    this.resetScroll(window.scrollY)
+    this.resetScroll(scrollHost.y())
     this.stop()
   }
 
@@ -133,7 +135,7 @@ class ScrollService {
     document.documentElement.classList.remove('vs-stopped')
     if (!this.stopped) return
     this.stopped = false
-    this.resetScroll(this.virtual ? this.scrollPixel : window.scrollY)
+    this.resetScroll(this.virtual ? this.scrollPixel : scrollHost.y())
     if (!this.started) { this.started = true; if (location.hash) this.toHash(location.hash, true) } // deep link on load
   }
   /** kept for the clock's old call site; the engine is ticked by update() */
@@ -143,11 +145,13 @@ class ScrollService {
    *  position as a fraction and stops any glide, like Lusion; a content-only change just re-reads the limit. */
   private measure(force = false) {
     const doc = document.documentElement
-    const vw = window.innerWidth, vh = window.innerHeight
+    // R7.07 VIEWPORT: "changed" = the stable viewport (touch: an address-bar slide is not a viewport change, so the
+    // reading position is never reset by it); the limit is the page's own (native) one
+    const vw = viewport.w, vh = viewport.h
     const viewportChanged = vw !== this.vw || vh !== this.vh
     const progress = this.limit > 1 ? this.scrollPixel / this.limit : 0
     this.vw = vw; this.vh = vh
-    this.limit = Math.max(1, doc.scrollHeight - vh)
+    this.limit = Math.max(1, scrollHost.max()); void doc
     if (force) return
     if (viewportChanged) { this.tween = null; this.resetScroll(progress * this.limit); this.written = -1 }
     else { this.scrollPixel = this.clampPx(this.scrollPixel); this.targetScrollPixel = this.clampPx(this.targetScrollPixel) }
@@ -313,7 +317,7 @@ class ScrollService {
   }
   private onNativeScroll = () => {
     if (!this.virtual) return
-    const y = window.scrollY
+    const y = scrollHost.y()
     if (Math.abs(y - this.written) > 1) this.external = y
   }
   /** walks up from el: does an inner element (not the page) want this scroll? */
@@ -333,7 +337,7 @@ class ScrollService {
     if (this.needsMeasure) { this.needsMeasure = false; this.measure() }
     const prev = this.scrollPixel
     if (!this.virtual) {
-      const y = window.scrollY
+      const y = scrollHost.y()
       // native touch scroll: a designed glide (anchor, header pill) still eases, written to the page once per frame;
       // the page moving under it (a finger, momentum) ends it and the page's own position wins
       if (this.nativeTouch && !this.stopped && (this.tween || this.isWheelScrolling) && Math.abs(y - this.written) <= 1) {
@@ -351,7 +355,7 @@ class ScrollService {
         this.scrollPixel = this.clampPx(this.scrollPixel + a)
         if (Math.abs(this.scrollPixel - this.written) > 0.01) {
           this.written = this.scrollPixel
-          window.scrollTo({ top: this.scrollPixel, left: 0, behavior: 'instant' as ScrollBehavior })
+          scrollHost.set(this.scrollPixel)
         }
       } else {
         this.scrollPixel = this.targetScrollPixel = y
@@ -424,7 +428,7 @@ class ScrollService {
       // the carrier: one write per frame, only when it moved
       if (Math.abs(this.scrollPixel - this.written) > 0.01) {
         this.written = this.scrollPixel
-        window.scrollTo({ top: this.scrollPixel, left: 0, behavior: 'instant' as ScrollBehavior })
+        scrollHost.set(this.scrollPixel)
       }
       this.wheelAcc = 0; this.keyTarget = null; this.dragAcc = 0
       this.touchWasDown = this.touchDown
@@ -449,18 +453,18 @@ class ScrollService {
     else {
       const el = typeof target === 'string' ? (target.startsWith('#') ? this.findHash(target) : document.querySelector<HTMLElement>(target)) : target
       if (!el) return
-      y = el.getBoundingClientRect().top + window.scrollY
+      y = el.getBoundingClientRect().top + scrollHost.y()
     }
     y = this.clampPx(y + (opts.offset ?? 0))
     if (this.reduced || opts.immediate || (!this.virtual && !this.nativeTouch)) {
       this.tween = null
       this.resetScroll(y)
       this.written = y
-      window.scrollTo({ top: y, left: 0, behavior: 'instant' as ScrollBehavior })
+      scrollHost.set(y)
       opts.onComplete?.()
       return
     }
-    if (!this.virtual) { this.scrollPixel = window.scrollY; this.written = this.scrollPixel } // native touch: glide from where the page is
+    if (!this.virtual) { this.scrollPixel = scrollHost.y(); this.written = this.scrollPixel } // native touch: glide from where the page is
     if (opts.duration && opts.duration > 0) {
       this.velocityPixel = 0; this.history.length = 0; this.isWheelScrolling = false
       this.tween = { from: this.scrollPixel, to: y, t: 0, dur: opts.duration, ease: houseInOut, done: opts.onComplete } // house A→B move: eases in and out, never a hard start
@@ -487,7 +491,7 @@ export class DomRange {
   constructor(public el: HTMLElement) { this.measure() }
   measure() {
     const r = this.el.getBoundingClientRect()
-    this.docTop = r.top + window.scrollY; this.height = r.height
+    this.docTop = r.top + scrollHost.y(); this.height = r.height
     this.docLeft = r.left + window.scrollX; this.width = r.width
   }
   update() {

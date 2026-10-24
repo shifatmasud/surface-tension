@@ -131,6 +131,10 @@ const PHONE_HERO_DPR = 1  // R6.89 (Shifat 4:09 AM Oct 23): phone heroes at 1.0 
 /** R6.89 (Shifat 4:10 AM Oct 23 "keep the TEXT at 1.5 while heroes go to 1.0"): the phone canvas (the GPU text layer) has
  *  its own density now; the hero pass renders into its own target at PHONE_HERO_DPR and is composited up onto it */
 const PHONE_TEXT_DPR = 1.5
+/** R7.07 #10: the phone text layer's density once the page is still (the screen's own, max 2x) */
+const PHONE_TEXT_REST_DPR = 2
+const TEXT_REST_MS = 350
+const TEXT_REST_OFF = q.get('txtrest') === '0'
 /** R7.00 PHONE SHARP (Shifat 4:18 AM Oct 24: "0 pixelation + smooth fast performance"; lusion.co draws its whole scene at
  *  1.5x with cheap quarter-res post). A budget phone's background ran at 0.5 (a 3x stretch onto the 1.5x canvas) all the
  *  time. Now, outside the hero above the water, it refines to SHARP_BG whenever the scroll is still or slow, drops back
@@ -140,6 +144,8 @@ const PHONE_TEXT_DPR = 1.5
  *  off, like the rest refinement on other devices. Hero above water: unchanged density (Shifat 4:20 AM: "No need hi res
  *  on that. Just performance boost"). ?res=old = the R6.99 behaviour; ?bgdpr=1.25 tries another sharp density (QA). */
 const RES_OLD = q.get('res') === 'old'
+/** R7.07 #10: the phone canvas at its rest density, moving frames drawn into a 1.5x sub-rectangle (?txtrest=0 = 7.06) */
+const SUBRECT = SPLIT && tier === 'low' && !TEXT_REST_OFF
 export const PHONE_SHARP = SPLIT && LOW_END_GPU && tier === 'low' && !settings.WEAK_GPU && !RES_OLD
 const SHARP_BG = Math.max(0.5, Math.min(1.5, parseFloat(q.get('bgdpr') || '') || 1.0))
 const SHARP_FAST_V = 18        // css px per 60 Hz frame (~1100 px/s): faster is a fling, the frame may drop
@@ -222,7 +228,7 @@ class Quality {
   textDprFor(w: number, h: number, noRest = false) {
     const n = this.nativeFor(w, h)
     if (tier !== 'low') return n
-    if (SPLIT) return Math.min(n, PHONE_TEXT_DPR) // R6.89: the canvas (the text) at 1.5 on phones; the heroes at their own density
+    if (SPLIT) return Math.min(n, SUBRECT ? PHONE_TEXT_REST_DPR : PHONE_TEXT_DPR) // R6.89 (+ R7.07 #10: the canvas is allocated once at the rest density; renderScale): the canvas (the text) at 1.5 on phones; the heroes at their own density
     if (this.rest && !noRest) return this.textCeil(w, h)
     // W27 R6.65: the text rung drops to 1.5x from level 1 on (the same absolute level as before the ladder grew: it was
     // "the last two of three"), and NEVER lower — the new 0.85 / 0.72 / 0.6 scene steps keep the text at 1.5x, so
@@ -246,7 +252,30 @@ class Quality {
   private restBackoff = REST_BACKOFF_MS
   private restN = 0
   private restBuf = new Float32Array(REST_WINDOW)
+  /** R7.07 #10 (Shifat "10 7 8 9"): the phone's big GPU text is drawn at 1.5x on a 1.75x / 3x screen, so the browser's
+   *  upscale left it slightly soft. Once the page has been fully still for TEXT_REST_MS (no scroll, no finger), outside the
+   *  hero above the water (never any cost there), the canvas / text layer refines to the screen's own density (max 2x) —
+   *  one re-allocation in, one out on the first moving frame; while moving it is exactly 7.06 (1.5x). ?txtrest=0 = 7.06. */
+  textRest = false
+  private textStill = 0
+  private textRestTick(now: number) {
+    if (tier !== 'low' || !SPLIT || TEXT_REST_OFF) return
+    const can = this.enabled && props.introDone && !props.aboveWater && !props.overlayOpen
+    const moving = Math.abs(props.scrollVel) > 0.5 || input.isDown
+    if (!can || moving) { this.textStill = now; this.textRest = false; return }
+    if (!this.textRest && now - this.textStill > TEXT_REST_MS) this.textRest = true
+  }
+  /** R7.07 #10, zero re-allocation (Shifat: "in phone height never grows or shrinks"): the phone canvas is allocated ONCE at
+   *  the screen's own density (max 2x). While anything moves (and always in the hero above the water) the final pass draws
+   *  into a 1.5x sub-rectangle of it, which the compositor scales up to the screen exactly as it scaled the old 1.5x canvas
+   *  (same pixels, same cost); once still, the same buffer is drawn whole: crisp type. Only a viewport and a CSS transform
+   *  change (gl/renderScale.ts), never a canvas or render-target size. 1 = draw the whole buffer. */
+  renderScale(): number {
+    if (!SUBRECT) return 1
+    return this.textRest ? 1 : Math.min(1, PHONE_TEXT_DPR / Math.max(1e-3, props.textDpr || 1))
+  }
   restTick(moving: boolean, now: number) {
+    this.textRestTick(now)
     if (PHONE_SHARP) return this.sharpTick(now)
     // PERFGOV-3: a known low-end phone GPU settles with rest suspended (the native-DPR + SMAA still costs ~4–5x its
     // moving frame on an Adreno 50x and is judged straight back down, a few dropped frames every 30–120 s of idle), so it

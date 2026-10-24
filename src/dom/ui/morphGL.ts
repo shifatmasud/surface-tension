@@ -1,3 +1,4 @@
+import { viewport, PHONE } from '../../core/viewport'
 /**
  * MOCKUP v2 (Shifat 11:44–11:46Z): the slide image comes TOWARD the viewer as a soft body, settles flat, and only then
  * does the card reveal from behind it. A tiny dedicated WebGL canvas draws the flying image as a 32×32 plane:
@@ -112,6 +113,7 @@ class Morph {
       const cv = document.createElement('canvas')
       cv.className = 'morph-gl'; cv.setAttribute('aria-hidden', 'true')
       Object.assign(cv.style, { position: 'fixed', left: '0', top: '0', width: '100vw', height: '100vh', zIndex: '72', pointerEvents: 'none', display: 'none' })
+      { const u = PHONE ? '100svh' : '100dvh'; if (typeof CSS !== 'undefined' && CSS.supports('height', u)) cv.style.height = u }   // R7.07: phones 100svh, everything else 100dvh
       const gl = cv.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: true, depth: false, stencil: false }) as WebGLRenderingContext | null
       if (!gl) { this.failed = true; return false }
       const sh = (t: number, s: string) => { const o = gl.createShader(t)!; gl.shaderSource(o, s); gl.compileShader(o); if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o) || 'sh'); return o }
@@ -157,7 +159,7 @@ class Morph {
     const vid = opt.video && opt.video.readyState >= 2 && opt.video.videoWidth ? opt.video : null
     const t = vid ? null : await this.texture(src); if (!vid && !t) return null
     const gl = this.gl!, cv = this.cv!
-    const dpr = Math.min(window.devicePixelRatio || 1, 2), W = innerWidth, H = innerHeight
+    const dpr = Math.min(window.devicePixelRatio || 1, 2), W = viewport.w, H = viewport.h
     if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr) }
     cv.style.display = 'block'
     gl.viewport(0, 0, cv.width, cv.height); gl.useProgram(this.pr)

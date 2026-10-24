@@ -423,7 +423,7 @@ export function HeroStage() {
     if (!vis) return
     // W22: the stone's dark-chip fill: off in the hero, full once the dive guides the stone (QA: window.__gemFill)
     gemLift.value = (window as any).__gemLift ?? 0.35
-    { const portrait = innerWidth < innerHeight; gemBoost.value = portrait ? 1.15 : 1; gemFeather.value = 1.75   /* W24 R6.37: the 2.75 px portrait feather read as a grey halo on the white lake (scorer-r636 #1); back to 1.75 */ }
+    { const portrait = props.width < props.height; gemBoost.value = portrait ? 1.15 : 1; gemFeather.value = 1.75   /* W24 R6.37: the 2.75 px portrait feather read as a grey halo on the white lake (scorer-r636 #1); back to 1.75 */ }
     gemFill.value = (window as any).__gemFill ?? (0.7 + 0.15 * Math.min(1, Math.max(0, dive.gemMix)))   // W23 (scorer-r621 #1, root 02:55Z): the hero lifts its darkest chips too (0.7; 0.85 in the dive)
     { const W = window as any; if (W.__gemFres !== undefined) (gemMesh.current.material as any).fresnel = W.__gemFres; if (W.__sheenTp !== undefined) sheen.uniforms.u_tp.value = W.__sheenTp; if (W.__sheenWarm !== undefined) sheen.uniforms.u_warm.value = W.__sheenWarm; if (W.__sheenStr !== undefined) sheen.uniforms.u_strength.value = W.__sheenStr; if (W.__gemHide !== undefined) sheenMesh.current.visible = !W.__gemHide }   // QA hooks (W22 stone A/B)
     waterMesh.current.visible = lakeOn; dome.visible = lakeOn
@@ -619,9 +619,9 @@ export function HeroStage() {
         const R = gem.radius * (dive.gemMix > 0 ? dive.gemScale : 1) * 1.1
         const v = st.look.copy(gem.pos).applyMatrix4(c.matrixWorldInverse)
         const dz = Math.max(0.05, -v.z), f = 1 / Math.tan((c.fov * Math.PI) / 360)
-        gemMask.r = (R / dz) * f * innerHeight * 0.5
+        gemMask.r = (R / dz) * f * props.height * 0.5
         v.applyMatrix4(c.projectionMatrix)
-        gemMask.x = (v.x * 0.5 + 0.5) * innerWidth; gemMask.y = (0.5 - v.y * 0.5) * innerHeight; gemMask.on = 1
+        gemMask.x = (v.x * 0.5 + 0.5) * props.width; gemMask.y = (0.5 - v.y * 0.5) * props.height; gemMask.on = 1
       } else gemMask.on = 0
     }
     // CURTAIN (Shifat 13:04Z): while the preloader curtain is lifting, the periodic re-captures wait (the 3 captures of the

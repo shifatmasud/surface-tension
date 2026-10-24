@@ -12,19 +12,50 @@ import { WL_EDGE } from '../water/waterline'
  * u_iridescence is an extra thin-film pass on the wake edges (off = 1:1 with the reference).
  * ?paintdebug draws the trail over a flat grey field so the trail can be judged on its own.
  */
+/** R7.07 HI-RES TRAIL (Shifat 12:15 PM Oct 24: "Hi res the cursor trail without performance issue"). The trail field is
+ *  a 1/4-size texture (ScreenPaint), and one bilinear read of it per pixel drew its piecewise-linear ridges and texel
+ *  steps as blocky, diamond-shaped edges in the smear. The field and the shader maths are unchanged (look locked); only how
+ *  the field is READ changes: 1 = the same single tap with a smooth (C1) in-texel curve (zero extra texture reads: phones
+ *  and weak PCs), 2 = a 4-tap B-spline bicubic (C2, desktop/tablet only). ?trailf=0 = 7.06's plain bilinear read. */
+export function trailFilterMode(lowOrWeak: boolean) {
+  const q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : null
+  const f = q && q.has('trailf') ? parseInt(q.get('trailf') || '0', 10) : (lowOrWeak ? 1 : 2)
+  return f === 0 || f === 1 || f === 2 ? f : 1
+}
 export class ScreenPaintDistortionEffect extends Effect {
-  constructor() {
+  constructor(trailF = 0) {
     const debug = typeof location !== 'undefined' && /[?&]paintdebug/.test(location.search)
     super('ScreenPaintDistortion', /* glsl */ `
+      #define SPD_F ${trailF}
       uniform sampler2D u_screenPaintTexture;
       uniform vec2 u_screenPaintTexelSize;
       uniform float u_amount, u_rgbShift, u_multiplier, u_colorMultiplier, u_shade, u_iridescence, u_debug;
       ${BLUE_NOISE}
       vec3 spd_encode(vec3 c){ c = max(c, 0.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
       vec3 spd_decode(vec3 c){ c = max(c, 0.0); return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
+      vec4 spd_paint(vec2 uv){
+      #if SPD_F == 1
+        vec2 sz = 1.0 / u_screenPaintTexelSize, p = uv * sz + 0.5, i = floor(p), f = p - i;
+        f = f * f * (3.0 - 2.0 * f);
+        return texture2D(u_screenPaintTexture, (i + f - 0.5) * u_screenPaintTexelSize);
+      #elif SPD_F == 2
+        vec2 tx = u_screenPaintTexelSize, p = uv / tx - 0.5, f = fract(p); p -= f;
+        vec2 f2 = f * f, f3 = f2 * f;
+        vec2 w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0, w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+        vec2 w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0, w3 = f3 / 6.0;
+        vec2 g0 = w0 + w1, g1 = w2 + w3, h0 = (w1 / g0 - 0.5 + p) * tx, h1 = (w3 / g1 + 1.5 + p) * tx;
+        return g0.y * (g0.x * texture2D(u_screenPaintTexture, h0) + g1.x * texture2D(u_screenPaintTexture, vec2(h1.x, h0.y)))
+             + g1.y * (g0.x * texture2D(u_screenPaintTexture, vec2(h0.x, h1.y)) + g1.x * texture2D(u_screenPaintTexture, h1));
+      #else
+        return texture2D(u_screenPaintTexture, uv);
+      #endif
+      }
       void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor){
         vec3 bn = getBlueNoise(gl_FragCoord.xy + vec2(17.0, 29.0));
-        vec4 data = texture2D(u_screenPaintTexture, uv);
+        vec4 data = spd_paint(uv);
+      #if SPD_F > 0
+        data += (vec4(bn.yz, bn.xy) - 0.5) * (1.0 / 255.0);           // R7.07: the field is 8-bit, a 1-level blue-noise dither hides its steps (no extra reads)
+      #endif
         float weight = (data.z + data.w) * 0.5;
         vec2 vel = (0.5 - data.xy - 0.001) * 2.0 * weight;           // signed, flipped, fades with paint
         vec2 stepUv = vel * u_amount / 4.0 * u_screenPaintTexelSize * u_multiplier;

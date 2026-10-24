@@ -181,6 +181,8 @@ export const TOOL_POS: [number, number, number][] = [
   [2.3, -19.5, 33.6],
 ]
 
+const GEM_DROP_OLD = typeof location !== 'undefined' && /[?&]gemdrop=old/.test(location.search)
+const sstep = (x: number) => { const t = Math.min(1, Math.max(0, x)); return t * t * (3 - 2 * t) }
 /** The guide gem's path while it sinks (world). After U_LEAD it rides ahead of the camera, high in the frame. */
 const GEM_KEYS: { u: number; p: [number, number, number] }[] = [
   { u: 0.06, p: [0, 0.45, 0] },
@@ -222,7 +224,11 @@ export function gemPath(u: number, pos: THREE.Vector3, target: THREE.Vector3, vf
   _b.copy(out)
   out.lerpVectors(_b, _a, w)
   // v3: past the work the stone sinks ahead of us and settles at the axis of the UI cylinder
-  const t2 = Math.min(1, Math.max(0, (u - 1.0) / 0.2)), w2 = t2 * t2 * (3 - 2 * t2)
+  // R7.07 #7 (Shifat "10 7 8 9"): the drop out of the frame used to take ~3 frames (a tiny blend weight already carries the
+  // stone below the frame, SYS_C is far under the lens there). Same route, same end pose; the first 15 % of the blend now
+  // eases over 0.15 of u (so the fall down the frame reads), the rest (out of frame) lands by u 1.25. ?gemdrop=old = 7.06.
+  const t2 = Math.min(1, Math.max(0, (u - 1.0) / (GEM_DROP_OLD ? 0.2 : 0.25)))
+  const w2 = GEM_DROP_OLD ? t2 * t2 * (3 - 2 * t2) : t2 < 0.6 ? 0.15 * sstep(t2 / 0.6) : 0.15 + 0.85 * sstep((t2 - 0.6) / 0.4)
   if (w2 > 0) {
     _b.copy(SYS_C); _b.y += sysLift() + Math.sin(time * 0.55) * 0.06; _b.x += Math.sin(time * 0.37) * 0.03
     out.lerp(_b, w2)
