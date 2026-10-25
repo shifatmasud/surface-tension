@@ -1,4 +1,4 @@
-import { DIVE_COMMON, CLIP, CAUSTICS_FRAG } from './shaders'
+import { DIVE_COMMON, CLIP, CAUSTICS_FRAG, CZ_LINE } from './shaders'
 
 /**
  * Underwater vegetation — kelp ribbons and seagrass blades, one instanced strip each.
@@ -134,7 +134,7 @@ void main(){
   alb *= 0.9 + 0.1 * sin(h * 23.0);
   vec3 sunAt = exp(-K * d);
   float ndl = abs(dot(N, toSun));
-  float czNew = step(0.001, u_czIntensity);
+  ${CZ_LINE}
   vec3 c = czNew > 0.5 ? vec3(1.0) : causticsAt(surfaceEntry(p), d, dist);
   if (vKind > 0.5) ndl = 0.6 + 0.4 * ndl;              // thin blades scatter light all round
   vec3 lit = sunAt * ndl * mix(0.45 + 0.55 * c, vec3(0.5), czNew) * mix(0.6, 1.0, czNew);

@@ -117,6 +117,11 @@ vec3 causticRGB(vec2 q, float D, float blur){
 float caustic(vec2 q){ return causticRGB(q * 0.8, 1.3, 0.05).g; }
 `
 
+// R7.11: u_czIntensity is 2.2 on every page load (0 only behind ?oldcaus, the before/after QA switch), so the old
+// analytic caustics behind 'czNew' never show; fold the switch at compile time and the compiler drops causticsAt()
+// from the seabed and kelp programs (it was still evaluated per pixel: a uniform ternary is not a guaranteed skip)
+export const CZ_LINE = typeof location !== 'undefined' && /[?&]oldcaus/.test(location.search) ? 'float czNew = step(0.001, u_czIntensity);' : 'const float czNew = 1.0;'
+
 export const CAUSTICS_FRAG = /* glsl */ `
 /** caustics on a surface at depth d whose surface-entry point is q; softened by the pixel footprint (fwidth) */
 vec3 causticsAt(vec2 q, float d, float dist){
@@ -298,7 +303,7 @@ void main(){
   float d = max(-p.y, 0.0);
   vec2 q = surfaceEntry(p);
   float sunL = max(dot(n, -u_sun), 0.0);
-  float czNew = step(0.001, u_czIntensity);
+  ${CZ_LINE}
   vec3 cOld = czNew > 0.5 ? vec3(1.0) : causticsAt(q, d, length(p - u_cam));
   vec3 light = exp(-K * d) * (sunL * mix(0.6 + 0.48 * cOld, vec3(0.55), czNew) * 0.62) + inscatter(vec3(0.0, 1.0, 0.0), d) * 0.55;
   vec3 col = alb * light;
