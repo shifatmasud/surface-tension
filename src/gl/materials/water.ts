@@ -44,6 +44,7 @@ export function createWaterMaterial() {
     u_gem: { value: new THREE.Vector4(0, 0.5, 0, 0) },               // xyz diamond centre, w = caustic strength
     u_gemTint: { value: new THREE.Color('#2f63ff') },
     u_touch: { value: 0 },                                           // 0..1 how deep the stone's tip is in the water (meniscus)
+    u_lipSoft: { value: 1 },                                          // R7.10 PATCHER: the low tiers' soft meniscus lip (0 = build 7, QA)
     u_glint: { value: 1 },
     u_dbg: { value: 0 },
     u_underTex: { value: null as THREE.Texture | null },          // the submerged stone (screen space), for refraction
@@ -56,9 +57,10 @@ export function createWaterMaterial() {
     // shader, so the depth is full-res and exact: the stone's edge and the meniscus line stay crisp) then only reads it back.
     ...(hi ? {} : { u_lakeTex: { value: null as THREE.Texture | null }, u_lakeComp: { value: 0 }, u_lakeHalf: { value: new THREE.Vector2(0, 0) } }),
   }
+  if (/[?&]qa\b/.test(location.search)) ((window as any).__wus ??= []).push(uniforms)   // R7.10 PATCHER QA: lip A/B
   const material = new THREE.ShaderMaterial({
     uniforms,
-    defines: { HI: hi ? 1 : 0 },
+    defines: { HI: hi ? 1 : 0, WSIN: /[?&]whash\b/.test(location.search) ? 0 : 1, WAB: parseInt(new URLSearchParams(location.search).get('wab') || '0') | 0, RX5: /[?&]rx3\b/.test(location.search) ? 0 : 1, RXW: (parseFloat(new URLSearchParams(location.search).get('rxw') || '') || 2.2).toFixed(3), RSV: (parseFloat(new URLSearchParams(location.search).get('rsv') || '') || 0.004).toFixed(5) },   // R7.10 b5: ?wsin = the sine hash
     side: THREE.DoubleSide,
     vertexShader: /* glsl */ `
       uniform sampler2D u_rippleTexture; uniform vec2 u_rippleTexel; uniform float u_poolSize, u_rippleAmp, u_time, u_swell, u_rippleShade;
@@ -88,7 +90,7 @@ export function createWaterMaterial() {
       uniform vec3 u_rippleGate;
       uniform sampler2D u_reflTex; uniform float u_reflOn; uniform float u_gemReflK;
       uniform float u_bedDepth, u_cauRipple, u_refrK; uniform vec3 u_absorb, u_sigS; uniform vec3 u_scatter; uniform vec3 u_bedColor;
-      uniform vec4 u_gem; uniform vec3 u_gemTint; uniform float u_touch, u_glint, u_dbg, u_underOn, u_cau; uniform sampler2D u_underTex; uniform vec2 u_resolution; uniform float u_fogNear, u_fogFar;
+      uniform vec4 u_gem; uniform vec3 u_gemTint; uniform float u_touch, u_lipSoft, u_glint, u_dbg, u_underOn, u_cau; uniform sampler2D u_underTex; uniform vec2 u_resolution; uniform float u_fogNear, u_fogFar;
       uniform float u_wlClip;   // W18-DIVE OVER-UNDER: -1 off, else the lens waterline (screen y); the lake draws above it only
 ${hi ? '' : '      uniform sampler2D u_lakeTex; uniform float u_lakeComp; uniform vec2 u_lakeHalf;   // LAKERES (phones); W29: half a low-res texel, the read-back UV inset\n'}      ${WL_EDGE}
       varying vec3 v_world; varying vec2 v_ruv; varying float v_rmask; varying vec4 v_refl;
@@ -111,7 +113,16 @@ ${hi ? '' : '      uniform sampler2D u_lakeTex; uniform float u_lakeComp; unifor
         return g * u_swell;
       }
       // ---- micro detail: gradient noise with analytic derivatives (fresh implementation) ------
-      vec2 hash2(vec2 p){ p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3))); return -1.0 + 2.0 * fract(sin(p) * 43758.5453); }
+      // R7.10 b5 (Shifat: "possible fastest performance"): a sine-free lattice hash (Hoskins' hash22: three fracts and two
+      // dots, no transcendental) in place of fract(sin(x) * 43758): same statistics (uniform, decorrelated), a different
+      // random instance of the same chop / sand / caustic network. Measured ~3 % of the lake (sim, noise-level): OFF by default,
+      // ?whash = on. ?wab=<bits> = QA ablation (1 caustics, 2 sand, 4 stone mirror, 8 glints, 16 chop, 32 sky)
+      #if WSIN
+      vec2 hash22(vec2 p){ return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453); }
+      #else
+      vec2 hash22(vec2 p){ vec3 p3 = fract(p.xyx * vec3(0.1031, 0.1030, 0.0973)); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.xx + p3.yz) * p3.zy); }
+      #endif
+      vec2 hash2(vec2 p){ return -1.0 + 2.0 * hash22(p); }
       vec3 gnoise(vec2 p){ // value, d/dx, d/dy
         vec2 i = floor(p), f = fract(p);
         vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0), du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
@@ -176,7 +187,12 @@ ${hi ? '' : '      uniform sampler2D u_lakeTex; uniform float u_lakeComp; unifor
       float cells(vec2 p, float t){
         vec2 i = floor(p), f = fract(p); float d1 = 8.0, d2 = 8.0;
         for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
-          vec2 o = vec2(x, y); vec2 h = 0.5 + 0.5 * sin(t + 6.2831 * fract(sin(vec2(dot(i + o, vec2(41.3, 289.1)), dot(i + o, vec2(173.9, 61.7)))) * 7341.3));
+          vec2 o = vec2(x, y);
+          #if WSIN
+          vec2 h = 0.5 + 0.5 * sin(t + 6.2831 * fract(sin(vec2(dot(i + o, vec2(41.3, 289.1)), dot(i + o, vec2(173.9, 61.7)))) * 7341.3));
+          #else
+          vec2 h = 0.5 + 0.5 * sin(t + 6.2831 * hash22(i + o + 17.0));
+          #endif
           float d = length(o + h - f);
           if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
         }
@@ -185,8 +201,8 @@ ${hi ? '' : '      uniform sampler2D u_lakeTex; uniform float u_lakeComp; unifor
       float caustic(vec2 p, float t){
         // WATER LANE: domain-warped so the network reads as focused light, not Voronoi tiles; softer filaments
         p += 0.4 * vec2(gnoise(p * 0.35 + t * 0.06).x, gnoise(p * 0.35 + 5.2 - t * 0.05).x);
-        float a = 1.0 - smoothstep(0.0, 0.26, cells(p * 1.15, t * 0.55));
         #if HI
+          float a = 1.0 - smoothstep(0.0, 0.26, cells(p * 1.15, t * 0.55));
           float b = 1.0 - smoothstep(0.0, 0.3, cells(p * 1.9 + 3.1, -t * 0.42));
           return a * a * 0.6 + a * b * 1.1 + 0.12;
         #else
@@ -242,7 +258,7 @@ ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on p
         // lanes beside rougher ones) instead of one uniform texture: the cue that sells real water at a glance
         // PERF (water-perf): the chop's weight (detailFade × octAA, and the finer octaves fade before the coarse one) is
         // exactly 0 where a pixel spans its wavelength: skip the noise there (adding x * 0 changes nothing)
-        if (detailFade * octAA(fp, 2.1) > 0.0) {
+        if (detailFade * octAA(fp, 2.1) > 0.0 && (WAB & 16) == 0) {
         float gust = 0.5 + 0.5 * gnoise(v_world.xz * 0.16 + vec2(u_time * 0.05, -u_time * 0.02)).x;
         float gustK = mix(0.45, 1.5, smoothstep(0.25, 0.8, gust));
         vec3 n1 = gnoise(v_world.xz * 2.1 + wind);
@@ -261,7 +277,7 @@ ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on p
           float NoV = max(dot(N, V), 0.0);
           float F = 0.02 + 0.98 * pow(1.0 - NoV, 5.0);              // Schlick, IOR 1.333
           vec3 R = reflect(-V, N); R.y = abs(R.y);
-          vec3 refl = skyColor(R, 0.0);
+          vec3 refl = (WAB & 32) != 0 ? u_skyMid : skyColor(R, 0.0);
           // two long dark flags overhead (a product studio's ceiling): steep views reflect the ceiling, where the
           // analytic sky is a flat zenith; the swell and the gusting chop bend their soft edges into moving light
           // lines, which is what lets a high-key lake read as water. Low contrast, so the field stays airy
@@ -273,14 +289,20 @@ ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on p
             refl = mix(refl, refl * vec3(0.8, 0.85, 0.93), strip * 0.7);   // cool dark flags (background darker & cooler)
           }
           // planar reflection of the diamond, wobbled by the surface normal
-          if (u_reflOn > 0.5) {
+          if (u_reflOn > 0.5 && (WAB & 4) == 0) {
             // ripples wobble it (more across than along: water breaks a reflection into horizontal bands), and a short
             // vertical smear of taps stretches it the way a slightly moving surface does
             vec4 ruv = v_refl; ruv.xy += N.xz * vec2(0.1, 0.26) * ruv.w;
             // water breaks a near reflection into horizontal bands that slide sideways: a band-limited wobble across
             // (x) that varies along the view depth (z), growing away from the waterline
             if (octAA(fp, 6.0) > 0.0) {   // PERF (water-perf): the band wobble's weight is exactly 0 past ~2 px bands: skip its 2 noises + 1 tap
+            #if HI || !RX5
             float band = gnoise(vec2(v_world.x * 2.0, v_world.z * 22.0 - u_time * 1.1)).x + 0.5 * gnoise(vec2(v_world.x * 4.0 + 7.0, v_world.z * 41.0 + u_time * 1.6)).x;
+            #else
+            // R7.10 b6: the 41/m octave shifted rows only a few pixels tall, which the sharp mirror turned into a ragged staircase
+            // along the reflection's edge; the low tiers keep the slow 22/m bands (one noise instead of two)
+            float band = 0.8 * gnoise(vec2(v_world.x * 2.0, v_world.z * 22.0 - u_time * 1.1)).x;
+            #endif
             float away = clamp(length(v_world.xz - u_gem.xz) * 1.6, 0.25, 1.0);
             // W25 R6.48 (scorer-r642 #3: a spike at each tip of the dive's mirror lobe): the band wobble shifts whole rows sideways,
             // so at the mirror's outline a row could pull the stone's colour out past its edge as a thin horizontal spike. The wobble
@@ -288,15 +310,27 @@ ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on p
             float rcov = texture2DProj(u_reflTex, ruv).a;
             ruv.x += band * 0.0035 * away * ruv.w * octAA(fp, 6.0) * mix(0.25, 1.0, smoothstep(0.2, 0.8, rcov));   // WATER LANE: gentler bands (0.0075 read as a jagged mosaic)
             }
-            vec2 sv = vec2(0.0, 0.0008) * (1.0 + 4.0 * length(rg));   // WATER LANE: half the smear (it read as a blur blob)
+            // R7.10 b6 (QA on M02s: the now-sharp mirror read as stair-stepped edges / detached shards): water smears a reflection
+            // along the view, more the farther the reflected point is from where the stone meets the water; the smear now grows
+            // from the contact out (riptide v2 got its softness from a 20x45 mirror instead). ?rsv=<base> (b5: 0.0008, flat)
+            vec2 sv = vec2(0.0, RSV) * (1.0 + 4.0 * length(rg)) * mix(0.5, 1.5, smoothstep(0.1, 1.2, length(v_world.xz - u_gem.xz)));
             #if HI
             vec4 pr = texture2DProj(u_reflTex, ruv) * 0.28;
             pr += (texture2DProj(u_reflTex, ruv + vec4(sv, 0.0, 0.0) * ruv.w) + texture2DProj(u_reflTex, ruv - vec4(sv, 0.0, 0.0) * ruv.w)) * 0.22;
             pr += (texture2DProj(u_reflTex, ruv + vec4(sv * 2.6, 0.0, 0.0) * ruv.w) + texture2DProj(u_reflTex, ruv - vec4(sv * 2.6, 0.0, 0.0) * ruv.w)) * 0.14;
             #else
             // WATERRES (Shifat 23:06Z 'just use reduced quality reflection'): phones smear with 3 taps (was 5), same span
+            #if RX5
+            // R7.10 b6 (QA: "ragged stair-stepped shards", v2 = one soft blob): five taps, the centre and an X of four, the X's
+            // arms as wide across as along (in pixels), so the mirror's 2x-magnified edges read as a soft shape, never as steps
+            vec2 sx = vec2(sv.y * RXW * u_resolution.y / max(u_resolution.x, 1.0), sv.y * 1.6);
+            vec4 pr = texture2DProj(u_reflTex, ruv) * 0.32;
+            pr += (texture2DProj(u_reflTex, ruv + vec4(sx, 0.0, 0.0) * ruv.w) + texture2DProj(u_reflTex, ruv - vec4(sx, 0.0, 0.0) * ruv.w)) * 0.17;
+            pr += (texture2DProj(u_reflTex, ruv + vec4(sx.x, -sx.y, 0.0, 0.0) * ruv.w) + texture2DProj(u_reflTex, ruv + vec4(-sx.x, sx.y, 0.0, 0.0) * ruv.w)) * 0.17;
+            #else
             vec4 pr = texture2DProj(u_reflTex, ruv) * 0.4;
             pr += (texture2DProj(u_reflTex, ruv + vec4(sv * 1.6, 0.0, 0.0) * ruv.w) + texture2DProj(u_reflTex, ruv - vec4(sv * 1.6, 0.0, 0.0) * ruv.w)) * 0.3;
+            #endif
             #endif
             gemR = vec4(pr.rgb / max(pr.a, 1e-3), pr.a);
           }
@@ -319,7 +353,7 @@ ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on p
           // so the 9-cell search + domain warp is skipped there (the pixel is bit-identical)
           float cauFade = (1.0 - smoothstep(2.0, 8.0, dist)) * u_cau;    // shallow-bed caustics through clear water
           float cau = 0.32;
-          if (cauFade > 0.0) cau = caustic(cp * 2.0, u_time * 0.7);
+          if (cauFade > 0.0 && (WAB & 1) == 0) cau = caustic(cp * 2.0, u_time * 0.7);
           float focus = 1.0; vec3 focusC = vec3(1.0);
           {
             // where the sun ray that lands here crossed the surface, the sim's curvature acts as a lens: a crest
@@ -337,7 +371,7 @@ ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on p
               #endif
             }
           }
-          vec3 alb = bedAlbedo(bed.xz, fp * (1.0 + tb / max(dist, 0.1)), 1.0 - smoothstep(3.0, 10.0, dist));
+          vec3 alb = (WAB & 2) != 0 ? u_bedColor : bedAlbedo(bed.xz, fp * (1.0 + tb / max(dist, 0.1)), 1.0 - smoothstep(3.0, 10.0, dist));
           float cauL = 0.9 + cauFade * (cau - 0.32) * 0.32;              // a soft network, not a pool-tile cliché
           vec3 sunOnBed = u_sunColor * max(-Ls.y, 0.0) * cauL * focus * focusC * exp(-u_absorb * ls);
           vec3 amb = mix(u_skyMid, u_skyHorizon, 0.4) * 0.42 * exp(-u_absorb * depthHere);
@@ -396,7 +430,7 @@ ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on p
           float glitter = 1.0 - smoothstep(0.45, 0.85, NoV);
           // sun glint (WATER LANE): an anisotropic Ward lobe in the wave's own frame, stretched toward the viewer the
           // way a sun path streaks on water, plus the tight specular core
-          {
+          if ((WAB & 8) == 0) {
             vec3 tv = normalize(vec3(-V.x, 0.0, -V.z) + vec3(1e-4, 0.0, 0.0));
             vec3 t1 = normalize(tv - N * dot(tv, N)), b1 = cross(N, t1);
             float ht = dot(H, t1), hb = dot(H, b1), hn = max(dot(H, N), 1e-3);
@@ -442,9 +476,20 @@ ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on p
             float rr = length(gq);
             float on = step(0.003, u_touch);
             float r0 = u_touch + 0.006;
+            #if HI
             float lip = exp(-pow((rr - r0) / 0.007, 2.0));
             float trough = exp(-pow((rr - r0 - 0.02) / 0.014, 2.0));
             col = col * (1.0 - trough * 0.12 * on) + vec3(1.0) * lip * 0.5 * on;
+            #else
+            // R7.10 PATCHER (Reviewer, M02s 9-10%: "thin bright white rim" where the tip meets the lake): riptide v2 shaded this
+            // lip in the half-density lake target, so it reached the screen as a soft, dim band; the one-pass lake drew it as a
+            // crisp pure-white line. Same lip, as v2 read it: twice as wide, about half as bright, tinted by the gem's light.
+            // (u_lipSoft: 1 = this, 0 = build 7's lip; QA A/B only)
+            float lw = mix(0.007, 0.014, u_lipSoft);
+            float lip = exp(-pow((rr - r0 - 0.003 * u_lipSoft) / lw, 2.0));
+            float trough = exp(-pow((rr - r0 - mix(0.02, 0.024, u_lipSoft)) / mix(0.014, 0.018, u_lipSoft), 2.0));
+            col = col * (1.0 - trough * mix(0.12, 0.1, u_lipSoft) * on) + mix(vec3(1.0), mix(vec3(1.0), u_gemTint, 0.35), u_lipSoft) * lip * mix(0.5, 0.24, u_lipSoft) * on;
+            #endif
           }
           float spill = exp(-dot(gq, gq) * 1.3) * 0.3 + exp(-dot(gq, gq) * 6.0) * 0.34;
           col = mix(col, col * u_gemTint * 1.5 + u_gemTint * 0.2, clamp(spill * 0.45 * u_gem.w * exp(-max(0.2 - u_gem.y, 0.0) * 4.0), 0.0, 1.0));   // WATER LANE: halved (violet halo, review #13)

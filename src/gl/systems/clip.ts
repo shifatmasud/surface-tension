@@ -113,7 +113,11 @@ class Clip {
     if (!this.boundary) {
       this.xfade = false; this.cut = false
       // arm: a neighbouring block is about to enter (either direction) — keep the latest frame of this one
-      if ((owner + 1 < N && this.top(owner + 1) < vh * 1.6) || (owner > 0 && this.top(owner) > -vh * 0.6)) this.capture = owner
+      // R7.10 (transition cost hunt): a boundary that is a cut (the dive → journey push, R6.87) never shows a still, so its
+      // approach keeps no copy either: the copy was a full-screen composite pass every frame for ~1.6 screens before and
+      // ~0.6 after the push (and it kept SMAA from joining the grade pass there). ?divexfade arms it as before.
+      const keep = (b: number) => !(this.CUT && this.FADE.has(b))
+      if ((owner + 1 < N && this.top(owner + 1) < vh * 1.6 && keep(owner + 1)) || (owner > 0 && this.top(owner) > -vh * 0.6 && keep(owner))) this.capture = owner
       this.still = -1
       this.shift = 0; this.scale = 1; this.lag = 0; this.dark = 0; this.radius = 0; this.inset = 0; this.outRadius = 0; this.t = 0
       this.unstyle()

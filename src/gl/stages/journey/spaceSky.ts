@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { vfovFor } from '../../../core/frame'
 import { inner, type Inner } from './timeline'
 import { CREW_CENTER_Y } from './crewmate'
@@ -147,19 +148,81 @@ void main(){
   gl_FragColor = vec4(col * a, 1.0);
 }`
 let rockGeo: THREE.BufferGeometry | null = null
+// R7.10 PATCHER (Shifat 8:32 AM "Need better realistic models" / "Asteroids... not diamonds" / 8:56 "Reference a real one"):
+// the rocks were one flat-shaded, lightly-dented icosphere (320 facets) - under the rim light every facet flashed its own
+// colour and they read as cut gems. Now two real families, after NASA's own pictures:
+//   EROS (NEAR, even variants): elongated, bent peanut with a saddle, beige-grey, big soft craters (+ small ones per pixel)
+//   BENNU (OSIRIS-REx, odd variants): spinning-top / diamond silhouette, dark charcoal rubble pile, boulders + gravel grain
+// Smooth normals, matte low albedo. All variants live in one geometry; each instance keeps one (iVar) and the vertex shader
+// collapses the others to a point (no fragments): one draw, the extra work is vertex-only.
+const ROCK_VARIANTS = 2
+function rockRand(seed: number) { let s = seed; return () => ((s = (s * 16807) % 2147483647) / 2147483647) }
+function rockNoise(seed: number) {
+  // 3D value noise on a hashed lattice (smoothstep-interpolated), deterministic per seed
+  const h = (x: number, y: number, z: number) => { const n = Math.sin(x * 127.1 + y * 311.7 + z * 74.7 + seed * 19.19) * 43758.5453; return n - Math.floor(n) }
+  const sm = (t: number) => t * t * (3 - 2 * t)
+  return (x: number, y: number, z: number) => {
+    const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z), xf = sm(x - xi), yf = sm(y - yi), zf = sm(z - zi)
+    const l = (a: number, b: number, t: number) => a + (b - a) * t
+    return l(l(l(h(xi, yi, zi), h(xi + 1, yi, zi), xf), l(h(xi, yi + 1, zi), h(xi + 1, yi + 1, zi), xf), yf),
+      l(l(h(xi, yi, zi + 1), h(xi + 1, yi, zi + 1), xf), l(h(xi, yi + 1, zi + 1), h(xi + 1, yi + 1, zi + 1), xf), yf), zf) * 2 - 1
+  }
+}
+function rockVariant(k: number) {
+  const eros = k % 2 === 0
+  const g = mergeVertices(new THREE.IcosahedronGeometry(1, 3))   // indexed: smooth normals across the body
+  const r = rockRand(101 + k * 7919), nz = rockNoise(k + 1)
+  // big craters (Eros) / big boulders (Bennu) in the mesh; the small ones are per pixel (rockMaterial)
+  const feats = Array.from({ length: eros ? 4 + Math.floor(r() * 3) : 6 + Math.floor(r() * 4) }, () => ({
+    d: new THREE.Vector3(r() - 0.5, r() - 0.5, r() - 0.5).normalize(),
+    rad: eros ? 0.28 + r() * 0.3 : 0.14 + r() * 0.14, dep: eros ? 0.07 + r() * 0.08 : 0.035 + r() * 0.035,
+  }))
+  const bend = eros ? 0.18 + r() * 0.12 : 0, sq = eros ? 0.4 + r() * 0.1 : 0.88 + r() * 0.1
+  const p = g.attributes.position as THREE.BufferAttribute, v = new THREE.Vector3(), n = p.count
+  const col = new Float32Array(n * 3)
+  for (let i = 0; i < n; i++) {
+    v.fromBufferAttribute(p, i).normalize()
+    const lump = nz(v.x * 1.5, v.y * 1.5, v.z * 1.5) * (eros ? 0.1 : 0.07) + nz(v.x * 3.4 + 5, v.y * 3.4, v.z * 3.4) * (eros ? 0.04 : 0.05)
+    let f = 0, floor = 0
+    for (const c of feats) {
+      const t = Math.acos(Math.min(1, Math.max(-1, v.dot(c.d)))) / c.rad
+      if (eros) {
+        if (t < 1) { f -= c.dep * (1 - t * t); floor = Math.max(floor, 1 - t) }
+        f += c.dep * 0.3 * Math.exp(-(((t - 1) / 0.2) ** 2))
+      } else if (t < 1) f += c.dep * (1 - t * t) * (1 - t * t)
+    }
+    let x: number, y: number, z: number
+    if (eros) {
+      // elongated (x), bent like a banana, pinched into a saddle on its upper side
+      const rad = 1 + lump + f
+      x = v.x * rad * 1.25; y = v.y * rad * sq; z = v.z * rad * (sq + 0.08)
+      const pinch = 1 - 0.32 * Math.exp(-(((x - 0.12) / 0.38) ** 2)) * Math.min(1, Math.max(0, (v.y + 0.25) / 0.8))
+      y *= pinch; z *= 1 - (1 - pinch) * 0.45
+      y += bend * (x * x - 0.5)
+    } else {
+      // spinning top: an equatorial ridge, the poles pulled in (the diamond silhouette)
+      const rad = (1.08 - 0.34 * Math.pow(Math.abs(v.y), 1.15)) * (1 + lump + f)
+      x = v.x * rad; y = v.y * rad * sq; z = v.z * rad
+    }
+    p.setXYZ(i, x, y, z)
+    const mot = 0.9 + nz(v.x * 4 + 3, v.y * 4, v.z * 4) * 0.12
+    const shade = mot * (1 - floor * 0.35)
+    if (eros) col.set([shade * 1.02, shade, shade * 0.95], i * 3)
+    else col.set([shade * 0.6, shade * 0.6, shade * 0.6], i * 3)
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3))
+  g.setAttribute('aVar', new THREE.BufferAttribute(new Float32Array(n).fill(k), 1))
+  g.computeVertexNormals()
+  return g
+}
 function rockGeometry() {
   if (rockGeo) return rockGeo
-  const g = new THREE.IcosahedronGeometry(1, 2)
-  const p = g.attributes.position as THREE.BufferAttribute, v = new THREE.Vector3()
-  for (let i = 0; i < p.count; i++) {
-    v.fromBufferAttribute(p, i)
-    const n = Math.sin(v.x * 3.1 + 1.3) * Math.sin(v.y * 2.7 + 0.4) * Math.sin(v.z * 3.3 + 2.1)
-    const n2 = Math.sin(v.x * 7.3) * Math.sin(v.y * 6.1 + 1.0) * Math.sin(v.z * 8.7)
-    v.multiplyScalar(1 + 0.28 * n + 0.07 * n2).multiply(new THREE.Vector3(1, 0.78, 0.9))
-    p.setXYZ(i, v.x, v.y, v.z)
-  }
-  const ng = g.toNonIndexed(); g.dispose()
-  ng.computeVertexNormals()
+  const parts = Array.from({ length: ROCK_VARIANTS }, (_, k) => rockVariant(k))
+  const ng = mergeGeometries(parts)!
+  parts.forEach((g) => g.dispose())
+  // which body each of the ROCKS instances keeps (instance attribute; the same 7 instances in both scenes)
+  ng.setAttribute('iVar', new THREE.InstancedBufferAttribute(new Float32Array([0, 1, 0, 1, 1, 0, 1]), 1))
+  ng.computeBoundingSphere()
   rockGeo = ng
   return ng
 }
@@ -197,16 +260,76 @@ export function skyFrame(isPortrait: boolean, W: number, H: number) {
   return { I, tJ, tM, fwd, crewC, dC, eye, basis, dWin, winC }
 }
 
+/** R7.10 PATCHER: the rock surface, per pixel (object space, so it sticks to the tumbling body): Eros' small craters and
+ *  Bennu's boulders from one 8-cell crater/boulder field with an analytic slope, regolith bumps, gravel grain in the albedo;
+ *  the sky's fill light is cut to a third and the colour pulled toward grey, so a single hard terminator reads as in NASA's
+ *  pictures; the variant collapse; a one-pixel analytic silhouette fade (coverage AA: the low-density layer the rocks are
+ *  drawn into upsamples a soft edge instead of a stair). Same single draw, same fragment count. */
+function rockMaterial() {
+  const m = new THREE.MeshStandardMaterial({ color: '#8e8e8e', roughness: 0.97, metalness: 0.0, vertexColors: true, transparent: true, depthWrite: true, fog: false })
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aVar;\nattribute float iVar;\nvarying vec3 vRkP; varying vec3 vRkM0; varying vec3 vRkM1; varying vec3 vRkM2; varying float vRkK;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        vRkP = position; vRkK = mod(iVar, 2.0);
+        { mat3 rkM = normalMatrix * mat3(instanceMatrix); vRkM0 = normalize(rkM[0]); vRkM1 = normalize(rkM[1]); vRkM2 = normalize(rkM[2]); }
+        transformed *= 1.0 - step(0.5, abs(aVar - iVar));`)
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+        varying vec3 vRkP; varying vec3 vRkM0; varying vec3 vRkM1; varying vec3 vRkM2; varying float vRkK;
+        float rkH(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
+        vec3 rkH3(vec3 p) { return fract(sin(vec3(dot(p, vec3(127.1, 311.7, 74.7)), dot(p, vec3(269.5, 183.3, 246.1)), dot(p, vec3(113.5, 271.9, 124.6)))) * 43758.5453); }
+        float rkN(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(mix(rkH(i), rkH(i + vec3(1, 0, 0)), f.x), mix(rkH(i + vec3(0, 1, 0)), rkH(i + vec3(1, 1, 0)), f.x), f.y),
+                     mix(mix(rkH(i + vec3(0, 0, 1)), rkH(i + vec3(1, 0, 1)), f.x), mix(rkH(i + vec3(0, 1, 1)), rkH(i + vec3(1, 1, 1)), f.x), f.y), f.z); }
+        // 8-cell crater (eros) / boulder field: xyz = slope in object space, w = cavity (0..1, for the albedo)
+        vec4 rkField(vec3 p, float fq, bool eros) {
+          p *= fq; vec3 b = floor(p - 0.5); vec4 acc = vec4(0.0);
+          for (int i = 0; i < 2; i++) for (int j = 0; j < 2; j++) for (int k = 0; k < 2; k++) {
+            vec3 c = b + vec3(float(i), float(j), float(k)); vec3 rr = rkH3(c);
+            vec3 dv = p - (c + 0.25 + 0.5 * rr); float R = 0.14 + 0.28 * fract(rr.x * 7.31 + rr.y * 3.17);
+            float L = max(length(dv), 1e-4), d = L / R;
+            if (d < 1.5) {
+              float dh;
+              if (eros) { float e = exp(-((d - 1.0) * (d - 1.0)) / 0.04); dh = (d < 1.0 ? 2.6 * d * (1.0 - d * d) : 0.0) - 0.1 * e * (d - 1.0) / 0.02; acc.w = max(acc.w, 1.0 - d); }
+              else { float q = max(1.0 - d * d, 0.0); dh = -4.0 * d * q; acc.w = max(acc.w, -q * 0.6); }
+              acc.xyz += dh * dv / L;
+            }
+          }
+          return acc;
+        }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        bool rkE = vRkK < 0.5;
+        vec4 rkC = rkField(vRkP, rkE ? 3.6 : 10.0, rkE);
+        float rkGf = rkE ? 9.0 : 26.0; float rkG = rkN(vRkP * rkGf);
+        // grain finer than ~2 px aliases into speckle (the PC's half-density rock layer): swap in a coarser octave there
+        rkG = mix(rkN(vRkP * rkGf * 0.38 + 3.0), rkG, clamp(1.6 - 2.2 * length(fwidth(vRkP)) * rkGf, 0.0, 1.0));   // coarser gravel there instead
+        diffuseColor.rgb *= (rkE ? 0.86 + 0.24 * rkG : 0.5 + 0.95 * rkG * rkG) * (1.0 - 0.3 * max(rkC.w, 0.0)) * (1.0 + 0.35 * max(-rkC.w, 0.0));`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        { vec3 gO = rkC.xyz * (rkE ? 0.55 : 0.32);
+          vec3 gV = mat3(vRkM0, vRkM1, vRkM2) * gO; gV -= dot(gV, normal) * normal;
+          normal = normalize(normal - gV); }`)
+      .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
+        reflectedLight.indirectDiffuse *= 0.35;`)
+      .replace('#include <opaque_fragment>', `outgoingLight = mix(outgoingLight, vec3(dot(outgoingLight, vec3(0.299, 0.587, 0.114))), 0.8) * (rkE ? vec3(1.04, 1.0, 0.94) : vec3(1.0));
+      #include <opaque_fragment>
+      { float rkNv = dot(normalize(vNormal), normalize(vViewPosition)) - 0.12;
+        gl_FragColor.a *= smoothstep(0.0, 1.0, clamp(rkNv / max(fwidth(rkNv) * 2.2, 1e-4), 0.0, 1.0)); }`)
+  }
+  m.customProgramCacheKey = () => 'rock710b'
+  return m
+}
+
 /** The rocks + dust of the sky, one instance per scene, laid out by skyFrame and moved by the same clock. */
 export class SkyExtras {
   readonly rocks: THREE.InstancedMesh
-  readonly rockMat = new THREE.MeshStandardMaterial({ color: '#6b6e76', roughness: 0.65, metalness: 0.08, flatShading: true, transparent: true, depthWrite: true, fog: false })
+  readonly rockMat = rockMaterial()
   readonly dust: THREE.Points
   readonly dustMat = new THREE.ShaderMaterial({
     uniforms: { u_time: { value: 0 }, u_pr: { value: 1 }, u_opacity: { value: 1 } }, vertexShader: DUST_VS, fragmentShader: DUST_FS,
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
   })
-  private data: { p: THREE.Vector3; s: number; ax: THREE.Vector3; w: number; ph: number }[] = []
+  private data: { p: THREE.Vector3; s: number; ax: THREE.Vector3; w: number; ph: number; st: THREE.Vector3 }[] = []
   private key = ''
   private dummy = new THREE.Object3D(); private q = new THREE.Quaternion()
   constructor() {
@@ -225,10 +348,13 @@ export class SkyExtras {
       [1.05, 0.2, 0.8, 0.3], [-1.25, -0.05, 0.35, 0.16], [0.95, -0.72, 0.28, 0.12],
     ]
     let s2 = 11; const r = () => ((s2 = (s2 * 16807) % 2147483647) / 2147483647)
+    let s3 = 29; const r2 = () => ((s3 = (s3 * 16807) % 2147483647) / 2147483647)
     this.data = place.map(([x, y, z, sc]) => {
       const dz = F.dWin + z * F.dC * (F.tJ / F.tM)
       const p = new THREE.Vector3(x * 0.34 * dz, y * 0.22 * dz, -dz).applyMatrix4(F.basis).add(F.eye)
-      return { p, s: sc * F.dC * 0.1, ax: new THREE.Vector3(r() - 0.5, r() - 0.5, r() - 0.5).normalize(), w: 0.05 + r() * 0.12, ph: r() * 6.28 }
+      const o = { p, s: sc * F.dC * 0.1, ax: new THREE.Vector3(r() - 0.5, r() - 0.5, r() - 0.5).normalize(), w: 0.05 + r() * 0.12, ph: r() * 6.28 }
+      // R7.10 PATCHER: each rock its own proportions (a fixed second stream, so the layout above is unchanged)
+      return { ...o, st: new THREE.Vector3(0.8 + r2() * 0.4, 0.75 + r2() * 0.4, 0.8 + r2() * 0.35) }
     })
     // the dust's resting frame: at the window, square to the journey's opening view
     this.dust.position.copy(F.winC); this.dust.quaternion.setFromRotationMatrix(F.basis)
@@ -240,7 +366,7 @@ export class SkyExtras {
       this.dummy.position.copy(R.p)
       this.dummy.position.y += Math.sin(time * 0.2 + R.ph) * R.s * 0.15
       this.q.setFromAxisAngle(R.ax, R.ph + time * R.w)
-      this.dummy.quaternion.copy(this.q); this.dummy.scale.setScalar(R.s)
+      this.dummy.quaternion.copy(this.q); this.dummy.scale.copy(R.st).multiplyScalar(R.s)
       this.dummy.updateMatrix(); this.rocks.setMatrixAt(i, this.dummy.matrix)
     }
     this.rocks.instanceMatrix.needsUpdate = true

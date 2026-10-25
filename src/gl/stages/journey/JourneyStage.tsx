@@ -18,6 +18,9 @@ import { runToEnd, prewarm, type CompileJob } from '../../prewarm' // PERFGOV
 import { buildFireflies, buildCanopy } from './nightFx'
 import { buildTunnel, buildTunnelLights } from './tunnel'
 import { buildTunnelBlur } from './tunnelBlur' // TUNNEL DRAMA: half-res zoom blur
+const ROCK_HI = settings.TIER === 'low' && !/[?&]rocklo\b/.test(location.search)   // R7.10 b7
+let _rockL: CrewLayer | null = null
+const rockLayer = () => (_rockL ??= new CrewLayer(13))   // R7.10 b7: the rocks' own layer (13: not the crewmate's 12)
 const OLDT = typeof location !== 'undefined' && /[?&]oldtrans/.test(location.search) // R7.04 QA: ?oldtrans = 7.03 transitions
 
 // R7.05 GROUND: ?oldground = the 7.04 land during the descent (A/B)
@@ -510,9 +513,14 @@ export function JourneyStage(): JSX.Element {
       gl.clear()
       // R6.87 SPLIT: until the glass cracks the crewmate is drawn at the canvas density (crewLayer.ts), not in this target
       const split = !!S.crewL && S.crewIn.root.visible && p < T.HIT1 - 0.0015
+      // R7.10 b7: on the low tiers (his M02s + PC: a 352x512 inner target stretched ~3x) the rocks leave this target with the
+      // crewmate and are drawn at its density in the crew layer (?rocklo = in the target, as riptide v2)
+      const rocks = S.skyExtras.rocks, rockHi = split && ROCK_HI && rocks.visible && S.skyExtras.rockMat.opacity > 0.002
       if (split) S.crewIn.root.visible = false
+      if (rockHi) rocks.visible = false
       gl.render(S.inner, S.icam)
       if (split) S.crewIn.root.visible = true
+      if (rockHi) rocks.visible = true
       if (split && S.crewL) {
         const ph = screenPx(S, state.camera as THREE.PerspectiveCamera, W, H)
         const hd = (props.heroDpr || props.textDpr || 1) * (nb.active ? nb.scale : 1)   // R6.89: hero density
@@ -521,6 +529,19 @@ export function JourneyStage(): JSX.Element {
         if (Math.max(cw, ch) > lim) { const k = lim / Math.max(cw, ch); cw *= k; ch *= k }
         S.crewL.render(gl, S.inner, S.icam, S.crewIn.root, S.rt, S.one, cw, ch)
         ;(S.screenMat.uniforms.u_crewScale.value as THREE.Vector2).copy(S.crewL.scale)
+        gl.setRenderTarget(S.rt)
+      }
+      // R7.10 b7: the rocks at the background density (the screen's own pass samples them: no composite)
+      S.screenMat.uniforms.u_rockOn.value = rockHi ? 1 : 0
+      if (rockHi) {
+        const rl = rockLayer()
+        const ph = screenPx(S, state.camera as THREE.PerspectiveCamera, W, H), bd = (props.dpr || 1) * (nb.active ? nb.scale : 1)
+        let rh = Math.min(H * 1.2, ph) * bd, rw = rh * (S.sw / S.sh)
+        const lim = Math.max(W, H) * 1.25 * (props.dpr || 1)
+        if (Math.max(rw, rh) > lim) { const k = lim / Math.max(rw, rh); rw *= k; rh *= k }
+        rl.render(gl, S.inner, S.icam, rocks, S.rt, S.one, rw, rh, rocks)
+        S.screenMat.uniforms.u_rock.value = rl.rt.texture
+        ;(S.screenMat.uniforms.u_rockScale.value as THREE.Vector2).copy(rl.scale)
         gl.setRenderTarget(S.rt)
       }
       if (S.crewScreen) S.crewScreen.visible = split

@@ -132,8 +132,16 @@ const BG_FLOOR = SPLIT && LOW_END_GPU ? 0.5 : 0.6
  *  background was drawn at 0.5-0.75 of the CSS size and stretched 2.3-3.5x onto a 1.5-1.75 canvas (the stairs he sees).
  *  Phones now draw the scene and the heroes at ONE static density (DENS_PHONE, never moved by the governor or a rest
  *  toggle: no re-allocation, no pop), so the stretch to the canvas is 1.2x moving / 1.4x at rest. ?dens=old = 7.08 */
-export const DENS_ONE = SPLIT && tier === 'low' && PHONE && q.get('dens') !== 'old'   // phones only (tablet, PC unchanged)
+// R7.10 (Shifat 12:52 AM Oct 25: "My Pc should get equal or better quality than my phone"): his weak-GPU PC (Intel UHD 600,
+// &weakgpu) took the 7.07 governed background, 0.5 css-density in every section (sim), half the phone's 1.0 below the water.
+// It now takes the phone's one static density too (1.0 below the water = its native 1:1, 0.5 above it, no governor, no rest
+// refine, no CAS on top). Its canvas, heroes and text stay at native 1:1 (a 1.25 supersample on a 1x screen is a non-integer
+// downscale by the browser = softer). ?dens=old = the 7.09 paths.
+export const DENS_ONE = SPLIT && tier === 'low' && (PHONE || settings.WEAK_GPU) && q.get('dens') !== 'old'   // phones + weak-GPU PCs (tablet, desktop unchanged)
 const DENS_PHONE = Math.max(0.75, Math.min(1.75, parseFloat(q.get('dens') || '') || 1.0))   // simulated: 1.25 cost 1.3-2.3x 7.07 moving, 1.0 holds it outside the hero
+/** R7.10 b5 (Shifat 4:42 AM: cost <= riptide v2 on BOTH devices, every section): the weak PC below the water was at its native
+ *  1.0 since b1 (1.5-2.2x riptide v2 there, sim); it is back at riptide v2's 0.5 (its governor floor; headless sim). ?pcund=<x> */
+const DENS_UNDER = settings.WEAK_GPU && !PHONE ? Math.max(0.5, Math.min(1, parseFloat(q.get('pcund') || '') || 0.5)) : DENS_PHONE
 /** R7.08c (Shifat 8:22 PM on his M02s: "hero feels jittery"; 4:20 AM Oct 24: the hero above the water needs "no hi res, just
  *  performance"): above the water the background (sky, lake, haze: soft by nature) holds 7.07's density (0.5); the gem
  *  keeps its own sharp MSAA layer. One switch per crossing (it rides the waterline wobble), never while moving inside a
@@ -230,7 +238,7 @@ class Quality {
   dprFor(w: number, h: number, noRest = false) {
     this.w = w; this.h = h
     const td = this.textDprFor(w, h, noRest)
-    if (DENS_ONE) return Math.min(td, this.nativeFor(w, h), props.aboveWater ? DENS_ABOVE : DENS_PHONE)   // R7.08b: static, same moving and still (R7.08c: per side of the waterline)
+    if (DENS_ONE) return Math.min(td, this.nativeFor(w, h), props.aboveWater ? DENS_ABOVE : DENS_UNDER)   // R7.08b: static, same moving and still (R7.08c: per side of the waterline)
     const moving = Math.min(td, Math.max(BG_FLOOR, Math.min(this.stepAt(this.level), this.cap(w, h))))
     if (!this.rest || noRest) return moving
     return Math.min(td, Math.max(moving, Math.min(this.restTarget(w, h), this.restCap)))
@@ -292,7 +300,7 @@ class Quality {
   restTick(moving: boolean, now: number) {
     this.textRestTick(now)
     if (DENS_ONE) {   // R7.08b: one static density, no background rest refinement
-      if (props.aboveWater !== this.densAbove) { this.densAbove = props.aboveWater; if (DENS_ABOVE !== DENS_PHONE) { const s = this.state(); this.listeners.forEach((fn) => fn(s)) } }   // R7.08c: re-size once per waterline crossing
+      if (props.aboveWater !== this.densAbove) { this.densAbove = props.aboveWater; if (DENS_ABOVE !== DENS_UNDER) { const s = this.state(); this.listeners.forEach((fn) => fn(s)) } }   // R7.08c: re-size once per waterline crossing
       return
     }
     if (PHONE_SHARP) return this.sharpTick(now)

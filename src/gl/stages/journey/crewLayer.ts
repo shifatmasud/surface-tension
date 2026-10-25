@@ -16,6 +16,8 @@ const FS = /* glsl */ `uniform sampler2D u_depth; uniform vec2 u_dscale; varying
 
 export class CrewLayer {
   readonly on = SPLIT
+  /** R7.10 b7: the layer this instance draws (the crewmate's by default; the journey's rock layer uses its own) */
+  readonly layer: number
   rt: THREE.WebGLRenderTarget
   /** the drawn part's share of the allocation (the overlay samples uv × scale) */
   scale = new THREE.Vector2(1, 1)
@@ -41,7 +43,8 @@ export class CrewLayer {
     }
     return [x0, y0, x1, y1]
   }
-  constructor() {
+  constructor(layer = CREW_LAYER) {
+    this.layer = layer
     this.rt = new THREE.WebGLRenderTarget(16, 16, { type: THREE.HalfFloatType, depthBuffer: true, samples: LOW_END_GPU || settings.TIER === 'low' ? 0 : 4, generateMipmaps: false })
     this.rt.texture.minFilter = this.rt.texture.magFilter = THREE.LinearFilter
     this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.depthMat); this.quad.frustumCulled = false; this.qs.add(this.quad)
@@ -61,14 +64,14 @@ export class CrewLayer {
   }
   /** mark a crewmate (and the lights of its scene) for the crew-only draw */
   private mark(scene: THREE.Scene, crew: THREE.Object3D) {
-    crew.traverse((o) => o.layers.enable(CREW_LAYER))
-    if (!this.lit.has(scene)) { this.lit.add(scene); scene.traverse((o) => { if ((o as THREE.Light).isLight) o.layers.enable(CREW_LAYER) }) }
+    crew.traverse((o) => o.layers.enable(this.layer))
+    if (!this.lit.has(scene)) { this.lit.add(scene); scene.traverse((o) => { if ((o as THREE.Light).isLight) o.layers.enable(this.layer) }) }
   }
   /**
    * Draw the crewmate alone, w × h px, from `cam` (the same camera and projection the background target used), tested
    * against that target's depth (`bgScale`: the drawn part's share of its allocation).
    */
-  render(gl: THREE.WebGLRenderer, scene: THREE.Scene, cam: THREE.Camera, crew: THREE.Object3D, bg: THREE.WebGLRenderTarget, bgScale: THREE.Vector2, w: number, h: number) {
+  render(gl: THREE.WebGLRenderer, scene: THREE.Scene, cam: THREE.Camera, crew: THREE.Object3D, bg: THREE.WebGLRenderTarget, bgScale: THREE.Vector2, w: number, h: number, extra: THREE.Object3D | null = null) {
     w = Math.max(16, Math.round(w)); h = Math.max(16, Math.round(h))
     this.fit(w, h)
     this.mark(scene, crew)
@@ -85,6 +88,8 @@ export class CrewLayer {
       this.v.applyMatrix4(cam.projectionMatrix)
       x0 = Math.min(x0, this.v.x); x1 = Math.max(x1, this.v.x); y0 = Math.min(y0, this.v.y); y1 = Math.max(y1, this.v.y)
     }
+    // R7.10 b7: `extra` = draw the whole drawn part (the journey's rock layer: the rocks sit all around the frame)
+    if (extra && extra.visible) { extra.traverse((o) => o.layers.enable(this.layer)); full = true }
     if (full) { x0 = -1; y0 = -1; x1 = 1; y1 = 1 }
     const m = 0.04
     x0 = Math.max(-1, x0 - m); y0 = Math.max(-1, y0 - m); x1 = Math.min(1, x1 + m); y1 = Math.min(1, y1 + m)
@@ -106,7 +111,7 @@ export class CrewLayer {
         this.depthMat.uniforms.u_depth.value = bg.depthTexture; this.depthMat.uniforms.u_dscale.value.copy(bgScale)
         gl.render(this.qs, this.qc)
       }
-      scene.background = null; cam.layers.set(CREW_LAYER)
+      scene.background = null; cam.layers.set(this.layer)
       try { gl.render(scene, cam) } finally { cam.layers.mask = mask; scene.background = bgd }
     }
     gl.setClearColor(cc, ca); gl.autoClear = auto; gl.setRenderTarget(prev)

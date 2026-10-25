@@ -9,7 +9,7 @@ import { portrait } from '../../../core/frame'
 import { engine } from '../../engine'
 import { GEM_LAYER } from '../hero/HeroStage'
 import { brilliantGeometry } from '../hero/diamond'
-import { dive, diveRays, DIVE_LAYER, TOOL_POS, floorH, PORT, SINK_M } from './diveState'
+import { dive, diveRays, diveLo, DIVE_LAYER, TOOL_POS, floorH, PORT, SINK_M } from './diveState'
 import { Floaters } from './floaters' // FLOATERS HOOK
 import { Bubbles } from '../../fx/bubbles' // FX HOOK (CINEMATIC)
 import { browser } from '../../../services/settings'
@@ -18,7 +18,7 @@ import { applyCaustics, causticUniforms, causticsFrame } from '../../water/caust
 import { DeepSea } from './DeepSea'
 import { UiCylinder } from './UiCylinder'
 import { prewarm, runToEnd } from '../../prewarm' // PERFGOV
-import { backdropVert, backdropFrag, floorVert, floorFrag, siltVert, siltFrag, starVert, starFrag } from './shaders'
+import { backdropVert, backdropFrag, BACKDROP_AMB, DIVE_COMMON as DC_LO, floorVert, floorFrag, siltVert, siltFrag, starVert, starFrag } from './shaders'
 
 const ss = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
 const Q = typeof location !== 'undefined' ? location.search : ''
@@ -89,6 +89,18 @@ function* plantForestSteps(nKelp: number, nGrass: number): Generator<unknown, Pl
     fShape.push(wd, ph, tw, 0, wd, ph, tw + 1.5708, 0)
   }
   return { kelp, kShape, grass, gShape, fore, fShape }
+}
+
+/** R7.10 b8: the plants far to near (from the dive's view, looking +z), so their soft edges blend over what is behind them */
+const KELP_SOFT = !/[?&]kelphard\b/.test(Q)
+function farFirst(root: number[], shape: number[]): [number[], number[]] {
+  const n = root.length / 4, ix = Array.from({ length: n }, (_, i) => i)
+  const dd = (i: number) => Math.hypot(root[i * 4], root[i * 4 + 1] + 4, root[i * 4 + 2] - 2)
+  const key = ix.map(dd)
+  ix.sort((a, b) => key[b] - key[a])
+  const r: number[] = [], s: number[] = []
+  for (const i of ix) { for (let k = 0; k < 4; k++) { r.push(root[i * 4 + k]); s.push(shape[i * 4 + k]) } }
+  return [r, s]
 }
 
 function strip(segs: number, n: number, root: number[], shape: number[]) {
@@ -166,12 +178,38 @@ export function DiveStage() {
       uniforms: { ...u, u_dpr: { value: 1 } },
       transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
     })
-    const veg = new THREE.ShaderMaterial({ vertexShader: vegVert, fragmentShader: vegFrag, uniforms: { ...u, u_part: { value: 2.6 } }, defines, side: THREE.DoubleSide })
+    const veg = new THREE.ShaderMaterial({ vertexShader: vegVert, fragmentShader: vegFrag, uniforms: { ...u, u_part: { value: 2.6 } }, defines: KELP_SOFT ? { ...defines, SOFT: 1 } : defines, side: THREE.DoubleSide, transparent: KELP_SOFT })   // R7.10 b8: soft edges (blended, depth still written)
     const vegFore = new THREE.ShaderMaterial({ vertexShader: vegVert, fragmentShader: vegFrag, uniforms: { ...u, u_part: { value: 2.6 } }, defines: { ...defines, FORE: 1 }, side: THREE.DoubleSide, transparent: true, depthWrite: false })
     const vegMask = new THREE.ShaderMaterial({ vertexShader: vegVert, fragmentShader: vegFrag, uniforms: { ...u, u_part: { value: 2.6 } }, defines: { ...defines, MASK: 1 }, side: THREE.DoubleSide, depthTest: false, depthWrite: false })
     ;[floor, veg, vegFore].forEach((m) => applyCaustics(m))
     causticUniforms.u_czSun.value = u.u_sun.value
     const rayMask = new THREE.ShaderMaterial({ vertexShader: rayMaskVert, fragmentShader: rayMaskFrag, uniforms: { ...u, u_invVP: { value: diveRays.invVP }, u_sunInfo: { value: diveRays.sun } }, defines, depthTest: false, depthWrite: false })
+    // R7.10 SPLIT DENSITY: the same sphere drawn from the half-density shading (diveState.diveLo)
+    const backdropLo = new THREE.ShaderMaterial({
+      vertexShader: backdropVert, fragmentShader: /* glsl */ `
+${DC_LO}
+uniform sampler2D tLo; uniform vec2 u_full, u_loSize;
+varying vec3 vDir;
+void main(){
+  // Catmull-Rom from 5 bilinear taps: as crisp as the smooth volume ever is, no bilinear blur, no ringing worth a pixel
+  vec2 sp = gl_FragCoord.xy / u_full * u_loSize, tp = floor(sp - 0.5) + 0.5, f = sp - tp;
+  vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f)), w1 = 1.0 + f * f * (-2.5 + 1.5 * f), w2 = f * (0.5 + f * (2.0 - 1.5 * f)), w3 = f * f * (-0.5 + 0.5 * f);
+  vec2 w12 = w1 + w2, t0 = (tp - 1.0) / u_loSize, t3 = (tp + 2.0) / u_loSize, t12 = (tp + w2 / w12) / u_loSize;
+  vec3 c = texture2D(tLo, vec2(t12.x, t0.y)).rgb * (w12.x * w0.y) + texture2D(tLo, vec2(t0.x, t12.y)).rgb * (w0.x * w12.y)
+         + texture2D(tLo, t12).rgb * (w12.x * w12.y) + texture2D(tLo, vec2(t3.x, t12.y)).rgb * (w3.x * w12.y)
+         + texture2D(tLo, vec2(t12.x, t3.y)).rgb * (w12.x * w3.y);
+  float ws = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
+  vec3 col = max(c / ws, 0.0);
+  vec3 dir = normalize(vDir);
+  float jit = texture2D(u_bn, gl_FragCoord.xy / 64.0).r;   // the same static blue noise, at the full density
+  ${BACKDROP_AMB}
+  gl_FragColor = vec4(col, 1.0);
+}`,
+      uniforms: { ...u, tLo: { value: null }, u_full: { value: new THREE.Vector2(1, 1) }, u_loSize: { value: new THREE.Vector2(1, 1) } },
+      side: THREE.BackSide, depthTest: false, depthWrite: false,
+    })
+    const backdropLoPass = new THREE.ShaderMaterial({ vertexShader: backdropVert, fragmentShader: backdropFrag, uniforms: backdrop.uniforms, side: THREE.BackSide, depthTest: false, depthWrite: false, defines: { ...defines, BD_LO_PASS: 1 } })
+    diveLo.full = backdrop; diveLo.lo = backdropLoPass; diveLo.blit = backdropLo; diveLo.split = () => u.u_split.value as number
     return { backdrop, floor, silt, stars, veg, vegFore, vegMask, rayMask }
   }, [u, hi, low])
 
@@ -196,8 +234,8 @@ export function DiveStage() {
     stars.setAttribute('position', new THREE.BufferAttribute(sp, 3))
     stars.setAttribute('aRand', new THREE.BufferAttribute(rnd(starN), 3))
     const f = plantForest(320, 6400)
-    const kelp = strip(low ? 18 : 30, f.kelp.length / 4, f.kelp, f.kShape)
-    const grass = strip(low ? 4 : 6, f.grass.length / 4, f.grass, f.gShape)
+    const kelp = strip(low ? 18 : 30, f.kelp.length / 4, ...(KELP_SOFT ? farFirst(f.kelp, f.kShape) : [f.kelp, f.kShape] as [number[], number[]]))
+    const grass = strip(low ? 4 : 6, f.grass.length / 4, ...(KELP_SOFT ? farFirst(f.grass, f.gShape) : [f.grass, f.gShape] as [number[], number[]]))
     const fore = strip(low ? 18 : 30, f.fore.length / 4, f.fore, f.fShape)
     const quad = new THREE.PlaneGeometry(2, 2)
     return { sphere, floor, silt, stars, kelp, grass, fore, quad }
@@ -330,10 +368,10 @@ export function DiveStage() {
 
   return (
     <group ref={group} visible={false}>
-      <mesh ref={backdrop} geometry={geos.sphere} material={mats.backdrop} renderOrder={10} frustumCulled={false} onUpdate={(o) => o.layers.set(DIVE_LAYER)} />
+      <mesh ref={(m) => { backdrop.current = m!; diveLo.mesh = m }} geometry={geos.sphere} material={mats.backdrop} renderOrder={10} frustumCulled={false} onUpdate={(o) => o.layers.set(DIVE_LAYER)} />
       <mesh geometry={geos.floor} material={mats.floor} position={[0, 0, 28]} renderOrder={11} frustumCulled={false} onUpdate={(o) => o.layers.set(DIVE_LAYER)} />
-      {!QA.noVeg && <mesh geometry={geos.kelp} material={mats.veg} renderOrder={11} frustumCulled={false} onUpdate={(o) => o.layers.set(DIVE_LAYER)} />}
-      {!QA.noVeg && <mesh geometry={geos.grass} material={mats.veg} renderOrder={11} frustumCulled={false} onUpdate={(o) => o.layers.set(DIVE_LAYER)} />}
+      {!QA.noVeg && <mesh geometry={geos.kelp} material={mats.veg} renderOrder={11.5} frustumCulled={false} onUpdate={(o) => o.layers.set(DIVE_LAYER)} />}
+      {!QA.noVeg && <mesh geometry={geos.grass} material={mats.veg} renderOrder={11.4} frustumCulled={false} onUpdate={(o) => o.layers.set(DIVE_LAYER)} />}
       {!QA.noVeg && <mesh geometry={geos.fore} material={mats.vegFore} renderOrder={14} frustumCulled={false} onUpdate={(o) => o.layers.set(DIVE_LAYER)} />}
       <points geometry={geos.silt} material={mats.silt} renderOrder={12} frustumCulled={false} onUpdate={(o) => o.layers.set(DIVE_LAYER)} />
       <points geometry={geos.stars} material={mats.stars} renderOrder={13} frustumCulled={false} onUpdate={(o) => o.layers.set(DIVE_LAYER)} />

@@ -113,7 +113,7 @@ void main(){
       if (inl > a) { a = inl; leaf = 1.0 - abs(pe) / max(hw, 1e-3) * 0.6; }
     }
   }
-#ifdef FORE
+#if defined(FORE) || defined(SOFT)
   if (a < 0.02) discard;
 #else
   if (a < 0.5) discard;
@@ -158,6 +158,11 @@ void main(){
   // close to the lens: a darker, softer silhouette that only carries the backlight
   col = mix(fogC * 0.3, col, 0.4);
   gl_FragColor = vec4(col, a * 0.92 * smoothstep(0.35, 1.2, dist));
+#elif defined(SOFT)
+  // R7.10 b8 (Shifat's real M02s: "blocky kelp edges"): the analytic edge coverage is kept instead of a 0.5 cut (the cut
+  // made every frond and blade edge a 1-pixel stair, stretched 1.75x onto his screen). The plants are drawn far to near
+  // (DiveStage sorts the instances), so each edge blends over what is really behind it
+  gl_FragColor = vec4(col, a);
 #else
   gl_FragColor = vec4(col, 1.0);
 #endif

@@ -140,37 +140,9 @@ export class ScreenPaintDistortionEffect extends Effect {
  * tint, a soft vignette, a fade toward the section colour, and a blue-noise 1/255 dither to kill banding.
  * Also hosts the surface-break band for the dive (a refractive waterline swept across the frame).
  */
-export class GradeEffect extends Effect {
-  constructor() {
-    super('Grade', /* glsl */ `
-      uniform float u_exposure, u_saturation, u_contrast, u_brightness, u_vignette, u_vignetteSoft, u_fade, u_lift;
-      uniform vec3 u_tint, u_fadeColor;
-      uniform float u_waterline;   // -1 hidden, else the lens waterline's screen y (0 bottom … 1 top; > 1 = just passed above the frame)
-      uniform float u_wlK;         // W18-DIVE OVER-UNDER: strength of the underwater half's look (tint, refraction, caustic shimmer)
-      uniform float u_wlWob;       // the crossing: a brief wobble through the whole frame as the line rises past the lens
-      uniform float u_wlMo;        // 1 = motion, 0 = reduced motion (no ripple, no droplets, no wobble)
-      uniform float u_wlTime;
-      uniform float u_aspect;
-      ${BLUE_NOISE}
-      ${WL_EDGE}
-      float wlHash(float n){ return fract(sin(n) * 43758.5453); }
-      float wlNoise(float x){ float i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f); return mix(wlHash(i), wlHash(i + 1.0), f) * 2.0 - 1.0; }
-      /** the line's screen y at this x: the same edge the water world and the lake are cut along (water/waterline.ts) */
-      float wlLine(vec2 uv){ return u_waterline + wlEdge(uv.x * u_aspect, u_wlTime); }
-      /** droplets clinging to the dome just above the meniscus: xy = offset from the drop's centre (in drop radii), z = coverage */
-      vec3 wlDrop(vec2 uv){
-        float d = uv.y - u_waterline;
-        if (u_wlMo < 0.5 || d < 0.0 || d > 0.2) return vec3(0.0);
-        vec2 g = vec2(uv.x * u_aspect, d) * 24.0;
-        vec2 id = floor(g), f = fract(g) - 0.5;
-        float h1 = wlHash(id.x * 7.13 + id.y * 13.71 + 3.0), h2 = wlHash(id.x * 3.31 - id.y * 5.97 + 17.0);
-        if (h1 > 0.38) return vec3(0.0);
-        vec2 q = f - (vec2(h1 / 0.38, h2) - 0.5) * 0.5;
-        float r = mix(0.14, 0.34, h2) * (1.0 - smoothstep(0.03, 0.2, d));
-        float l = length(q / vec2(1.0, 1.3));
-        return vec3(q / max(r, 1e-3), 1.0 - smoothstep(r * 0.8, r, l));
-      }
-      void mainUv(inout vec2 uv){
+/** the grade's lens mainUv (the waterline meniscus, ripple, droplets, crossing wobble); a no-op while u_waterline < -0.5 */
+const WL_HARD = /[?&]wlhard\b/.test(location.search)   // R7.10 b6: the old sub-pixel waterline edge
+const GRADE_UV = /* glsl */ `void mainUv(inout vec2 uv){
         if (u_waterline > -0.5) {
           float L = wlLine(uv);
           float d = uv.y - L;
@@ -188,16 +160,90 @@ export class GradeEffect extends Effect {
           uv.y = mix(uv.y, Lm + (uv.y - Lm) * 0.95, uw);
           // droplets above the line: each a tiny inverted lens
           vec3 dr = wlDrop(uv);
+          #ifdef WL_AA
+          uv -= dr.xy * dr.z * 0.010 * smoothstep(1.0, 2.5, wlR / 24.0 / texelSize.y);   // R7.10 b9: sub-pixel drops do not refract
+          #else
           uv -= dr.xy * dr.z * 0.010;
+          #endif
           // the crossing: the frame wobbles once as the line rises past the lens
           if (u_wlWob > 0.0) {
             float w = u_wlWob * u_wlMo;
             uv += w * vec2(0.010 * sin(uv.y * 14.0 + t * 3.1 + sin(uv.x * 6.0)), 0.014 * sin(uv.x * u_aspect * 10.0 - t * 2.7 + uv.y * 4.0));
           }
         }
+      }`
+export class GradeEffect extends Effect {
+  /** R7.10: withUv = false builds the same grade without its mainUv (a UV transform cannot share an EffectPass with a
+   *  convolution effect such as SMAA); used only on frames whose waterline is hidden, where mainUv does nothing */
+  constructor(withUv = true) {
+    super(withUv ? 'Grade' : 'GradeNoUv', /* glsl */ `
+      uniform float u_exposure, u_saturation, u_contrast, u_brightness, u_vignette, u_vignetteSoft, u_fade, u_lift;
+      uniform vec3 u_tint, u_fadeColor;
+      uniform float u_waterline;   // -1 hidden, else the lens waterline's screen y (0 bottom … 1 top; > 1 = just passed above the frame)
+      uniform float u_wlK;         // W18-DIVE OVER-UNDER: strength of the underwater half's look (tint, refraction, caustic shimmer)
+      uniform float u_wlWob;       // the crossing: a brief wobble through the whole frame as the line rises past the lens
+      uniform float u_wlMo;        // 1 = motion, 0 = reduced motion (no ripple, no droplets, no wobble)
+      uniform float u_wlTime;
+      uniform float u_aspect;
+      ${BLUE_NOISE}
+      ${WL_EDGE}
+      float wlHash(float n){ return fract(sin(n) * 43758.5453); }
+      float wlNoise(float x){ float i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f); return mix(wlHash(i), wlHash(i + 1.0), f) * 2.0 - 1.0; }
+      /** the line's screen y at this x: the same edge the water world and the lake are cut along (water/waterline.ts) */
+      float wlLine(vec2 uv){ return u_waterline + wlEdge(uv.x * u_aspect, u_wlTime); }
+      /** droplets clinging to the dome just above the meniscus: xy = offset from the drop's centre (in drop radii), z = coverage */
+      float wlR = 0.0;   // R7.10 b9: the last drop's radius (cells of 1/24 screen height)
+      vec3 wlDrop(vec2 uv){
+        wlR = 0.0;
+        float d = uv.y - u_waterline;
+        #ifdef WL_AA
+        if (u_wlMo < 0.5 || d < 0.0 || d > 0.25) return vec3(0.0);   // R7.10 b9: past 0.2 every drop has shrunk to nothing (by its centre)
+        #else
+        if (u_wlMo < 0.5 || d < 0.0 || d > 0.2) return vec3(0.0);
+        #endif
+        vec2 g = vec2(uv.x * u_aspect, d) * 24.0;
+        vec2 id = floor(g), f = fract(g) - 0.5;
+        float h1 = wlHash(id.x * 7.13 + id.y * 13.71 + 3.0), h2 = wlHash(id.x * 3.31 - id.y * 5.97 + 17.0);
+        if (h1 > 0.38) return vec3(0.0);
+        vec2 q = f - (vec2(h1 / 0.38, h2) - 0.5) * 0.5;
+        #ifdef WL_AA
+        // R7.10 b9 (Reviewer, PC 11.5%: "bubbles sliced flat"): each drop's size and fade come from its own centre, so a drop is
+        // a whole bead that shrinks and fades as one, never squashed or cut by the band's edges or the line
+        float dC = (id.y + 0.5 + (h2 - 0.5) * 0.5) / 24.0;
+        float r = mix(0.14, 0.34, h2) * (1.0 - smoothstep(0.03, 0.2, dC));
+        // and a drop always fits inside its own cell (a bigger one was cut flat by the cell's edge: the "sliced" beads)
+        float cy = 0.5 + (h2 - 0.5) * 0.5, cx = 0.5 + (h1 / 0.38 - 0.5) * 0.5;
+        r = min(r, min(min(cy, 1.0 - cy) / 1.3, min(cx, 1.0 - cx)) - 0.02);
+        #else
+        float r = mix(0.14, 0.34, h2) * (1.0 - smoothstep(0.03, 0.2, d));
+        #endif
+        float l = length(q / vec2(1.0, 1.3));
+        wlR = r;
+        #ifdef WL_AA
+        // R7.10 b9: a drop sitting ON the line lensed the bright meniscus into a hard white blob, cut flat by the line;
+        // drops now bead up a little above it
+        return vec3(q / max(r, 1e-3), (1.0 - smoothstep(r * 0.8, r, l)) * smoothstep(0.012, 0.035, dC));
+        #else
+        return vec3(q / max(r, 1e-3), 1.0 - smoothstep(r * 0.8, r, l));
+        #endif
       }
+      ${withUv ? GRADE_UV : ''}
       void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor){
-        vec3 c = inputColor.rgb * u_exposure;
+        vec3 c = inputColor.rgb;
+        #ifdef WL_AA
+        // R7.10 b6 (Shifat's real M02s: "jagged waterline"): on his phone the crossing is drawn at half density and the lake / water
+        // world are cut along the line by discard, so the cut is a staircase of half-density pixels (which the meniscus lens
+        // then magnifies). Within 2.5 buffer pixels of the analytic line the colour is re-made from a clean sample on each
+        // side, blended by the line's own sub-pixel coverage: a smooth edge at any density. ?wlhard = the old staircase
+        if (u_waterline > -0.5) {
+          float wl0 = wlLine(uv), dd = uv.y - wl0, px = texelSize.y;
+          if (abs(dd) < 2.5 * px) {
+            vec3 ca = texture2D(inputBuffer, vec2(uv.x, wl0 + 2.5 * px)).rgb, cb = texture2D(inputBuffer, vec2(uv.x, wl0 - 2.5 * px)).rgb;
+            c = mix(cb, ca, smoothstep(-0.7 * px, 0.7 * px, dd));
+          }
+        }
+        #endif
+        c *= u_exposure;
         float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
         c = mix(vec3(l), c, u_saturation);
         c = (c - 0.5) * u_contrast + 0.5 + u_brightness;
@@ -232,20 +278,43 @@ export class GradeEffect extends Effect {
           float sq0 = (d + 0.011) / 0.009;
           float sil = exp(-(sq0 * sq0)) * min(1.0, u_wlK * 1.5);
           c = mix(c, c * 0.7 + vec3(0.66, 0.82, 0.86) * 0.36, sil * 0.6);   // W18: lighter underside band
-          float sq1 = d / 0.0016;
-          c += vec3(0.93, 0.98, 1.0) * exp(-(sq1 * sq1)) * 0.95;
+          // R7.10 b6 (Shifat's real M02s: "jagged waterline"): the crisp edge is 0.0016 of the screen height, under one pixel of
+          // the 0.5-density buffer the crossing is drawn in on his phone, so it (and the cut under it) read as stair-steps.
+          // Its width never goes under 1.1 buffer pixels now, its peak scaled so the line carries the same light (identical
+          // wherever a pixel is already finer than the line). ?wlhard = the old edge
+          // (heroPass.ts splices this source without the effect's defines and has no texelSize / inputBuffer: WL_AA is off there)
+          #ifdef WL_AA
+          float w1 = max(0.0016, 1.1 * texelSize.y);
+          #else
+          float w1 = 0.0016;
+          #endif
+          float sq1 = d / w1;
+          c += vec3(0.93, 0.98, 1.0) * exp(-(sq1 * sq1)) * 0.95 * min(1.0, 0.0016 / w1 * 1.25);
           float sq2 = (d - 0.004) / 0.006;
           c += vec3(0.55, 0.82, 0.95) * exp(-(sq2 * sq2)) * 0.12;
           // droplets: a dark rim and a highlight up and to the left (the sky caught in each bead)
           vec3 dr = wlDrop(uv);
           float rim = smoothstep(0.55, 0.95, length(dr.xy));
+          #ifdef WL_AA
+          // R7.10 b9 (Reviewer, M02s 10-10.5%: "white droplet dots"): a drop's highlight was 0.18 drop radii wide, under one
+          // pixel of the half-density crossing buffer, so each drop showed a hard white pixel (and the shrinking drops near the
+          // top of the band became lone white specks). Drops under ~1.5 buffer pixels now fade out, and the highlight is never
+          // narrower than 1.2 buffer pixels, its peak scaled so it carries the same light. ?wlhard = the old drops
+          float rPx = wlR / 24.0 / texelSize.y;
+          float dk = smoothstep(1.0, 2.5, rPx);
+          float sw = max(0.18, 1.2 / max(rPx, 1e-3));
+          c = mix(c, c * 0.72, dr.z * rim * 0.5 * dk);
+          c += vec3(1.0) * dr.z * dk * smoothstep(sw, 0.0, length(dr.xy - vec2(-0.35, 0.4))) * 0.55 * min(1.0, (0.18 * 0.18) / (sw * sw) * 1.4);
+          #else
           c = mix(c, c * 0.72, dr.z * rim * 0.5);
           c += vec3(1.0) * dr.z * smoothstep(0.18, 0.0, length(dr.xy - vec2(-0.35, 0.4))) * 0.55;
+          #endif
         }
         // R7.08c: the dither moved to the final blit (canvas density, where the frame becomes 8-bit; PostChain.ts blitMat)
         outputColor = vec4(c, inputColor.a);
       }`, {
       blendFunction: BlendFunction.NORMAL,
+      defines: new Map<string, string>(WL_HARD ? [] : [['WL_AA', '1']]),   // R7.10 b6: the waterline AA (the effect pass only; ?wlhard = off)
       uniforms: new Map<string, THREE.Uniform<any>>([
         ['u_exposure', new THREE.Uniform(1)], ['u_saturation', new THREE.Uniform(1)], ['u_contrast', new THREE.Uniform(1)],
         ['u_brightness', new THREE.Uniform(0)], ['u_vignette', new THREE.Uniform(0.2)], ['u_vignetteSoft', new THREE.Uniform(0.7)],

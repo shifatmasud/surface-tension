@@ -13,7 +13,7 @@ import { engine } from '../../gl/engine'
 import { props } from '../../state/props'
 import { scroll } from '../../services/scroll'
 
-type Stage = { close(): Promise<void> }
+type Stage = { close(): Promise<void>; show?: () => void; park?: () => Promise<void> }
 /** R7.09 QA: a step of the open, in ms since the tap (window.__giftT) */
 export function giftMark(k: string) { const T = (window as any).__giftT; if (T && T[k] === undefined) T[k] = Math.round(performance.now() - T.tap) }
 let state: 'idle' | 'open' | 'closing' = 'idle'
@@ -81,7 +81,10 @@ function hold(on: boolean) {
   if (on) scroll.stop(); else scroll.start()
 }
 
+let wantOpen: { from?: HTMLElement | null } | null = null   // R7.10: a tap while the last close is still fading
+const wired = new WeakSet<HTMLElement>()
 export function giftOpen(from?: HTMLElement | null) {
+  if (state === 'closing') { wantOpen = { from }; return }
   if (state !== 'idle') return
   state = 'open'
   ;(window as any).__giftT = { tap: performance.now() }   // R7.09 QA: the open's timeline (ms since the tap)
@@ -108,7 +111,7 @@ export function giftOpen(from?: HTMLElement | null) {
   // Esc closes from the first moment, even before the stage arrives; focus moves into the dialog at once
   document.addEventListener('keydown', onEsc, true)
   el.tabIndex = -1; el.focus({ preventScroll: true })
-  el.addEventListener('click', (e) => { const t = e.target as HTMLElement | null; if (e.target === el || e.target === bg || (t && t.classList && t.classList.contains('gift__tint'))) giftClose() })
+  if (!wired.has(el)) { wired.add(el); el.addEventListener('click', (e) => { const t = e.target as HTMLElement | null; if (e.target === el || e.target === bg || (t && t.classList && t.classList.contains('gift__tint'))) giftClose() }) }
 }
 
 function onEsc(e: KeyboardEvent) { if (e.key === 'Escape' && state === 'open') { e.preventDefault(); e.stopPropagation(); giftClose() } }
@@ -121,13 +124,20 @@ export async function giftClose() {
   hold(false)   // the live page resumes UNDER the still, so the still fades into the moving scene, not into a frozen one
   el.classList.remove('is-in'); el.classList.add('is-out')
   const st = stage; stage = null
-  await Promise.all([st?.close(), new Promise((r) => setTimeout(r, reduced() ? 180 : 720))])
+  // R7.10: the stage is kept (context, scene, linked programs) and put back in its held pose, so a reopen at any moment
+  // after the close is the instant reveal, never the cold path (7.09 destroyed it and re-parked ~1 s later, over seconds)
+  const keep = !GIFT_OLD && !!st?.park && !!st.show
+  await Promise.all([keep ? st!.park!() : st?.close(), new Promise((r) => setTimeout(r, reduced() ? 180 : 720))])
   el.remove(); root = null
   document.documentElement.classList.remove('gift-open')
   state = 'idle'
-  // R7.09: park the next one about a second after the close, in an idle moment (the reopen is instant too)
-  setTimeout(() => { const ric = (window as any).requestIdleCallback as ((f: () => void, o?: { timeout: number }) => void) | undefined; if (ric) ric(giftPrewarm, { timeout: 2000 }); else giftPrewarm() }, 1000)
+  const bg = el.querySelector('canvas.gift__bg') as HTMLCanvasElement | null
+  if (keep && bg) { el.className = 'gift'; parked = { el, bg, stage: st as Stage & { show: () => void } } }
+  // otherwise park the next one about a second after the close, in an idle moment (R7.09)
+  else setTimeout(() => { const ric = (window as any).requestIdleCallback as ((f: () => void, o?: { timeout: number }) => void) | undefined; if (ric) ric(giftPrewarm, { timeout: 2000 }); else giftPrewarm() }, 1000)
   const b = back; back = null
+  const w = wantOpen; wantOpen = null
+  if (w) { giftOpen(w.from ?? b); return }
   if (b && b.isConnected) b.focus({ preventScroll: true })
 }
 

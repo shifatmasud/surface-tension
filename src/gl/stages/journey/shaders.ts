@@ -182,6 +182,7 @@ export function screenMaterial(tex: THREE.Texture, size: THREE.Vector2) {
       // point it smears toward (u_zoomC, uv), the chromatic split at speed (u_chroma) and the warp flash (u_flash)
       u_blur: { value: tex }, u_zoom: { value: 0 }, u_zoomC: { value: new THREE.Vector2(0.5, 0.5) }, u_chroma: { value: 0 }, u_flash: { value: 0 },
       u_crew: { value: null }, u_crewScale: { value: new THREE.Vector2(1, 1) },
+      u_rock: { value: null }, u_rockScale: { value: new THREE.Vector2(1, 1) }, u_rockOn: { value: 0 },   // R7.10 b7: the rock layer
     },
     vertexShader: /* glsl */ `
       uniform vec2 u_center; uniform float u_bulge, u_width, u_ringT, u_ringAmp, u_time;
@@ -212,6 +213,7 @@ export function screenMaterial(tex: THREE.Texture, size: THREE.Vector2) {
       uniform sampler2D u_map; uniform vec2 u_size; uniform float u_bright, u_time, u_gloss;
       uniform sampler2D u_blur; uniform vec2 u_zoomC; uniform float u_zoom, u_chroma, u_flash;
       uniform sampler2D u_crew; uniform vec2 u_crewScale; // R6.87 SPLIT: the crewmate at the canvas density (crewLayer.ts)
+      uniform sampler2D u_rock; uniform vec2 u_rockScale; uniform float u_rockOn;   // R7.10 b7: the rocks at the background density
       varying vec2 vUv; varying vec3 vWPos; varying float vH;
       void main(){
         vec3 n = normalize(cross(dFdx(vWPos), dFdy(vWPos)));
@@ -236,6 +238,10 @@ export function screenMaterial(tex: THREE.Texture, size: THREE.Vector2) {
         col.r = texture2D(u_map, vUv - off * (1.0 + 0.10 * disp) + ca).r;
         col.g = texture2D(u_map, vUv - off).g;
         col.b = texture2D(u_map, vUv - off * (1.0 - 0.10 * disp) - ca).b;
+        // R7.10 b7 (Shifat 5:52 AM, real M02s: the asteroids "Pixelated, looks cheap"): on the low tiers the rocks are not in the
+        // 352x512 inner picture; they are drawn at the background's density into their own layer (premultiplied) and laid over
+        // it here, through the same bent-glass lookup: no extra pass, no composite
+        if (u_rockOn > 0.5) { vec4 rk = texture2D(u_rock, (vUv - off) * u_rockScale); col = col * (1.0 - rk.a) + rk.rgb; }
         if (u_zoom > 0.001) {
           // one extra tap of the half-res zoom blur, mixed in by distance from the vanishing point
           vec3 blr = texture2D(u_blur, vUv - off).rgb;

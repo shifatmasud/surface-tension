@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { Pass } from 'postprocessing'
+import { Pass, Effect, BlendFunction } from 'postprocessing'
 import { diveRays } from '../stages/dive/diveState'
 import { shared } from '../../state/props'
 
@@ -98,8 +98,25 @@ export class DiveGodRaysPass extends Pass {
     if (this.mask.width !== mw || this.mask.height !== mh) { this.mask.setSize(mw, mh); this.a.setSize(mw, mh); this.b.setSize(mw, mh) }
   }
 
+  /** R7.10: the composite rides in the next EffectPass (DiveRaysEffect) instead of its own full-screen pass */
+  merged = false
+  /** R7.10: the add as an Effect, sharing this pass's uniforms (the rays texture, tint, amount) */
+  effect(): Effect {
+    const u = this.comp.uniforms
+    return new Effect('DiveRays', /* glsl */ `
+uniform sampler2D tRays; uniform vec3 u_tint; uniform float u_amount, u_e, u_debug;
+void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor){
+  vec2 ruv = (uv - 0.5) / u_e + 0.5;
+  vec3 r = texture2D(tRays, ruv).rgb;
+  vec3 c = inputColor.rgb + r * u_tint * u_amount * (1.0 - 0.35 * clamp(dot(inputColor.rgb, vec3(0.33)), 0.0, 1.0));
+  if (u_debug > 0.5) c = r;
+  outputColor = vec4(c, inputColor.a);
+}`, { blendFunction: BlendFunction.NORMAL, uniforms: new Map<string, THREE.Uniform<any>>([['tRays', u.tRays as any], ['u_tint', u.u_tint as any], ['u_amount', u.u_amount as any], ['u_e', u.u_e as any], ['u_debug', u.u_debug as any]]) })
+  }
+
   render(renderer: THREE.WebGLRenderer, inputBuffer: THREE.WebGLRenderTarget, outputBuffer: THREE.WebGLRenderTarget) {
     const R = diveRays
+    this.needsSwap = !this.merged
     this.fit(inputBuffer.width, inputBuffer.height)
     // 1. mask through the widened camera
     const cam = this.cam as THREE.PerspectiveCamera, mc = this.maskCam
@@ -128,8 +145,9 @@ export class DiveGodRaysPass extends Pass {
     this.fullscreenMaterial = this.shortMat
     renderer.setRenderTarget(this.b); renderer.render(this.scene, this.camera)
     // 3. composite
-    this.comp.uniforms.tMap.value = inputBuffer.texture
     this.comp.uniforms.u_amount.value = R.intensity
+    if (this.merged) return   // R7.10: the next pass adds the rays (DiveRaysEffect); no full-screen copy here
+    this.comp.uniforms.tMap.value = inputBuffer.texture
     this.fullscreenMaterial = this.comp
     renderer.setRenderTarget(this.renderToScreen ? null : outputBuffer)
     renderer.render(this.scene, this.camera)

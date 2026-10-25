@@ -4,7 +4,8 @@ import { GradeEffect, ScreenPaintDistortionEffect, trailFilterMode } from './eff
 import { DiveGodRaysPass } from './DiveGodRays'
 import { ClipCompositeEffect } from './ClipComposite'
 import { clip } from '../systems/clip'
-import { diveRays } from '../stages/dive/diveState'
+import { diveRays, diveLo, DIVE_LAYER } from '../stages/dive/diveState'
+import { journey } from '../stages/journey/journeyState'
 import { props, shared } from '../../state/props'
 import { settings } from '../../services/settings'
 import { quality, paintState, PHONE_SHARP, DENS_ONE } from '../quality' // PERF HOOK
@@ -52,10 +53,41 @@ const TAA_MODE = TAA_Q === '1' ? 1 : TAA_Q === 'phone' ? 2 : 0   // R7.08c (Shif
 const TAA_FLOOR = 0.125
 const NOCAS = typeof location !== 'undefined' && new URLSearchParams(location.search).has('nocas')
 
+/** R7.10 SPLIT DENSITY (diveState.diveLo): shades the dive's water volume at half the density into its own target and
+ *  points the backdrop sphere at it for the scene render; BackdropRestore hands the sphere its own shader back. */
+class BackdropLoPass extends Pass {
+  private rt = new THREE.WebGLRenderTarget(4, 4, { depthBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter })
+  constructor(private cam: THREE.Camera) { super('BackdropLo'); this.needsSwap = false }
+  render(renderer: THREE.WebGLRenderer, inputBuffer: THREE.WebGLRenderTarget) {
+    const L = diveLo, m = L.mesh, b = L.blit
+    if (!m || !b || !L.full) return
+    const W = inputBuffer.width, H = inputBuffer.height, w = Math.ceil(W * 0.5), h = Math.ceil(H * 0.5)
+    if (this.rt.texture.type !== inputBuffer.texture.type) { this.rt.dispose(); this.rt.texture.type = inputBuffer.texture.type }
+    if (this.rt.width !== w || this.rt.height !== h) this.rt.setSize(w, h)
+    m.material = L.lo ?? L.full!
+    const sc = renderer.getScissorTest(), ac = renderer.autoClear
+    renderer.setScissorTest(false); renderer.autoClear = false   // the sphere covers every pixel
+    renderer.setRenderTarget(this.rt); renderer.render(m, this.cam)
+    renderer.autoClear = ac; renderer.setScissorTest(sc)
+    b.uniforms.tLo.value = this.rt.texture
+    b.uniforms.u_full.value.set(W, H); b.uniforms.u_loSize.value.set(w, h)
+    m.material = b
+  }
+  dispose() { this.rt.dispose(); super.dispose() }
+}
+class BackdropRestorePass extends Pass {
+  constructor() { super('BackdropRestore'); this.needsSwap = false }
+  render() { if (diveLo.mesh && diveLo.full) diveLo.mesh.material = diveLo.full }
+}
+
 export class PostChain {
   composer: EffectComposer
   entries: Entry[] = []
   grade = new GradeEffect()
+  /** R7.10: kept so the merged pass can take its composite */
+  rays!: DiveGodRaysPass
+  /** R7.10: the same grade without its lens mainUv (shares every uniform with `grade`), for the merged SMAA pass */
+  gradeNoUv = (() => { const g = new GradeEffect(false); this.grade.uniforms.forEach((u, k) => g.uniforms.set(k, u)); return g })()
   distortion = new ScreenPaintDistortionEffect(trailFilterMode(settings.TIER === 'low' || !!settings.WEAK_GPU)) // R7.07 HI-RES TRAIL
   bloom: BloomEffect
   private signature = -1
@@ -95,14 +127,16 @@ export class PostChain {
     this.preUfx = new RenderPass(ufxUnder, ufxCamera); this.preUfx.clear = false; this.preUfx.ignoreBackground = true
     this.postUfx = new RenderPass(ufxOver, ufxCamera); this.postUfx.clear = false; this.postUfx.ignoreBackground = true
     this.jitWrap(this.scenePass, camera); this.jitWrap(this.preUfx, ufxCamera); this.jitWrap(this.postUfx, ufxCamera)   // R7.08b
+    ;(window as any).__post = this; (window as any).__heroPass = heroPass   // R7.10 QA: per-pass cost probe
     ;(window as any).__taa = () => ({ on: this.taaOn, k: this.taaK })   // R7.08b QA: rest supersampling state
     // W22 (scorer-r614 #3, the stepped stone outline at 390): MEDIUM searches 8 px along an edge, so the stone's long, shallow
     // silhouette (upscaled ~2x on phones) kept its stair steps. HIGH searches 16: same three passes, more taps on edge pixels only
     // R6.95 QUALITY: SMAA ULTRA on every tier: edge threshold 0.1 -> 0.05 and a 32 px search, so the low-contrast silhouettes
     // (the stone's long rim, kelp, the card edges) lose their last stair steps. Same three passes, at the background's own
     // density (0.1-1 Mpx on phones and weak PCs); only edge pixels pay the longer search. ?aa=high = the R6.94 preset.
+    this.rays = new DiveGodRaysPass(camera)
     const AA_Q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('aa') : null
-    const smaa = new SMAAEffect({ preset: DENS_ONE && !AA_Q ? SMAAPreset.MEDIUM : AA_Q === 'high' || (PHONE_SHARP && AA_Q !== 'ultra') ? SMAAPreset.HIGH : SMAAPreset.ULTRA })   /* R7.08b: at the phone's one density SMAA MEDIUM (8 search steps) is enough */   // R7.00: budget phones HIGH (16 search steps, was ULTRA 32 + corners): the cost moves into pixels, not edge searches
+    const smaa = new SMAAEffect({ preset: DENS_ONE && !AA_Q ? (PHONE ? SMAAPreset.MEDIUM : SMAAPreset.ULTRA /* R7.10: his PC at full res keeps 7.09's ULTRA (finer threshold catches the gem's inner facet steps; 1 Mpx, edge pixels only) */) : AA_Q === 'high' || (PHONE_SHARP && AA_Q !== 'ultra') ? SMAAPreset.HIGH : SMAAPreset.ULTRA })   /* R7.08b: at the phone's one density SMAA MEDIUM (8 search steps) is enough */   // R7.00: budget phones HIGH (16 search steps, was ULTRA 32 + corners): the cost moves into pixels, not edge searches
     const fxaa = new FXAAEffect()
     const renderScale = () => props.dpr / Math.max(1, Math.min(window.devicePixelRatio || 1, 2))
     // sharpen (convolution) first, then the grade on its result: one pass instead of two when below native size
@@ -113,23 +147,48 @@ export class PostChain {
     const sharpGrade = new EffectPass(camera, new InlineSharpenEffect(), this.grade)
     const sharp = () => false && renderScale() < 0.99   // W18: CAS in the final upscale replaces the inline sharpen
     const bloomOn = () => settings.USE_BLOOM && props.look.bloom > 0.001
+    const RAYS_M = !(typeof location !== 'undefined' && /[?&]raysep\b/.test(location.search))   // R7.10 b4: on (?raysep = 7.09's separate rays composite)
+    const BD_LO = !(typeof location !== 'undefined' && /[?&]bdfull\b/.test(location.search))   // R7.10 b4: on (?bdfull = shaded at full density as in 7.09)
+    const shown = (o: THREE.Object3D | null) => { for (let p = o; p; p = p.parent) if (!p.visible) return false; return !!o }
+    const backdropLo = () => DENS_ONE && PHONE && BD_LO && props.dpr >= 0.99 && !!diveLo.blit && shown(diveLo.mesh) && camera.layers.isEnabled(DIVE_LAYER) && diveLo.split() < -0.5
+    // R7.10 ONE PASS FEWER (phones + weak PC at the one density; first principles: each full-screen pass is a full write +
+    // read of the frame on a tiled, low-bandwidth GPU): SMAA's blend joins the bloom + grade pass (SMAA first, then bloom and
+    // the grade on its result) on every frame where nothing is drawn between them (no UI effects, no boundary composite)
+    // and the lens waterline and the footer curtain are hidden (their mainUv, a UV transform, cannot share a pass with SMAA). Edge detection
+    // and weights are unchanged. ?aasep = the 7.09 separate SMAA pass.
+    // R7.10 FOOTER LOCK (Shifat 3:22 AM "Lock footer too. Never touch it."): from the moment the CTA wall enters
+    // (journey.cta > 0) through the footer, the frame goes through riptide v2's own passes (no merge).
+    // R7.10 FOOTER FIX (Shifat 2:33 AM "Broke footer", build 2): the footer test read the curtain's own uniform, which only
+    // the footer effect's update() writes, and that update never ran once the merged pass (no footer in it) was chosen, so
+    // the curtain stayed down for good. The test now reads the source (journey.lift, as update() does) and the footer's
+    // state keeps ticking on merged frames (below), so the curtain, its bar and --kd behave exactly as in 7.08/7.09.
+    const AA_SEP = typeof location !== 'undefined' && /[?&]aasep\b/.test(location.search)
+    const mergeAA = () => DENS_ONE && !AA_SEP && !((journey.cta || 0) > 0) && (!this.footer || !((journey.lift || 0) > 0)) && quality.aa === 'smaa' && !sharp() && (this.grade.u('u_waterline').value as number) < -0.5
+      && !((clip.boundary && !clip.cut) || clip.capture >= 0) && !ufxUnder.children.some((c) => c.visible) && !ufxOver.children.some((c) => c.visible) && !heroPass.hasUi()
     this.entries = [
+      // R7.10 SPLIT DENSITY: the dive's water volume at half density (?bdfull = the full density, as in 7.09)
+      { name: 'BackdropLo', order: -3, pass: new BackdropLoPass(camera), needsRender: () => backdropLo() },
+      { name: 'BackdropRestore', order: 0.5, pass: new BackdropRestorePass(), needsRender: () => backdropLo() },
       { name: 'HeroHide', order: -1, pass: new HeroHidePass(), needsRender: () => heroPass.active() },   // R6.87 SPLIT
       { name: 'Scene', order: 0, pass: this.scenePass, needsRender: () => true },
       { name: 'HeroDraw', order: 1, pass: new HeroDrawPass(scene, camera), needsRender: () => heroPass.active() },   // R6.87 SPLIT
-      { name: 'DiveGodRays', order: 5, pass: new DiveGodRaysPass(camera), needsRender: () => diveRays.on },
+      { name: 'DiveGodRays', order: 5, pass: this.rays, needsRender: () => diveRays.on },
       // R7.08c ONE FINAL PASS (first principles: on a tiled, low-bandwidth GPU every full-screen pass is a full write + read of
       // the frame): bloom's composite and the grade run in ONE EffectPass (the neighbour chain's own pairing), so a frame with
       // bloom pays one full-screen pass at the scene density instead of two. Same maths, one half-float round trip fewer.
-      { name: 'Bloom+Grade', order: 30, pass: this.footer ? new EffectPass(camera, this.bloom, this.grade, this.footer) : new EffectPass(camera, this.bloom, this.grade), needsRender: () => !sharp() && bloomOn() },
-      { name: 'Grade', order: 30, pass: gradeOnly, needsRender: () => !sharp() && !bloomOn() },
+      { name: 'Bloom+Grade', order: 30, pass: this.footer ? new EffectPass(camera, this.bloom, this.grade, this.footer) : new EffectPass(camera, this.bloom, this.grade), needsRender: () => !sharp() && bloomOn() && !mergeAA() },
+      { name: 'Grade', order: 30, pass: gradeOnly, needsRender: () => !sharp() && !bloomOn() && !mergeAA() },
+      { name: 'SMAA+Bloom+Grade', order: 30, pass: new EffectPass(camera, smaa, this.bloom, this.gradeNoUv), needsRender: () => bloomOn() && mergeAA() },   // R7.10
+      { name: 'SMAA+Grade', order: 30, pass: new EffectPass(camera, smaa, this.gradeNoUv), needsRender: () => !bloomOn() && mergeAA() && !(diveRays.on && RAYS_M) },   // R7.10
+      // R7.10: with no bloom between them (phones), the dive's god-ray add joins too: one full-screen pass for AA + rays + grade
+      { name: 'SMAA+Rays+Grade', order: 30, pass: new EffectPass(camera, smaa, this.rays.effect(), this.gradeNoUv), needsRender: () => !bloomOn() && mergeAA() && diveRays.on && RAYS_M },
       { name: 'Sharpen+Grade', order: 30, pass: sharpGrade, needsRender: () => sharp() },
       { name: 'UiHide', order: 49, pass: new UiHidePass(false), needsRender: () => heroPass.hasUi() },   // R6.87 SPLIT
       { name: 'PreUfx', order: 50, pass: this.preUfx, needsRender: () => ufxUnder.children.some((c) => c.visible) },
       { name: 'UiShow', order: 51, pass: new UiHidePass(true), needsRender: () => heroPass.hasUi() },   // R6.87 SPLIT
       { name: 'ScreenPaintDistortion', order: 3100, pass: new EffectPass(camera, this.distortion), needsRender: () => props.look.paintAmount > 0 && !paintState.asleep && !(this.distortion.hr && paintState.empty) },
       { name: 'PostUfx', order: 100, pass: this.postUfx, needsRender: () => ufxOver.children.some((c) => c.visible) },
-      { name: 'SMAA', order: 4000, pass: new EffectPass(camera, smaa), needsRender: () => quality.aa === 'smaa' },
+      { name: 'SMAA', order: 4000, pass: new EffectPass(camera, smaa), needsRender: () => quality.aa === 'smaa' && !mergeAA() },
       { name: 'FXAA', order: 4000, pass: new EffectPass(camera, fxaa), needsRender: () => quality.aa === 'fxaa' },
       // W17 GLOBAL TEXT LAYER (Shifat 10:17Z + 11:46Z): all copy in one fixed slot, drawn ONCE over the composited frame
       // (so a boundary never doubles it or slides it with a card) and BEFORE the trail, so the trail still bends it
@@ -311,7 +370,10 @@ void main(){
     this.composer.inputBuffer.setSize(bw, bh); this.composer.outputBuffer.setSize(bw, bh)
     // R7.00 PHONE SHARP: the bloom keeps its absolute size when the phone's background refines (quarter-res post, like
     // lusion.co): 0.5 of a 0.5 background = 0.25 of the css size, so a 1.0 background blooms at 0.25
-    if (PHONE_SHARP && !settings.BLOOM_HQ) (this.bloom as any).resolution.scale = Math.max(0.25, Math.min(0.5, 0.25 / Math.max(0.01, props.dpr)))
+    // R7.10: the weak PC at the phone's one density keeps the phone's bloom size rule too (same glow size per css px as 7.09)
+    if ((PHONE_SHARP || DENS_ONE) && !settings.BLOOM_HQ) (this.bloom as any).resolution.scale = Math.max(0.25, Math.min(0.5, 0.25 / Math.max(0.01, props.dpr)))
+    // R7.10: and its bright-pass at 0.5 css density as in 7.09 (an exact 2x2 average of the 1.0 frame, not a full-res pass)
+    if (DENS_ONE && settings.WEAK_GPU && !settings.BLOOM_HQ) (this.bloom as any).luminancePass.resolution.scale = Math.max(0.5, Math.min(1, 0.5 / Math.max(0.01, props.dpr)))
     for (const e of this.entries) e.pass.setSize(bw, bh)
     this.text.resize(w, h)
     const pw = Math.max(1, (w * props.paintDpr) >> 2), ph = Math.max(1, (h * props.paintDpr) >> 2)
@@ -385,9 +447,11 @@ void main(){
     this.blitWarm = warm   // R7.08: the warm frame links the trail blit program too
     for (let i = 0; i < this.entries.length; i++) {
       const e = this.entries[i]
-      e.on = warm ? !(e.name === 'Bloom+Grade' && !settings.USE_BLOOM) && !(e.name === 'FXAA' && settings.TIER !== 'low') : e.needsRender()
+      e.on = warm ? !((e.name === 'Bloom+Grade' || e.name === 'SMAA+Bloom+Grade') && !settings.USE_BLOOM) && !(e.name === 'FXAA' && settings.TIER !== 'low') && !(e.name.startsWith('SMAA+') && !DENS_ONE) : e.needsRender()
       if (e.on) sig |= 1 << i
     }
+    { const m = this.entries.find((e) => e.name === 'SMAA+Rays+Grade'); this.rays.merged = !warm && !!m && !!m.on }   // R7.10
+    if (this.footer && !warm && this.entries.some((e) => e.on && e.name.startsWith('SMAA+'))) this.footer.update(this.gl, null as any, dt)   // R7.10 FOOTER FIX
     if (warm) {
       this.warmAll = false
       // NEIGHBOUR HOOK: link the neighbour chain's programs (bloom+grade pass, its targets) behind the curtain too

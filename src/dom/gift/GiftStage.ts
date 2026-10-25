@@ -571,7 +571,7 @@ function envBuilder(renderer: THREE.WebGLRenderer) {
   }
 }
 
-export type GiftHandle = { close(): Promise<void>; show?: () => void }
+export type GiftHandle = { close(): Promise<void>; show?: () => void; park?: () => Promise<void> }
 
 export type GiftOpts = { reduced: boolean; close: () => void; parked?: boolean }
 /** the tap path: the whole stage built in one go (as 7.08) */
@@ -1022,6 +1022,9 @@ function* mountSteps(root: HTMLElement, opts: GiftOpts): Generator<void, GiftHan
       update(0, 0); draw()
       giftMark('shownDraw')
     }
+    begin()
+  }
+  function begin() {
     t0 = performance.now(); last = t0; ready = true
     giftMark('ready')
     root.classList.add('gift--ready')
@@ -1032,7 +1035,7 @@ function* mountSteps(root: HTMLElement, opts: GiftOpts): Generator<void, GiftHan
   // R7.09 PARKED: show() takes the page's frozen frame (the dialog's blurred still, drawn after the tap) for the fill's mood
   // and the reflections, exactly as a stage built on the tap reads it, then releases prep()
   let release: () => void = () => {}
-  const shown = new Promise<void>((r) => { release = r })
+  let shown = new Promise<void>((r) => { release = r })
   // The box is released at once (it rises from below the bottom edge, so its first frames are off screen); the page's
   // mood and reflections are read from the still two frames later, before the box is in view (the read-back of the still
   // is a GPU sync: ~5.7-6.0 s on the simulator whether read here or at the grab, so it must not sit between the tap and
@@ -1063,6 +1066,37 @@ function* mountSteps(root: HTMLElement, opts: GiftOpts): Generator<void, GiftHan
 
   return {
     show,
+    // R7.10 (Shifat: "Major caveats must die"): a reopen within ~1 s of a close took the 3 s cold path, because close()
+    // destroyed the context and the next park only started ~1 s later and took seconds to link. park() closes exactly as
+    // close() looks (the frame sinks and fades) but keeps the context, the scene, its linked programs and textures, and
+    // puts the stage back in its wrapped, held pose: the very next tap only reveals it again. ?giftold = the 7.08 path.
+    async park() {
+      if (!alive) return
+      alive = false; if (raf) cancelAnimationFrame(raf); raf = 0
+      sfx?.stop(); sfx = null
+      root.classList.add('gift--leaving')
+      cta.classList.remove('is-on'); hit.style.display = 'none'
+      await Promise.all([blurFadeOut(closeBtn), new Promise((r) => setTimeout(r, reduced ? 160 : 700))])
+      // back to the held pose (as built): wrapped, below the edge, nothing interactive
+      U.uD.value = 0; U.uDR.value = 0; U.uForm.value = 0; U.uGlow.value = 0; U.uHit.value.set(0, TOP, 0)
+      enterK = reduced ? 1 : 0; opened = reduced; openAt = reduced ? -100 : -1
+      hover = 0; hoverWant = 0; press = 0; ptr.set(0, 0); ptrS.set(0, 0)
+      spin = 0; spinV = 0; settleUntil = 0; ctaHover = false; ctaFocus = false; hOp = 0; yaw = -0.62
+      frames = 0; ema = 16.7; qaT = 0; ctaOn = false; hitShown = false; viaKey = false; ready = false
+      lidG.rotation.set(0, 0, 0); lidG.position.set(0, 0, 0)
+      if (!reduced) { boxParts.forEach((o) => { o.visible = true }); shadow.visible = true }
+      dustAll.forEach((d) => { d.visible = false }); cardTilt.visible = reduced
+      btnMatH.opacity = 0
+      typeO = -1; typeB = -1; typeH = -1; typeEl.style.opacity = '0'
+      hit.style.display = ''; hit.style.visibility = ''; hit.removeAttribute('tabindex')
+      cta.tabIndex = -1
+      closeBtn.getAnimations().forEach((a) => a.cancel()); closeBtn.style.opacity = '0'
+      canvas.removeAttribute('data-cursor'); canvas.style.cursor = ''
+      root.classList.remove('gift--leaving', 'gift--ready')
+      alive = true
+      shown = new Promise<void>((r) => { release = r })
+      void shown.then(() => { if (!alive) return; giftMark('released'); update(0, 0); draw(); giftMark('shownDraw'); begin() })
+    },
     async close() {
       release()
       // the GL stops drawing at once (the page's scene takes the GPU back); the frozen frame sinks and fades in CSS

@@ -160,6 +160,21 @@ void main(){
   vDir = wp.xyz - cameraPosition;
   gl_Position = projectionMatrix * viewMatrix * wp;
 }`
+/** v3 the deep's own glow and its last shafts (jittered by full-res blue noise: drawn at the full density even when the
+ *  rest of the volume is shaded at half, R7.10 diveLo, so its fine grain stays the grain of riptide v2) */
+export const BACKDROP_AMB = /* glsl */ `if (u_amb > 0.001){
+    vec3 deep = deepWater(dir);
+    float sh = 0.0;
+    for (int i = 0; i < 4; i++){
+      float ti = 2.0 + float(i) * 4.5 + jit * 4.5;
+      vec3 p = u_cam + dir * ti;
+      sh += shaft(p.xz * 0.35 - p.y * u_sun.xz * 0.35 + vec2(0.0, u_time * 0.01)) * exp(-0.06 * ti);
+    }
+    float upw = smoothstep(-0.25, 0.85, dir.y);
+    deep += vec3(0.020, 0.090, 0.125) * sh * upw * (1.0 - 0.5 * u_abyss);
+    col = mix(col, deep, u_amb);
+  }`
+const HZ_SOFT = typeof location !== 'undefined' && /[?&]hzhard\b/.test(location.search) ? '1.0' : 'smoothstep(0.0, 0.08, dir.y)'   // R7.10 b8/b9
 export const backdropFrag = /* glsl */ `
 ${DIVE_COMMON}
 ${CLIP}
@@ -217,7 +232,11 @@ void main(){
       vec3 mirror = inscatter(r, dc + 12.0 * gz) * mix(0.95, 0.55, gz) + vec3(0.05, 0.11, 0.12) * (1.0 - gz) * exp(-K * dc);
       float dance = 0.78 + 0.42 * caustic(hp * 1.15);              // the window shimmers as the swell focuses light
       vec3 surf = sky * win * tr * mix(1.0, dance, clamp(4.0 / (t + 2.0), 0.0, 1.0)) + mirror * (1.0 - win * tr);
-      vec3 tv = exp(-KV * t);
+      // R7.10 b8 (Shifat's real M02s, the dive start: "hard line at the stone's top"): just under the surface (dc → 0.02) the
+      // underside faded in over a sliver of view angle (t = dc / dir.y), a hard horizontal line with a dark slab below it.
+      // b9: the underside now fades in over the first 0.08 of dir.y above the horizon (≈4.6°, ~100 px on his phone); above
+      // that the water is exactly as before (b8 spread the whole fade, which paled the upper water). ?hzhard = the old line
+      vec3 tv = exp(-KV * t) * ${HZ_SOFT};
       col = surf * tv + col * (1.0 - tv);
     }
   }
@@ -241,18 +260,9 @@ void main(){
 
   col *= 1.0 - u_deep * 0.9;
   // v3: the deep's own glow, and the last light shafts slanting down into it (fading with depth)
-  if (u_amb > 0.001){
-    vec3 deep = deepWater(dir);
-    float sh = 0.0;
-    for (int i = 0; i < 4; i++){
-      float ti = 2.0 + float(i) * 4.5 + jit * 4.5;
-      vec3 p = u_cam + dir * ti;
-      sh += shaft(p.xz * 0.35 - p.y * u_sun.xz * 0.35 + vec2(0.0, u_time * 0.01)) * exp(-0.06 * ti);
-    }
-    float upw = smoothstep(-0.25, 0.85, dir.y);
-    deep += vec3(0.020, 0.090, 0.125) * sh * upw * (1.0 - 0.5 * u_abyss);
-    col = mix(col, deep, u_amb);
-  }
+#ifndef BD_LO_PASS
+  ${BACKDROP_AMB}
+#endif
   gl_FragColor = vec4(col, 1.0);
 }`
 

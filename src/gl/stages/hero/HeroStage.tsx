@@ -16,7 +16,13 @@ import { input } from '../../../services/input'
 import { Spring } from '../../../core/spring'
 import { engine } from '../../engine'
 import { dive, DIVE_LAYER } from '../dive/diveState'
-import { quality, PHONE_SHARP } from '../../quality' // PERF HOOK
+import { quality, PHONE_SHARP, DENS_ONE } from '../../quality' // PERF HOOK
+// b6: the weak PC (closed-form stone in the mirror, ~1/5 the traced cost) spends its hero headroom on a full-density mirror / under
+const SURF_FULL = settings.WEAK_GPU && !/[?&]gemtrace\b/.test(location.search)
+const MIRROR_S = Math.max(0.25, Math.min(1, parseFloat(new URLSearchParams(location.search).get('mirror') || '') || (SURF_FULL ? 1 : 0.5)))
+const UNDER_S = Math.max(0.25, Math.min(1, parseFloat(new URLSearchParams(location.search).get('under') || '') || (SURF_FULL ? 1 : 0.5)))
+const LAKE_ONE = DENS_ONE && !/[?&]lksplit\b/.test(location.search)   // R7.10 b5
+const SURF_B4 = /[?&]surfb4\b/.test(location.search)   // R7.10 b5: ?surfb4 = build 4's mirror / under sizes
 import { waterInput } from '../../water/waterInput' // WATER HOOK
 import { gemMask } from '../../systems/stickerMask'
 import { heroPass } from '../../post/heroPass' // R6.87 SPLIT
@@ -59,7 +65,9 @@ export const gemDisU = { value: 0 }
 export const gemRef = { m: null as THREE.Mesh | null }
 const gemFill = { value: 0.7 }   // W23: 0.7 in the hero (the darkest navy chips lift toward the env blue), 0.85 in the dive (set per frame)
 /** R7.09 A/B knobs: ?gemlite = the weak-GPU closed-form stone on this device; ?gemb=N = N bounces */
-const GEM_LITE = /[?&]gemlite\b/.test(location.search)
+// R7.10 b5 (Shifat 4:42 AM "same performance, better quality"): the weak PC is back on the closed-form stone (as in riptide
+// v2): the traced stone cost ~5x on his UHD 600 (hero 1.16x v2, sim) and was what reset that GPU in R6.92. ?gemtrace = traced
+const GEM_LITE = /[?&]gemlite\b/.test(location.search) || (settings.WEAK_GPU && !/[?&]gemtrace\b/.test(location.search))
 const GEM_B = parseInt(new URLSearchParams(location.search).get('gemb') || '', 10)
 function gemPatch(fresPow: string, lod: string) {
   return (sh: { vertexShader: string; fragmentShader: string; uniforms: Record<string, { value: unknown }> }) => {
@@ -132,7 +140,9 @@ function gemPatch(fresPow: string, lod: string) {
     // crown 0.16 over a 0.56 table, pavilion 0.86 deep), so every facet still throws its own env direction (the sparkle)
     // and the refraction / total internal reflection / chroma / grade below are untouched. The BVH functions become
     // unreferenced and the compiler drops them. Phones and strong GPUs keep the traced stone.
-    if (settings.WEAK_GPU || GEM_LITE) sh.fragmentShader = sh.fragmentShader.replace(
+    // R7.10 (Shifat 12:52 AM: PC "equal or better quality than my phone"): the weak PC traces the stone as the phone does
+    // (its programs are linked behind the preloader like every other); ?gemlite = the closed-form stone (R6.92-7.09 on it)
+    if (GEM_LITE) sh.fragmentShader = sh.fragmentShader.replace(
       /bvhIntersectFirstHit\(\s*bvh,\s*rayOrigin,\s*rayDirection,\s*faceIndices,\s*faceNormal,\s*barycoord,\s*side,\s*dist\s*\);/,
       `{
         vec3 lgO = rayOrigin, lgD = rayDirection;
@@ -314,7 +324,13 @@ export function HeroStage() {
   }, [hi])
   useEffect(() => {
     // PERF HOOK: the reflection target follows the governor (DPR step × its render-target scale)
-    const fit = () => { const s = quality.rt(refl.scale), d = quality.dprFor(size.width, size.height); refl.rt.setSize(Math.max(2, Math.floor(size.width * d * s)), Math.max(2, Math.floor(size.height * d * s))) }
+    // R7.10 WATER SURFACE (Shifat 3:46 AM "fix reflection refraction of water surface"): on the one-density tiers the mirror
+    // was 0.2 x the background (a 20x45 px target on his M02s, 68x38 on his PC) magnified 16-36x into the lake: a blur blob
+    // with blocky lumps. It holds only the stone, so it now follows the stone's own density at half scale (257x571 phone,
+    // 683x384 PC); the empty rest of the target is a clear.
+    // b5: the lake samples the mirror at the background's density (one pass), through a 5-tap ripple blur; a mirror at half that
+    // density (103x228 phone, 341x192 PC) is the same blurred image at a quarter of b4's traced-stone pixels (?mirror=<scale>)
+    const fit = () => { const s = DENS_ONE ? (SURF_B4 ? 0.5 : MIRROR_S) : quality.rt(refl.scale), d = DENS_ONE ? (SURF_B4 ? quality.heroDprFor(size.width, size.height) : quality.dprFor(size.width, size.height)) : quality.dprFor(size.width, size.height); refl.rt.setSize(Math.max(2, Math.floor(size.width * d * s)), Math.max(2, Math.floor(size.height * d * s))) }
     fit()
     return quality.on(fit)
   }, [size, refl])
@@ -326,7 +342,9 @@ export function HeroStage() {
     // DIAG: follows the governor too (it was sized once from props.dpr, so a DPR step left it at the old size)
     // W19: follow the governor's MOVING rung only (noRest): the rest refinement toggles on every pointer stop/start, and
     // re-allocating this target on each toggle cost the hero ~2x CPU in R5's perf tour
-    const fit = () => { const d = quality.dprFor(size.width, size.height, true); const w = Math.max(2, Math.floor(size.width * d * under.scale)), h = Math.max(2, Math.floor(size.height * d * under.scale)); if (w !== under.rt.width || h !== under.rt.height) under.rt.setSize(w, h) }
+    // R7.10 WATER SURFACE: the submerged stone seen through the surface, likewise at half the stone's density on the one-density tiers (phone 57x128 -> 257x571)
+    // b5: half the density of the lake shading that samples it through its 4-tap blur (103x228 phone, 341x192 PC; ?under=1 = 206x457 / 683x384)
+    const fit = () => { const d = DENS_ONE ? (SURF_B4 ? quality.heroDprFor(size.width, size.height) * 0.5 : quality.dprFor(size.width, size.height, true) * UNDER_S) / under.scale : quality.dprFor(size.width, size.height, true); const w = Math.max(2, Math.floor(size.width * d * under.scale)), h = Math.max(2, Math.floor(size.height * d * under.scale)); if (w !== under.rt.width || h !== under.rt.height) under.rt.setSize(w, h) }
     fit()
     return quality.on(fit)
   }, [size, under])
@@ -336,7 +354,11 @@ export function HeroStage() {
   // camera's draw of the same mesh then only reads it back (water.ts u_lakeComp). Same vertex shader → full-res, exact depth:
   // the stone's silhouette, its submerged cut and the meniscus line are still drawn at scene resolution, and the stone is
   // never in this target, so nothing of it can bleed (no halo). Desktop/mid: nothing here exists (hi).
-  const lake = useMemo(() => hi ? null : { rt: new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType }), scale: PHONE_SHARP ? 0.5 : 0.65,   /* R7.00 (Shifat 4:20 AM 'hero … just performance boost'): the lake's own pass 0.65 → 0.5 on budget phones (≈40 % fewer pixels) */ low: false, frame: -1, mw: new THREE.Matrix4(), pm: new THREE.Matrix4(), comps: 0 }, [hi])
+  // R7.10 b5 LAKE ONE PASS (Shifat: "0 pixelated stuff & possible fastest performance"): on the one-density tiers (his M02s,
+  // his PC) the lake no longer shades into its own 0.5x / 0.65x target (103x228 phone, 443x249 PC) to be read back by the main
+  // draw: the main draw shades it in full at the background's density (206x457 phone, 683x384 PC), 2x / 1.5x sharper per axis.
+  // One 138k-tri pass instead of two, no extra target, clear or feedback-loop guard; same per-frame cost (sim). ?lksplit = b4's split
+  const lake = useMemo(() => hi || LAKE_ONE ? null : { rt: new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType }), scale: PHONE_SHARP ? 0.5 : 0.65,   /* R7.00 (Shifat 4:20 AM 'hero … just performance boost'): the lake's own pass 0.65 → 0.5 on budget phones (≈40 % fewer pixels) */ low: false, frame: -1, mw: new THREE.Matrix4(), pm: new THREE.Matrix4(), comps: 0 }, [hi])
   useEffect(() => {
     if (!lake) return
     // the governor's MOVING rung only (noRest), as `under`: no re-allocation on every pointer stop/start
@@ -392,7 +414,8 @@ export function HeroStage() {
     wu.u_lakeTex!.value = lake.rt.texture
     waterMesh.current.layers.enable(LAKE_LAYER)
     if (/[?&]qa\b/.test(location.search)) (window as any).__lake = lake   // QA only (comps = main draws served from the low-res lake)
-  }, [lake, wu])
+    if (/[?&]qa\b/.test(location.search)) { (window as any).__refl = refl; (window as any).__under = under }   // R7.10 QA: the surface's targets
+  }, [lake, wu, refl, under])
 
   const st = useMemo(() => ({
     tiltX: new Spring(0, 1.1, 0.55, 0), tiltZ: new Spring(0, 1.1, 0.55, 0), lift: new Spring(0, 0.9, 0.45, 0),
@@ -449,7 +472,13 @@ export function HeroStage() {
         if (comp) lake.comps++
         if (!lake.low) wu.u_resolution.value.copy(shared.u_resolution.value)
         wu.u_wlClip.value = main ? dive.split : -1
-      } : (_r, _s, cam) => { wu.u_wlClip.value = cam === camera ? dive.split : -1 }
+      } : (_r, _s, cam) => {
+        // b6 FIX (Shifat 5:53 AM "Stone cutoff", real M02s): the low tiers' water has its OWN u_resolution (set per draw by the
+        // split path above); with b5's one-pass lake nothing set it, so it stayed 1x1: the lens-waterline cut never cut (the lake's
+        // underside covered the stone's pavilion and the dive backdrop) and the refraction read the submerged stone at a corner
+        if (wu.u_resolution !== shared.u_resolution) wu.u_resolution.value.copy(shared.u_resolution.value)
+        wu.u_wlClip.value = cam === camera ? dive.split : -1
+      }
     }
     // R6.93 WATERLINE: the sheen's meniscus line is seen only from the air (gemSheen.ts): the main camera's draw gets the
     // lens waterline and whether the lens is above the lake; the env/mirror/neighbour captures keep the line as before

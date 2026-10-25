@@ -60,6 +60,18 @@ export const diveRays = {
   tint: new THREE.Color(0.42, 0.88, 1.0),
 }
 ;(window as any).__diveRays = diveRays
+
+/** R7.10 SPLIT DENSITY: the water volume behind everything (the backdrop sphere: in-scatter, the surface from below, the
+ *  deep's glow) is smooth light with no edges, so on the one-density tiers it is shaded at half the density into its own
+ *  target (PostChain BackdropLo) and drawn into the scene with a sharp (Catmull-Rom) upsample; every edge in front of it
+ *  (sand, kelp, silt, creatures, text) stays at the full density. The stage registers the mesh and its two materials. */
+export const diveLo = {
+  mesh: null as THREE.Mesh | null,
+  full: null as THREE.Material | null,
+  lo: null as THREE.Material | null,   // the backdrop without its full-density part (the deep's jittered shafts)
+  blit: null as THREE.ShaderMaterial | null,
+  split: () => -1 as number,
+}
 // PERF HOOK: the god-ray mask/blur resolution follows the governor level (the tap count is compiled into the shader per tier)
 quality.on(() => { diveRays.scale = quality.rt(diveRays.baseScale) })
 
