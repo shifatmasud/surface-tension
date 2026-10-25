@@ -36,6 +36,7 @@ import { GpuFrameTimer } from './systems/perfGovernor' // SHARP HOOK: the govern
 import { installShaderGuard, ShaderGuard } from './systems/shaderGuard'
 import { scrollHost } from '../services/scrollHost'
 import { applyRenderScale } from './renderScale'
+import { giftPrewarm } from '../dom/gift/gift'   // R7.09 GIFT PREWARM
 
 // PRELOAD: code-split per scene. The hero is in this chunk; each later stage is its own chunk, mounted and
 // shader-warmed when its block enters the ±1 window around the current block (LaterStages below).
@@ -123,7 +124,7 @@ function Renderer() {
     // PERF HOOK: once the hero is linked, one curtain-hidden frame runs every post pass this tier can use (clip
     // composite, god rays, trail, SMAA/FXAA), so none of them links at its first boundary mid-scroll
     // PRELOAD: then the warm gate (services/preload.ts) builds every program of the real frame a few per frame, counted
-    const done = () => { if (++n === 2) { engine.warm = true; warmGate.open(gl) } }
+    const done = () => { if (++n === 2) { engine.warm = true; warmGate.open(gl); giftPrewarm() } }   // R7.09: the gift is built + linked behind the curtain too (dom/gift/gift.ts)
     // PERFGOV-3: the hero, its environment and the UFX layer now mount in their own tasks after this one (BootStager);
     // the warm-up compiles the scenes once they are all in (same programs, same order as before)
     booted.then(() => {

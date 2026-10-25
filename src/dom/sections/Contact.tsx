@@ -152,7 +152,16 @@ export function Contact() {
         footRoll(clamp((k0 - 0.03 * fh) / (0.45 * fh)))
         // R6.89 GIFT STICKER: the surprise at the very end of the scroll (the footer fully uncovered); it gathers once each
         // time you arrive, and is put away again when you scroll back up off the end
-        if (giftBtn.ctl) { const end = k0 >= fh - 2; if (end) giftBtn.ctl.set(true); else if (k0 < fh * 0.85) giftBtn.ctl.set(false) }
+        // R7.09 (Shifat 10:00 PM "Gift scene ... too slow to trigger"): the footer is fixed and the curtain uncovers it from the
+        // bottom up, so the sticker's own spot (bottom of the footer) is in view long before the footer is fully uncovered. It
+        // now gathers as soon as its spot is uncovered (+ 6 px), and is put away once the curtain covers it again by 40 px
+        // (was: only at k0 >= fh - 2, the last 2 px of the scroll). Its spot is measured once per viewport height (no layout
+        // read per frame). ?giftold = the 7.08 threshold.
+        if (giftBtn.ctl) {
+          if (giftBtn.vh !== vh && giftBtn.el && !GIFT_OLD) { giftBtn.vh = vh; const r = giftBtn.el.getBoundingClientRect(); giftBtn.at = Math.max(0, Math.round(vh - r.top - giftBtn.ty)) + 6 }
+          if (GIFT_OLD || giftBtn.at < 0) { const end = k0 >= fh - 2; if (end) giftBtn.ctl.set(true); else if (k0 < fh * 0.85) giftBtn.ctl.set(false) }
+          else { const at = Math.min(fh - 2, giftBtn.at); if (k0 >= at) giftBtn.ctl.set(true); else if (k0 < at - 40) giftBtn.ctl.set(false) }
+        }
         // W19 (Shifat 19:49Z): the footer is fully in view at k0 = fh; it then HOLDS for the runway while the bar fills, and wraps at the end
         // R6.80 (Shifat Oct 22 "scroll hard to loop to top", 04:55 "Rubber band is enough"; services/loopPull.ts): the
         // footer is the page's end. Scrolling on past it only stretches the bar and it springs back; a hard, sustained
@@ -214,7 +223,8 @@ export function Contact() {
 
 const footerBar = { el: null as HTMLDivElement | null }
 /** R6.89: the gift sticker's button and its controller (dom/gift/giftSticker.ts) */
-const giftBtn = { el: null as HTMLElement | null, ctl: null as ReturnType<typeof mountGiftSticker> | null }
+const giftBtn = { el: null as HTMLElement | null, ctl: null as ReturnType<typeof mountGiftSticker> | null, vh: -1, at: -1, ty: 0 }
+const GIFT_OLD = typeof location !== 'undefined' && /[?&]giftold\b/.test(location.search)   // R7.09: ?giftold = the 7.08 gift (trigger + open path)
 /** TEXTROLL: the footer's text blocks, each rolled per line (lineRoll), staggered left to right / top to bottom */
 const footRolls: LineRoll[] = []
 let footP = -1

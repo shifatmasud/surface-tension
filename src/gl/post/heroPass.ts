@@ -37,6 +37,29 @@ type Root = { o: THREE.Object3D; ui: boolean; was: boolean }
 const VS = /* glsl */ `varying vec2 vUv; void main(){ vUv = position.xy * 0.5 + 0.5; gl_Position = vec4(position.xy, 0.0, 1.0); }`
 const DEPTH_FS = /* glsl */ `uniform sampler2D u_depth; varying vec2 vUv; void main(){ gl_FragDepth = texture2D(u_depth, vUv).r; gl_FragColor = vec4(0.0); }`
 
+/** R7.09: the unique vertices of a small, rigid, plain mesh (no skin, no morphs), cached per geometry; null = use the box */
+const tvCache = new WeakMap<THREE.BufferGeometry, Float32Array | null>()
+function tightVerts(o: THREE.Object3D): Float32Array | null {
+  const m = o as THREE.Mesh
+  if (!m.isMesh || (m as THREE.SkinnedMesh).isSkinnedMesh || (m as THREE.InstancedMesh).isInstancedMesh || o.children.length) return null
+  const g = m.geometry as THREE.BufferGeometry
+  if (!g || Object.keys(g.morphAttributes || {}).length) return null
+  if (tvCache.has(g)) return tvCache.get(g)!
+  const pos = g.getAttribute('position') as THREE.BufferAttribute | undefined
+  let out: Float32Array | null = null
+  if (pos && pos.count > 0 && pos.count <= 4096) {
+    const seen = new Set<string>(), arr: number[] = []
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i), k = x.toFixed(4) + ',' + y.toFixed(4) + ',' + z.toFixed(4)
+      if (seen.has(k)) continue
+      seen.add(k); arr.push(x * 1.006, y * 1.006, z * 1.006)   // the sheen shell draws at 1.004x
+    }
+    out = new Float32Array(arr)
+  }
+  tvCache.set(g, out)
+  return out
+}
+
 class HeroPass {
   enabled = SPLIT
   private roots: Root[] = []
@@ -47,9 +70,11 @@ class HeroPass {
   rt: THREE.WebGLRenderTarget | null = null
   depth: THREE.DepthTexture | null = null
   private box = { x: 0, y: 0, w: 0, h: 0, on: false }
+  /** R7.09: the rect cleared, drawn and resolved this frame (target px) */
+  private drect = { x: 0, y: 0, w: 0, h: 0 }
   private drawn = false
   private lightsAt = -1
-  private v = new THREE.Vector3(); private v2 = new THREE.Vector2(); private sp = new THREE.Sphere(); private bb = new THREE.Box3()
+  private m4 = new THREE.Matrix4(); private v = new THREE.Vector3(); private v2 = new THREE.Vector2(); private sp = new THREE.Sphere(); private bb = new THREE.Box3()
   private quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2))
   private qcam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
   private depthMat = new THREE.ShaderMaterial({ uniforms: { u_depth: { value: null } }, vertexShader: VS, fragmentShader: DEPTH_FS, depthTest: true, depthWrite: true, depthFunc: THREE.AlwaysDepth, colorWrite: false })
@@ -132,7 +157,7 @@ class HeroPass {
   /** the screen rectangle (canvas px, bottom-left origin) covered by the visible heroes, or none */
   private measure(camera: THREE.Camera, ui: boolean, cam2?: THREE.Camera) {
     const W = this.rt!.width, H = this.rt!.height
-    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, any = false, full = false
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, any = false, full = false, tight = false, loose = false
     for (const r of this.roots) {
       if (r.ui !== ui || !this.shown(r.o)) continue
       if (ui) { full = true; any = true; continue }   // the slides place their vertices in the shader (no usable bounds)
@@ -146,8 +171,28 @@ class HeroPass {
       }
       const c = cam2 ?? camera
       r.o.updateWorldMatrix(true, true)
+      // R7.09 TIGHT BOX (Shifat 9:45 PM "Then we push hero more"): a small rigid mesh (the stone and its sheen shell) is
+      // bounded by its own projected vertices, not by the 8 corners of its world box. The spinning, tilted stone's world box
+      // projected to roughly twice the stone's screen area, and every pixel of the box is cleared, drawn (depth copy) and
+      // resolved at 4x MSAA. The vertices are exact for the frame; a few px of margin cover the shell's 0.4 % inflation.
+      const tv = HB_OLD ? null : tightVerts(r.o)
+      if (tv) {
+        const e = r.o.matrixWorld, near = -((c as THREE.PerspectiveCamera).near ?? 0.01)
+        this.m4.multiplyMatrices(c.matrixWorldInverse, e)
+        let behind = false
+        for (let i = 0; i < tv.length; i += 3) {
+          this.v.set(tv[i], tv[i + 1], tv[i + 2]).applyMatrix4(this.m4)
+          if (this.v.z > near) { behind = true; break }
+          this.v.applyMatrix4(c.projectionMatrix)
+          x0 = Math.min(x0, this.v.x); x1 = Math.max(x1, this.v.x); y0 = Math.min(y0, this.v.y); y1 = Math.max(y1, this.v.y)
+        }
+        if (behind) full = true
+        any = true; tight = true
+        continue
+      }
       this.bb.setFromObject(r.o, false)
       if (this.bb.isEmpty() || r.o.userData.heroFull) { full = true; any = true; continue }
+      loose = true
       // the 8 corners of the world box, projected (a corner behind the camera = the whole screen)
       const b = this.bb
       for (let i = 0; i < 8; i++) {
@@ -165,7 +210,9 @@ class HeroPass {
     // pulls hero pixels up to ~8 % of the screen: the whole grown box is cleared and drawn, so the composite never reads a
     // stale pixel from an earlier frame
     const trail = props.look.paintAmount > 0 && !paintState.asleep
-    const mx = 0.06 + (trail ? 0.16 * Math.max(W, H) / W : 0), my = 0.06 + (trail ? 0.16 * Math.max(W, H) / H : 0)
+    // R7.09: vertex-tight bounds need only 4 px of margin (2 / W in NDC per px), the loose world-box path keeps 0.06
+    const m0x = tight && !loose ? 8 / W : 0.06, m0y = tight && !loose ? 8 / H : 0.06
+    const mx = m0x + (trail ? 0.16 * Math.max(W, H) / W : 0), my = m0y + (trail ? 0.16 * Math.max(W, H) / H : 0)
     x0 = Math.max(-1, x0 - mx); y0 = Math.max(-1, y0 - my); x1 = Math.min(1, x1 + mx); y1 = Math.min(1, y1 + my)
     if (x1 <= x0 || y1 <= y0) { B.on = false; return B }
     B.x = Math.floor((x0 * 0.5 + 0.5) * W); B.y = Math.floor((y0 * 0.5 + 0.5) * H)
@@ -197,14 +244,22 @@ class HeroPass {
     this.lights(scene)
     const prev = gl.getRenderTarget(), auto = gl.autoClear, ca = gl.getClearAlpha(), cc = gl.getClearColor(new THREE.Color())
     const bg = scene.background, mask = camera.layers.mask, su = gl.shadowMap.autoUpdate
-    rt.scissor.set(B.x, B.y, B.w, B.h); rt.scissorTest = true
+    // R7.09: the drawn rect D is the box grown by 2 px; the clear, the draw and three's resolve all stay inside it, and the
+    // composite reads nothing outside it (heroAt: u_hr), so no stale texel from an earlier frame or from the UI heroes can
+    // show (the R7.03 forest line) without clearing the whole 4x target every frame
+    const D = this.drect
+    D.x = Math.max(0, B.x - 2); D.y = Math.max(0, B.y - 2); D.w = Math.min(rt.width, B.x + B.w + 2) - D.x; D.h = Math.min(rt.height, B.y + B.h + 2) - D.y
+    if (HB_OLD) { D.x = 0; D.y = 0; D.w = rt.width; D.h = rt.height }
+    rt.scissor.set(HB_OLD ? B.x : D.x, HB_OLD ? B.y : D.y, HB_OLD ? B.w : D.w, HB_OLD ? B.h : D.h); rt.scissorTest = true
     rt.viewport.set(0, 0, rt.width, rt.height)
     // R7.03 FOREST LINE: clear the WHOLE target, not just this frame's box. The composite's scissor rounds up to the
     // canvas grid and its bilinear read / trail smear reach a texel past the box; rows outside the box kept whatever an
     // earlier frame drew there, so while the trail was awake (bigger box) a stale half-alpha row showed as a thin dark
     // line across the forest sky. A full clear is one cheap fill; the draw below stays scissored to the box.
-    rt.scissorTest = false; gl.setRenderTarget(rt)
+    // (R7.09: only the drawn rect D now; ?hbox=old clears the whole target as 7.08 did)
+    if (HB_OLD) { rt.scissorTest = false; gl.setRenderTarget(rt) }
     gl.setClearColor(0x000000, 0); gl.autoClear = false
+    gl.setRenderTarget(rt)
     gl.clear(true, true, false)
     rt.scissorTest = true; gl.setRenderTarget(rt)
     // the background's depth at canvas density
@@ -246,12 +301,12 @@ class HeroPass {
     const common = (graded: boolean) => ({
       ...un, u_fk: fk, u_ft: ft, u_fasp: fa, u_fvel: fv, u_fb: fb,
       tHero: { value: null as THREE.Texture | null }, u_trail: { value: 0 }, u_curtain: { value: foot ? 1 : 0 },
-      u_box: { value: new THREE.Vector4(-1e5, -1e5, 1e5, 1e5) }, u_band: { value: 1 },   // R7.08: the composite box (drawing-buffer px) and its trail fade band
+      u_box: { value: new THREE.Vector4(-1e5, -1e5, 1e5, 1e5) }, u_band: { value: 1 }, u_hr: { value: new THREE.Vector4(-1e5, -1e5, 1e5, 1e5) },   // R7.08: the composite box (drawing-buffer px) and its trail fade band
     })
     // the grade's own functions (mainUv, mainImage) are spliced in as written; `inputBuffer` is never read by them
     const body = (graded: boolean) => /* glsl */ `
 uniform sampler2D tHero; uniform float u_trail, u_curtain; uniform float u_fk, u_ft, u_fasp, u_fvel, u_fb;
-uniform float u_fadeIn; uniform vec4 u_box; uniform float u_band;
+uniform float u_fadeIn; uniform vec4 u_box; uniform float u_band; uniform vec4 u_hr;
 uniform sampler2D u_screenPaintTexture; uniform vec2 u_screenPaintTexelSize;
 uniform float u_amount, u_rgbShift, u_multiplier, u_colorMultiplier, u_shade;
 ${graded ? gsrc : `uniform sampler2D u_blueNoise; uniform vec2 u_blueNoiseOffset; uniform vec2 u_blueNoiseSize;
@@ -266,6 +321,7 @@ vec4 heroAt(vec2 p){
   vec2 q = p;
   ${graded ? 'mainUv(q);' : ''}
   if (u_fk > 0.0) q.y -= u_fk;
+  if (q.x < u_hr.x || q.y < u_hr.y || q.x > u_hr.z || q.y > u_hr.w) return vec4(0.0);   // R7.09: outside this frame's drawn rect
   vec4 h = texture2D(tHero, q);
   if (h.a < 0.0005) return vec4(0.0);
   vec3 c = h.rgb / h.a;
@@ -364,8 +420,13 @@ void main(){
     return clip.liveUpper ? 1 - k : k
   }
 
-  private put(gl: THREE.WebGLRenderer, mat: THREE.ShaderMaterial, B: { x: number; y: number; w: number; h: number }) {
+  private put(gl: THREE.WebGLRenderer, mat: THREE.ShaderMaterial, B: { x: number; y: number; w: number; h: number }, D?: { x: number; y: number; w: number; h: number }) {
     mat.uniforms.tHero.value = this.rt!.texture
+    {   // R7.09: the texel-centre bounds of the drawn rect, in target uv (none given = no limit)
+      const W0 = this.rt!.width, H0 = this.rt!.height
+      if (D && !HB_OLD) mat.uniforms.u_hr.value.set((D.x + 0.5) / W0, (D.y + 0.5) / H0, (D.x + D.w - 0.5) / W0, (D.y + D.h - 0.5) / H0)
+      else mat.uniforms.u_hr.value.set(-1e5, -1e5, 1e5, 1e5)
+    }
     mat.uniforms.u_trail.value = props.look.paintAmount > 0 && !paintState.asleep ? 1 : 0
     mat.uniforms.u_fadeIn.value = this.fade()
     this.quad.material = mat
@@ -437,7 +498,7 @@ void main(){
 
   private compositeHeroes(gl: THREE.WebGLRenderer, ufxUnder: THREE.Scene, ufxCamera: THREE.Camera) {
     this.warmPending(gl)
-    if (this.drawn) this.put(gl, this.comp!, this.box)
+    if (this.drawn) this.put(gl, this.comp!, this.box, this.drect)
     this.drawn = false
     // UI heroes: drawn now at canvas density (the chain's 'under' layer skipped them), through the trail only
     if (!this.hasUi()) return
@@ -493,7 +554,9 @@ export const heroPass = new HeroPass()
 if (typeof window !== 'undefined') (window as any).__hero = heroPass
 
 /** order -1 / order 1 passes for the post chain (no swap, the input buffer is untouched) */
-const HP_ONE = !/[?&]hpold\b/.test(location.search) // R7.06: ?hpold = 7.05 hero pass (three render calls, depth resolved)
+const HP_ONE = !/[?&]hpold\b/.test(location.search)
+/** R7.09: ?hbox=old = 7.08's loose box (world AABB corners + 0.06 margin) and the full-target clear */
+const HB_OLD = /[?&]hbox=old\b/.test(location.search) // R7.06: ?hpold = 7.05 hero pass (three render calls, depth resolved)
 export class HeroHidePass extends Pass {
   constructor() { super('HeroHide'); this.needsSwap = false; this.renderToScreen = false }
   render() { heroPass.hide() }

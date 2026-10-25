@@ -16,6 +16,9 @@ import { viewport, onViewport } from '../../core/viewport'
 import { blurFadeIn, blurFadeOut } from '../../services/blurFade'
 import './gift.css'
 import { giftSound } from './giftSound'
+import { giftMark } from './gift'   // R7.09 QA timeline
+import { LOW_END_GPU } from '../../gl/quality'   // R7.09: the gift's fixed phone density
+const GIFT_OLD = /[?&]giftold\b/.test(location.search)
 import { CSS3DRenderer, CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer.js' // R6.88b CRISP TYPE
 
 const CASE_URL = 'https://surface-tension-case-study.pages.dev/'
@@ -519,16 +522,31 @@ function filmPass() {
   return m
 }
 
+/** the page's mood, read from the blurred frame (unchanged from R6.83; a function since R7.09 so a parked stage re-reads it) */
+function readMood(snap: HTMLCanvasElement | null, mood: THREE.Color) {
+  const pre = snap?.dataset.mood?.split(',').map(Number)   // R7.09: read once by gift.ts at the grab (no read-back here)
+  if (pre && pre.length === 3 && pre.every((v) => Number.isFinite(v))) { mood.setRGB(pre[0] / 255, pre[1] / 255, pre[2] / 255, THREE.SRGBColorSpace); return }
+  if (snap && snap.width > 2) try {
+    const d = snap.getContext('2d')!.getImageData(0, 0, snap.width, snap.height).data; let r = 0, g = 0, b = 0, n = 0
+    for (let i = 0; i < d.length; i += 16) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++ }
+    mood.setRGB(r / n / 255, g / n / 255, b / n / 255, THREE.SRGBColorSpace)
+  } catch { /* tainted or empty: neutral */ }
+}
+
 // ---------- environment: the page's own blurred frame + soft studio strips ----------
 function makeEnv(renderer: THREE.WebGLRenderer, snap: HTMLCanvasElement | null) {
+  const b = envBuilder(renderer); const rt = b.build(snap); b.dispose(); return rt
+}
+/** R7.09: the same environment, with its PMREM generator and its scene kept alive between builds. A parked stage builds it
+ *  once while warming (programs linked then) and again from the real frozen frame on show(); disposing the generator in
+ *  between released its blur programs, so the rebuild re-linked them on the tap (measured: 6.6 s sim). Same scene, same
+ *  numbers as makeEnv always used. */
+function envBuilder(renderer: THREE.WebGLRenderer) {
   const env = new THREE.Scene()
   const disposables: { dispose(): void }[] = []
   const sg = new THREE.SphereGeometry(20, 32, 16); disposables.push(sg)
-  let sm: THREE.MeshBasicMaterial
-  if (snap && snap.width > 2) {
-    const tx = new THREE.CanvasTexture(snap); tx.colorSpace = THREE.SRGBColorSpace; disposables.push(tx)
-    sm = new THREE.MeshBasicMaterial({ map: tx, side: THREE.BackSide, color: new THREE.Color(0.75, 0.75, 0.75) })
-  } else sm = new THREE.MeshBasicMaterial({ side: THREE.BackSide, color: new THREE.Color(0.32, 0.34, 0.38) })
+  const tx = new THREE.CanvasTexture(document.createElement('canvas')); tx.colorSpace = THREE.SRGBColorSpace; disposables.push(tx)
+  const sm = new THREE.MeshBasicMaterial({ map: tx, side: THREE.BackSide, color: new THREE.Color(0.75, 0.75, 0.75) })
   disposables.push(sm); env.add(new THREE.Mesh(sg, sm))
   const pg = new THREE.PlaneGeometry(1, 1); disposables.push(pg)
   const strip = (x: number, y: number, z: number, w: number, h: number, k: number, tint?: THREE.Color) => {
@@ -542,19 +560,51 @@ function makeEnv(renderer: THREE.WebGLRenderer, snap: HTMLCanvasElement | null) 
   strip(1, -1.5, 9, 6, 2.5, 0.9)         // low front fill
   strip(-5, -2, -6, 2.5, 2.5, 1.6, PINK) // a warm pink bounce from the ribbon's side
   const pm = new THREE.PMREMGenerator(renderer)
-  const rt = pm.fromScene(env, 0.03, 0.1, 40)
-  pm.dispose(); disposables.forEach((d) => d.dispose())
-  return rt
+  return {
+    build(snap: HTMLCanvasElement | null) {
+      if (snap && snap.width > 2) { if (tx.image !== snap) { tx.image = snap } tx.needsUpdate = true; sm.map = tx; sm.color.setRGB(0.75, 0.75, 0.75) }
+      else { sm.map = null; sm.color.setRGB(0.32, 0.34, 0.38) }
+      sm.needsUpdate = true
+      return pm.fromScene(env, 0.03, 0.1, 40)
+    },
+    dispose() { pm.dispose(); disposables.forEach((d) => d.dispose()) },
+  }
 }
 
-export type GiftHandle = { close(): Promise<void> }
+export type GiftHandle = { close(): Promise<void>; show?: () => void }
 
-export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: () => void }): GiftHandle {
+export type GiftOpts = { reduced: boolean; close: () => void; parked?: boolean }
+/** the tap path: the whole stage built in one go (as 7.08) */
+export function mountGift(root: HTMLElement, opts: GiftOpts): GiftHandle {
+  const g = mountSteps(root, opts)
+  let r = g.next()
+  while (!r.done) r = g.next()
+  return r.value
+}
+/** R7.09 PARKED (Shifat 10:00 PM "too slow to trigger"): the stage built ahead of the tap, one slice per frame (no long
+ *  task), its programs submitted one object per frame and drawn once off screen, then held until show(): the tap only
+ *  reveals it. */
+export function mountGiftParked(root: HTMLElement, opts: GiftOpts): Promise<GiftHandle> {
+  ;(window as any).__giftT = { tap: performance.now(), parkedWarm: true }   // QA: the warm's own timeline (replaced by the tap's)
+  return new Promise((res) => {
+    const g = mountSteps(root, { ...opts, parked: true })
+    const step = () => { const r = g.next(); if (r.done) res(r.value); else requestAnimationFrame(step) }
+    requestAnimationFrame(step)
+  })
+}
+function* mountSteps(root: HTMLElement, opts: GiftOpts): Generator<void, GiftHandle, void> {
   const reduced = opts.reduced
+  giftMark('mount')
   // the shared uniforms outlive a close: a second open starts wrapped again
   U.uD.value = 0; U.uDR.value = 0; U.uForm.value = 0; U.uGlow.value = 0; U.uHit.value.set(0, TOP, 0)
   const phone = browser.isMobile || (viewport.w <= 812 && matchMedia('(pointer: coarse)').matches)
-  const dprMax = phone ? Math.min(devicePixelRatio || 1, 1) : Math.min(devicePixelRatio || 1, 1.2)
+  // R7.09 (Shifat 10:00 PM "jittery. Frame drops"): phones pick ONE density before the first frame and never resize the
+  // (antialiased, MSAA) canvas again: the 7.08 governor stepped 1.0 -> 0.6 in 0.1 steps on slow frames, each step a canvas +
+  // MSAA reallocation (his GPU report: multisample_renderbuffer_resize_emulation) = a hitch and a visible resolution pop,
+  // up to 4 of them while the box rose and opened. Budget GPUs (LOW_END_GPU: his Adreno 506) take 0.8, other phones 1.0.
+  // ?giftold = the 7.08 governor.
+  const phoneFixed = phone && !GIFT_OLD
+  const dprMax = phone ? Math.min(devicePixelRatio || 1, phoneFixed && LOW_END_GPU ? 0.8 : 1) : Math.min(devicePixelRatio || 1, 1.2)
   const dprMin = phone ? 0.6 : 0.8
   let dpr = dprMax
 
@@ -580,6 +630,8 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
     return { close: async () => { canvas.remove(); sr.remove(); hit.remove(); cta.remove(); closeBtn.remove() } }
   }
   renderer.setClearColor(0x000000, 0)
+  giftMark('context')
+  yield
   const css = new CSS3DRenderer(); css.domElement.className = 'gift__type'; css.domElement.setAttribute('aria-hidden', 'true') // R6.88b CRISP TYPE
   css.setSize(viewport.w, viewport.h); root.insertBefore(css.domElement, sr)
   renderer.toneMapping = TONE; renderer.toneMappingExposure = TONE === THREE.ACESFilmicToneMapping ? 1.12 : 1.0
@@ -608,17 +660,15 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
   const snap = root.querySelector('canvas.gift__bg') as HTMLCanvasElement | null
   // the page's mood, read once from the blurred frame: tints the fill so the box sits in the same light
   const mood = new THREE.Color(0.55, 0.58, 0.62)
-  if (snap && snap.width > 2) try {
-    const d = snap.getContext('2d')!.getImageData(0, 0, snap.width, snap.height).data; let r = 0, g = 0, b = 0, n = 0
-    for (let i = 0; i < d.length; i += 16) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++ }
-    mood.setRGB(r / n / 255, g / n / 255, b / n / 255, THREE.SRGBColorSpace)
-  } catch { /* tainted or empty: neutral */ }
+  readMood(snap, mood)
 
   const stage = new THREE.Group(); scene.add(stage)
   const floater = new THREE.Group(); stage.add(floater)
   const boxYaw = new THREE.Group(); boxYaw.position.y = BOX_Y; floater.add(boxYaw)
 
   const geo = buildBox(), rib = buildRibbon()
+  giftMark('b_geo')
+  yield
   const stripeTex = pinstripe(); stripeTex.wrapS = stripeTex.wrapT = THREE.RepeatWrapping; stripeTex.repeat.set(9, 9)
   const shellMat = dissolvable(new THREE.MeshPhysicalMaterial({
     color: new THREE.Color('#636a74'), metalness: 0.82, roughness: 0.24, clearcoat: 1, clearcoatRoughness: 0.06,
@@ -646,6 +696,8 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
   const dRib = dust([[rib.bands, Math.round(N * 0.34)]], 1, U.uDR, 'rise', U.uHitR, U.uSpanR)
   boxYaw.add(dBase); lidG.add(dLid); ribG.add(dRib)
   const dustAll = [dBase, dLid, dRib]
+  giftMark('b_dust')
+  yield
   dustAll.forEach((d) => { d.visible = false })
   const boxParts = [base, floorM, lid, bands, halo]
   const shadowTex = radial('rgba(0,0,0,0.62)', 'rgba(0,0,0,0)')
@@ -658,6 +710,8 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
   const tw = phone ? 768 : 1024
   const frontTex = cardFront(tw), backTex = cardBack(phone ? 512 : 768)
   const btnTex = buttonTex(phone ? 512 : 640, false), btnTexH = buttonTex(phone ? 512 : 640, true)
+  giftMark('b_tex')
+  yield
   const body = new THREE.Mesh(new THREE.ExtrudeGeometry(rr(CW, CH, CR), { depth: 0.012, bevelEnabled: false, curveSegments: 10 }), cardMat(new THREE.MeshStandardMaterial({ color: '#9aa0aa', roughness: 0.28, metalness: 0.7 }), 'gift-card-edge', 'edge'))
   body.position.z = -0.006
   const fg = faceGeo(CW, CH, CR)
@@ -701,7 +755,7 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
 
   // lights: the env does most of it; a key, a cool rim and a fill tinted by the page
   // film lighting: a warm key from high left, a cool rim from behind right, a low fill in the page's own colour
-  scene.add(new THREE.HemisphereLight(COOL.clone().lerp(new THREE.Color(1, 1, 1), 0.5), mood, 0.3))
+  const hemi = new THREE.HemisphereLight(COOL.clone().lerp(new THREE.Color(1, 1, 1), 0.5), mood, 0.3); scene.add(hemi)
   const key = new THREE.DirectionalLight(WARM, 2.0); key.position.set(-2.6, 3.6, 2.6); scene.add(key)
   const rim = new THREE.DirectionalLight(COOL, 2.2); rim.position.set(2.8, 1.8, -3.4); scene.add(rim)
   // haze: a warm shaft falling from the key's side behind the gift, motes drifting through it, then the film layer
@@ -711,8 +765,13 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
   const mote = motes(phone ? 90 : 160); scene.add(mote)
   const film = filmPass(); scene.add(film)
 
+  giftMark('b_scene')
+  yield
   let envRT: THREE.WebGLRenderTarget | null = null
-  try { envRT = makeEnv(renderer, snap); scene.environment = envRT.texture } catch { /* lights alone */ }
+  const envB = envBuilder(renderer)   // R7.09: kept for show() (parked)
+  try { envRT = envB.build(snap); scene.environment = envRT.texture } catch { /* lights alone */ }
+  giftMark('b_env')
+  yield
 
   // ---------- state ----------
   let t0 = performance.now(), last = t0, raf = 0, alive = true, ready = false
@@ -727,7 +786,7 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
   const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), inv = new THREE.Matrix4(), lray = new THREE.Ray()
   const boxBounds = new THREE.Box3(new THREE.Vector3(-L / 2, 0, -L / 2), new THREE.Vector3(L / 2, TOP + 0.2, L / 2))
   const cardBounds = new THREE.Box3(new THREE.Vector3(-CW / 2, -CH / 2, -0.02), new THREE.Vector3(CW / 2, CH / 2, 0.02))
-  const v3 = new THREE.Vector3()
+  const v3 = new THREE.Vector3(), fA = new THREE.Vector3(), fB = new THREE.Vector3()
 
   if (reduced) { boxParts.forEach((o) => { o.visible = false }); shadow.visible = false }
 
@@ -798,7 +857,8 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
   const offVp = onViewport(onResize) // R7.07: real resizes only (not the address bar)
 
   // ---------- frame ----------
-  const proj = (o: THREE.Object3D, x: number, y: number, z: number) => { v3.set(x, y, z).applyMatrix4(o.matrixWorld).project(camera); return [(v3.x * 0.5 + 0.5) * viewport.w, (-v3.y * 0.5 + 0.5) * viewport.h] }
+  const pj = [0, 0]   // R7.09: one reused pair (was a new array per call, 10+ a frame)
+  const proj = (o: THREE.Object3D, x: number, y: number, z: number) => { v3.set(x, y, z).applyMatrix4(o.matrixWorld).project(camera); pj[0] = (v3.x * 0.5 + 0.5) * viewport.w; pj[1] = (-v3.y * 0.5 + 0.5) * viewport.h; return pj }
   let ctaOn = false, hitShown = false
   const place = (el: HTMLElement, l: number, t: number, w: number, h: number) => {
     el.style.transform = `translate3d(${l.toFixed(1)}px, ${t.toFixed(1)}px, 0)`
@@ -899,7 +959,7 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
       if (!hitShown) { hitShown = true; hit.style.visibility = 'visible' }
     }
     if (opened) {
-      const facing = new THREE.Vector3(0, 0, 1).transformDirection(cardRoll.matrixWorld).dot(v3.copy(camera.position).sub(cardRoll.getWorldPosition(new THREE.Vector3())).normalize())
+      const facing = fA.set(0, 0, 1).transformDirection(cardRoll.matrixWorld).dot(v3.copy(camera.position).sub(cardRoll.getWorldPosition(fB)).normalize())   // R7.09: reused vectors
       const want = (reduced || ot > TL.F1 - 0.15) && facing > 0.55
       if (want) {
         const [x0, y0] = proj(cardRoll, bx - BTN_W / 2, by + BTN_H / 2, 0.008), [x1, y1] = proj(cardRoll, bx + BTN_W / 2, by - BTN_H / 2, 0.008)
@@ -925,7 +985,7 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
       // phones: step the density down on slow frames (never below 0.6), never up
       if (++frames > 40) {
         ema = ema * 0.93 + dt * 1000 * 0.07
-        if (ema > 21 && dpr > dprMin + 0.01) { dpr = Math.max(dprMin, dpr - 0.1); renderer.setPixelRatio(dpr); renderer.setSize(viewport.w, viewport.h, false); frames = 20; ema = 16.7 }
+        if (!phoneFixed && ema > 21 && dpr > dprMin + 0.01) { dpr = Math.max(dprMin, dpr - 0.1); renderer.setPixelRatio(dpr); renderer.setSize(viewport.w, viewport.h, false); frames = 20; ema = 16.7 }
       }
     }
     if (!reduced || !ready) raf = requestAnimationFrame(tick)
@@ -933,21 +993,65 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
 
   // ---------- prepare off-screen, then reveal (programs linked in parallel, textures uploaded, nothing compiles on show) ----------
   const prep = async () => {
+    giftMark('built')
     try { await document.fonts.load(`400 64px ${FONT}`) } catch { /* system face */ }
+    giftMark('font')
     frontTex.needsUpdate = true
     for (const t of [frontTex, backTex, btnTex, btnTexH, stripeTex, haloTex, shadowTex, sTex]) renderer.initTexture(t)
     dustAll.forEach((d) => { d.visible = true }); cardTilt.visible = true
-    try { await renderer.compileAsync(scene, camera) } catch { /* sync compile on first render */ }
+    if (opts.parked) {
+      // R7.09: no parallel shader compile on his phone, so each link stalls the GPU process: one object's programs a frame,
+      // then a few idle frames for the last links to finish before the first (off-screen) draw asks for them
+      const objs: THREE.Object3D[] = []
+      scene.traverseVisible((o) => { if ((o as THREE.Mesh).isMesh || (o as THREE.Points).isPoints || (o as THREE.Sprite).isSprite) objs.push(o) })
+      for (const o of objs) { if (!alive) return; try { renderer.compile(o, camera, scene) } catch { /* linked at the first draw */ } await new Promise((r) => requestAnimationFrame(r)) }
+      for (let i = 0; i < 6; i++) await new Promise((r) => requestAnimationFrame(r))
+    } else try { await renderer.compileAsync(scene, camera) } catch { /* sync compile on first render */ }
+    giftMark('compiled')
     if (!alive) return
     update(0, 0); cardTilt.visible = true; draw()
+    giftMark('firstDraw')
     dustAll.forEach((d) => { d.visible = false }); cardTilt.visible = reduced
     await new Promise((r) => requestAnimationFrame(r))
     if (!alive) return
+    if (opts.parked) {   // R7.09: held here until the tap (show), then the first visible frame is the box below the edge
+      giftMark('parked')
+      await shown
+      if (!alive) return
+      giftMark('released')
+      update(0, 0); draw()
+      giftMark('shownDraw')
+    }
     t0 = performance.now(); last = t0; ready = true
+    giftMark('ready')
     root.classList.add('gift--ready')
     blurFadeIn(closeBtn, reduced ? 0 : 500)
     if (reduced) { cta.tabIndex = 0; update(10, 0); draw(); update(10, 0); cta.focus({ preventScroll: true }) }
     else { hit.style.visibility = 'visible'; hitShown = true; hit.focus({ preventScroll: true }); raf = requestAnimationFrame(tick) }
+  }
+  // R7.09 PARKED: show() takes the page's frozen frame (the dialog's blurred still, drawn after the tap) for the fill's mood
+  // and the reflections, exactly as a stage built on the tap reads it, then releases prep()
+  let release: () => void = () => {}
+  const shown = new Promise<void>((r) => { release = r })
+  // The box is released at once (it rises from below the bottom edge, so its first frames are off screen); the page's
+  // mood and reflections are read from the still two frames later, before the box is in view (the read-back of the still
+  // is a GPU sync: ~5.7-6.0 s on the simulator whether read here or at the grab, so it must not sit between the tap and
+  // the first frame; the rise clock is shifted by whatever it cost)
+  const applyPage = () => {
+    if (!alive) return
+    const a0 = performance.now()
+    const s = root.querySelector('canvas.gift__bg') as HTMLCanvasElement | null
+    readMood(s, mood); hemi.groundColor.copy(mood)
+    giftMark('mood')
+    try { const e = envB.build(s); envRT?.dispose(); envRT = e; scene.environment = e.texture } catch { /* keeps the warm env */ }
+    giftMark('envShown')
+    // the rise is timed from t0: whatever that read cost is taken off the clock, so the box never jumps ahead
+    const spent = performance.now() - a0; t0 += spent; last += spent
+  }
+  const show = () => {
+    giftMark('show')
+    release()
+    requestAnimationFrame(() => requestAnimationFrame(applyPage))
   }
   prep()
   // reduced motion: one still frame, redrawn on resize only
@@ -958,7 +1062,9 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
   ;(window as any).__giftStage = { open: (x?: number, y?: number) => open(x, y), step, state: () => ({ ready, opened, spin, dpr, ctaOn }), wav: QA ? () => import('./giftSound').then((m) => m.giftSoundWav(TL)) : undefined }
 
   return {
+    show,
     async close() {
+      release()
       // the GL stops drawing at once (the page's scene takes the GPU back); the frozen frame sinks and fades in CSS
       alive = false; if (raf) cancelAnimationFrame(raf)
       sfx?.stop(); sfx = null
@@ -974,7 +1080,7 @@ export function mountGift(root: HTMLElement, opts: { reduced: boolean; close: ()
         mats.forEach((mt) => mt.dispose())
       })
       for (const t of [frontTex, backTex, btnTex, btnTexH, stripeTex, haloTex, shadowTex, sTex]) t.dispose()
-      envRT?.dispose()
+      envRT?.dispose(); envB.dispose()
       renderer.dispose(); renderer.forceContextLoss()
       delete (window as any).__giftStage
       canvas.remove(); css.domElement.remove(); sr.remove(); hit.remove(); cta.remove(); closeBtn.remove()

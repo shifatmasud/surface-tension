@@ -58,6 +58,9 @@ const gemPre = { value: 0 }   // W25 R6.42: 1 when the stone is drawn opaque (it
 export const gemDisU = { value: 0 }
 export const gemRef = { m: null as THREE.Mesh | null }
 const gemFill = { value: 0.7 }   // W23: 0.7 in the hero (the darkest navy chips lift toward the env blue), 0.85 in the dive (set per frame)
+/** R7.09 A/B knobs: ?gemlite = the weak-GPU closed-form stone on this device; ?gemb=N = N bounces */
+const GEM_LITE = /[?&]gemlite\b/.test(location.search)
+const GEM_B = parseInt(new URLSearchParams(location.search).get('gemb') || '', 10)
 function gemPatch(fresPow: string, lod: string) {
   return (sh: { vertexShader: string; fragmentShader: string; uniforms: Record<string, { value: unknown }> }) => {
     sh.uniforms.w22Fill = gemFill
@@ -129,7 +132,7 @@ function gemPatch(fresPow: string, lod: string) {
     // crown 0.16 over a 0.56 table, pavilion 0.86 deep), so every facet still throws its own env direction (the sparkle)
     // and the refraction / total internal reflection / chroma / grade below are untouched. The BVH functions become
     // unreferenced and the compiler drops them. Phones and strong GPUs keep the traced stone.
-    if (settings.WEAK_GPU) sh.fragmentShader = sh.fragmentShader.replace(
+    if (settings.WEAK_GPU || GEM_LITE) sh.fragmentShader = sh.fragmentShader.replace(
       /bvhIntersectFirstHit\(\s*bvh,\s*rayOrigin,\s*rayDirection,\s*faceIndices,\s*faceNormal,\s*barycoord,\s*side,\s*dist\s*\);/,
       `{
         vec3 lgO = rayOrigin, lgD = rayDirection;
@@ -642,7 +645,7 @@ export function HeroStage() {
           paths, so whole facets came out pure green, dark red or black (A/B on live: 0 removes them). Now a thin
           fast-chroma fringe (direction offset, one traced path) on every tier: the fire stays, the chips go */}
       <mesh ref={gemMesh} geometry={gemGeo} onUpdate={(o) => o.layers.enable(GEM_LAYER)} onBeforeRender={gemRes}>
-        <MeshRefractionMaterial envMap={env.rt.texture as any} bounces={hi || settings.WEAK_GPU ? 3 : 2} ior={2.2} fresnel={0.85} aberrationStrength={hi || settings.WEAK_GPU ? 0.006 : 0.008} fastChroma color={new THREE.Color(0.1, 0.34, 2.1)} toneMapped onBeforeCompile={hi || settings.WEAK_GPU ? gemPatchHi : gemPatchLo} />
+        <MeshRefractionMaterial envMap={env.rt.texture as any} bounces={GEM_B > 0 ? GEM_B : hi || settings.WEAK_GPU ? 3 : 2} ior={2.2} fresnel={0.85} aberrationStrength={hi || settings.WEAK_GPU ? 0.006 : 0.008} fastChroma color={new THREE.Color(0.1, 0.34, 2.1)} toneMapped onBeforeCompile={hi || settings.WEAK_GPU ? gemPatchHi : gemPatchLo} />
       </mesh>
       <mesh ref={sheenMesh} geometry={gemGeo} material={sheen.material} renderOrder={2} onUpdate={(o) => o.layers.enable(GEM_LAYER)} />
     </group>
