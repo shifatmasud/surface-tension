@@ -36,8 +36,9 @@ uniform float u_near, u_far, u_time, u_mo, u_pxScale, u_slotY, u_surf, u_amb, u_
 varying float vA, vL, vWob, vPx;
 void main(){
   float t = u_time * u_mo;
-  float rad = mix(0.0016, 0.0068, aRand.x * aRand.x);                 // radius, m (1.6-7 mm)
-  float vy = 0.11 + rad * 30.0;                                       // terminal rise speed, m/s
+  float rad0 = mix(0.0016, 0.0068, aRand.x * aRand.x);                // radius before R7.08b, m (1.6-7 mm)
+  float rad = rad0 * 0.65 * 0.6 * mix(0.75, 1.0, aRand.x);            // R7.08b (6:48 + 7:34 PM "Smaller needed"): champagne-size, most tiny
+  float vy = (0.11 + rad0 * 30.0) * 0.6 * 0.5;                        // terminal rise speed, m/s (R7.08b: 0.3x the 7.07 speed)
   float range = u_far - u_near;
   float fz = fract(position.z - dot(u_cam, u_bF) / range);
   float z = u_near + range * fz;
@@ -53,7 +54,7 @@ void main(){
   gl_Position = projectionMatrix * mv;
   float dist = max(-mv.z, 0.05);
   float px = 2.0 * rad * u_pxScale / dist;                            // true diameter in pixels
-  gl_PointSize = clamp(px * 1.25, 5.0, 56.0);                         // the sprite holds the rim's soft edge
+  gl_PointSize = clamp(px * 1.25, 3.0, 28.0);   // R7.08b: floor/cap follow the smaller size (was 5-56)                         // the sprite holds the rim's soft edge
   vPx = gl_PointSize;                                                  // R6.95: the sprite's size in pixels (the fragment's AA)
   // spatial visibility only (never a timed fade): the wrap faces sit outside the frame, the near lens blur, the fog,
   // the surface, and the copy's slot at the bottom of the frame
@@ -116,8 +117,11 @@ export function Bubbles({ u }: { u: U }) {
       p.set([tx + (train ? (R() - 0.5) * 0.004 : 0), train ? ((base * 0.29 + k * 0.035) % 1) : R(), tz], i * 3)
       a.set([train ? 0.25 + R() * 0.3 : R(), R(), R(), (R() - 0.5) * 2], i * 4)
     }
+    // R7.08b (Shifat 6:48 PM: "Reduce water bubble size & count & speed"): every other bubble of the same layout is kept
+    // (half the count, same spread and trains), each 35% smaller and rising 40% slower (BUB_SIZE / BUB_RISE in the shader)
+    const keep = (src: Float32Array, k: number) => { const o = new Float32Array((n >> 1) * k); for (let i = 0; i < n >> 1; i++) o.set(src.subarray(2 * i * k, 2 * i * k + k), i * k); return o }
     const g = new THREE.BufferGeometry()
-    g.setAttribute('position', new THREE.BufferAttribute(p, 3)); g.setAttribute('aRand', new THREE.BufferAttribute(a, 4))
+    g.setAttribute('position', new THREE.BufferAttribute(keep(p, 3), 3)); g.setAttribute('aRand', new THREE.BufferAttribute(keep(a, 4), 4))
     return g
   }, [])
   const st = useMemo(() => ({ q: new THREE.Quaternion(), m: new THREE.Matrix4(), init: false }), [])

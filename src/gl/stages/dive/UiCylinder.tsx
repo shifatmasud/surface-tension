@@ -1,4 +1,5 @@
 import { PHONE } from '../../../core/viewport'
+import { LOW_END_GPU } from '../../quality'
 import * as THREE from 'three'
 import { useEffect, useMemo, useRef } from 'react'
 import { useThree } from '@react-three/fiber'
@@ -181,7 +182,7 @@ function pal(hex: string, k = 1) {
 // R7.06: measured fully formed and square to the lens (PC + phone, headless) lift 1.0 gives #efefef and 7.05's 1.3 clips to
 // #ffffff; 7.04's 1.3 had been tuned on a frame where the drum was still fading in. 1.01 lands #f0f0f0. ?dmlift=1.3 = 7.05
 const PHONE_DM = PHONE   // R7.07 C
-const SOLID_LIFT = (() => { const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('dmlift') : null; return q ? +q : PHONE_DM ? 0.991 : 1.002 })()   // R7.07 (C): measured facing the front: phone #f2f2f2 → 0.991 lands #f0f0f0; PC #f1f1f1 → 1.002
+const SOLID_LIFT = (() => { const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('dmlift') : null; return q ? +q : PHONE_DM ? (LOW_END_GPU ? 0.97 : 0.966) : 1.006 })()   // R7.08 (median of the face, facing the front, headless): 412 lowend 0.991 = #f2f2f2, 0.983 = #f2f2f2, 0.974 = #ededed 0.978 = #f1f1f1 0.975 = #f1f1f1, 0.97 = #f1f1f1 (mode 241/240) → 0.97; 390 phone 0.974 = #f2f2f2 → 0.966; PC 1.006 = #f0f0f0. R7.07 (C): measured facing the front (headless): phone #f2f2f2 → 0.991 lands #f0f0f0; PC #f1f1f1 at 1.01, #efefef at 1.002 → 1.006
 const DM_LEAD = !(typeof location !== 'undefined' && /[?&]dmlead=0/.test(location.search)) // ?dmlead=0 = 7.05 fade timing
 const SOLID_NEUTRAL = SOLID_LIFT < 1.2 ? new THREE.Color(1, 1, 1) : new THREE.Color(1, 0.99, 0.965) // the deep's grade leaves a cool cast on white
 /** R7.02: an unlit token colour with no fog at all (the Do Magic face: the demo's solid #f0f0f0) */

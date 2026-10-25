@@ -3,6 +3,7 @@ import { BlendFunction, Effect, EffectAttribute } from 'postprocessing'
 import { shared } from '../../state/props'
 import { BLUE_NOISE } from '../shaders/chunks'
 import { WL_EDGE } from '../water/waterline'
+import { TRAIL_HR, u_trailField } from '../systems/ScreenPaint'
 
 /**
  * ScreenPaintDistortion (ch.14 S.6) — order 75. Smears the finished frame along the paint velocity
@@ -23,10 +24,15 @@ export function trailFilterMode(lowOrWeak: boolean) {
   return f === 0 || f === 1 || f === 2 ? f : 1
 }
 export class ScreenPaintDistortionEffect extends Effect {
+  /** R7.08: true = the field arrives pre-reconstructed (ScreenPaint's display field) and the wake fringe is drawn in the
+   *  final blit at the canvas's full density (PostChain.blit); this pass keeps only the smear, and skips it where empty */
+  readonly hr: boolean
   constructor(trailF = 0) {
+    const hr = TRAIL_HR
     const debug = typeof location !== 'undefined' && /[?&]paintdebug/.test(location.search)
     super('ScreenPaintDistortion', /* glsl */ `
-      #define SPD_F ${trailF}
+      #define SPD_F ${hr ? 0 : trailF}
+      #define SPD_HR ${hr ? 1 : 0}
       uniform sampler2D u_screenPaintTexture;
       uniform vec2 u_screenPaintTexelSize;
       uniform float u_amount, u_rgbShift, u_multiplier, u_colorMultiplier, u_shade, u_iridescence, u_debug;
@@ -53,6 +59,11 @@ export class ScreenPaintDistortionEffect extends Effect {
       void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor){
         vec3 bn = getBlueNoise(gl_FragCoord.xy + vec2(17.0, 29.0));
         vec4 data = spd_paint(uv);
+      #if SPD_HR == 1
+        // R7.08: nothing painted here (the display field is exactly at rest): the 7.07 result is the input clamped to 1 (each
+        // tap was clamped in display space), so skip the 9 taps and the 27 pow() calls on every untouched pixel
+        if (data.z + data.w < 0.002 && u_debug < 0.5) { outputColor = vec4(clamp(inputColor.rgb, 0.0, 1.0), 1.0); return; }
+      #endif
       #if SPD_F > 0
         data += (vec4(bn.yz, bn.xy) - 0.5) * (1.0 / 255.0);           // R7.07: the field is 8-bit, a 1-level blue-noise dither hides its steps (no extra reads)
       #endif
@@ -64,9 +75,11 @@ export class ScreenPaintDistortionEffect extends Effect {
         for (int i = 0; i < 9; i++) { vec4 s = texture2D(inputBuffer, p); acc += vec4(min(spd_encode(s.rgb), 1.0), s.a); p += stepUv; }  // each tap as the reference's 8-bit buffer holds it
         acc /= 9.0;
         if (u_debug > 0.5) acc = vec4(vec3(0.5 + 0.35 * weight), 1.0);
-        // wake fringe: strongest where weight is low, gone above 0.4
+        // wake fringe: strongest where weight is low, gone above 0.4 (R7.08 hi-res: drawn by the final blit at full density)
+      #if SPD_HR == 0
         acc.rgb += sin(vec3(vel.x + vel.y) * 40.0 + vec3(0.0, 2.0, 4.0) * u_rgbShift)
                  * smoothstep(0.4, -0.9, weight) * u_shade * max(abs(vel.x), abs(vel.y)) * u_colorMultiplier;
+      #endif
         if (u_iridescence > 0.0) {
           // accumulated thin film on the wake edges: the long-tail weight is the film thickness,
           // the weight gradient finds the edges; off by default (the reference has only the sine fringe)
@@ -78,12 +91,19 @@ export class ScreenPaintDistortionEffect extends Effect {
           vec3 thin = 0.5 + 0.5 * cos(6.28318 * (film + vec3(0.0, 0.33, 0.67)));
           acc.rgb = mix(acc.rgb, acc.rgb * (0.65 + thin * 0.7) + thin * 0.06, edge * u_iridescence);
         }
+      #if SPD_HR == 1
+        // alpha x0.997 = "the trail is here": the final blit draws the fringe only on pixels whose alpha is under 0.999 (the
+        // untouched ones are written at exactly 1.0 above). The NORMAL blend mixes by this alpha, so 0.3% of the unbent input
+        // shows through (under 1/255 at full contrast: invisible); alpha 0 would discard the smear entirely
+        outputColor = vec4(spd_decode(clamp(acc.rgb, 0.0, 1.0)), acc.a * 0.997);
+      #else
         outputColor = vec4(spd_decode(clamp(acc.rgb, 0.0, 1.0)), acc.a);
+      #endif
       }`, {
       attributes: EffectAttribute.CONVOLUTION,
       blendFunction: BlendFunction.NORMAL,
       uniforms: new Map<string, THREE.Uniform<any>>([
-        ['u_screenPaintTexture', shared.u_currPaintTexture as any],
+        ['u_screenPaintTexture', (hr ? u_trailField : shared.u_currPaintTexture) as any],   // R7.08: the type and heroes share this uniform, so they read the display field too
         ['u_screenPaintTexelSize', new THREE.Uniform(new THREE.Vector2(1, 1))],
         ['u_amount', new THREE.Uniform(3)],
         ['u_rgbShift', new THREE.Uniform(0.5)],
@@ -104,6 +124,7 @@ export class ScreenPaintDistortionEffect extends Effect {
         ['u_blueNoiseSize', shared.u_blueNoiseSize as any],
       ]),
     })
+    this.hr = hr
   }
   u(name: string) { return this.uniforms.get(name)! }
   /** The paint keeps the reference's own resolution (ScreenPaint.resize), independent of the render DPR, so the
@@ -221,7 +242,7 @@ export class GradeEffect extends Effect {
           c = mix(c, c * 0.72, dr.z * rim * 0.5);
           c += vec3(1.0) * dr.z * smoothstep(0.18, 0.0, length(dr.xy - vec2(-0.35, 0.4))) * 0.55;
         }
-        c += (getBlueNoise(gl_FragCoord.xy).r - 0.5) / 255.0;  // dither
+        // R7.08c: the dither moved to the final blit (canvas density, where the frame becomes 8-bit; PostChain.ts blitMat)
         outputColor = vec4(c, inputColor.a);
       }`, {
       blendFunction: BlendFunction.NORMAL,

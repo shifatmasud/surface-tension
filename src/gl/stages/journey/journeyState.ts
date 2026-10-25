@@ -23,5 +23,9 @@ export const journey = {
   footH: 0,
   /** R6.89: css px the CTA button takes above the curtain's edge (its bottom gap, its height, air); the CTA heroes settle above it */
   pillRes: 0,
+  /** R7.08 forest->CTA: the pill's placement this frame (Contact.tsx) and the stage's pre-render guard that keeps it clear
+   *  of the GL headline while the camera is still bringing the wall in (JourneyStage) */
+  pill: { el: null as HTMLElement | null, y: 0, restTop: -1, k: 0, push: 0 },
+  preRender: null as null | (() => void),
   lift: 0,         // W21: css px the CTA curtain has lifted over the footer (Contact.tsx); the scene re-frames by part of it
 }

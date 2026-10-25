@@ -70,6 +70,7 @@ export function Contact() {
       vignette: 0.0, bloom: 0.18, bloomThreshold: 0.97, contrast: 1.0, saturation: 1.04, exposure: 1.0, paintOffsetRatio: 0.6,
     })
     const canvasEl = document.getElementById('canvas')
+    let pillVhG = -1
     let lastK = -1, fired = false, lastExtra = -1, pillVh = -1, pillGap = -1, pillH = 0, pillCur = 0
     const ctaEl = ref.current?.querySelector<HTMLElement>('.contact__cta') ?? null
     // TEXTROLL: the CTA label rolls up into its pill after the headline (scroll-driven, reversible)
@@ -133,7 +134,10 @@ export function Contact() {
         // later on a fast fling. The pill is now fixed to the screen and placed by this same frame from the same scroll
         // value the GL used (where the sticky frame would put it, plus the curtain glide), so the two can no longer part.
         const pillY = PILL_FIXED ? Math.round(Math.min(vh + 40, Math.max(0, top)) - k + pillDown) : extra + pillDown
-        if (ctaEl && pillY !== lastExtra) { lastExtra = pillY; ctaEl.style.transform = pillY !== 0 || PILL_FIXED ? `translateX(-50%) translate3d(0, ${pillY}px, 0)` : '' }
+        // R7.08: the pill's top with no translate (measured once per viewport height, before this frame's write), for the stage's guard
+        if (ctaEl && PILL_FIXED && lastExtra !== -1 && (journey.pill.restTop < 0 || vh !== pillVhG)) { pillVhG = vh; journey.pill.restTop = ctaEl.getBoundingClientRect().top - (lastExtra + journey.pill.push) }
+        if (ctaEl && pillY !== lastExtra) { lastExtra = pillY; journey.pill.push = 0; ctaEl.style.transform = pillY !== 0 || PILL_FIXED ? `translateX(-50%) translate3d(0, ${pillY}px, 0)` : '' }
+        journey.pill.el = PILL_FIXED ? ctaEl : null; journey.pill.y = pillY; journey.pill.k = k
 
         // once the footer is fully uncovered, keep scrolling: the flat bar fills and floats you back to the surface
         // W19: the bar fills over the second half of the footer's reveal and wraps as it lands (no empty band above a half-height footer)

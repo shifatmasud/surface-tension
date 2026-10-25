@@ -95,6 +95,27 @@ function referenceRenderSize(vw: number, vh: number) {
   return [Math.ceil(w), Math.ceil(h)]
 }
 
+
+/** R7.08 HI-RES TRAIL (Shifat 12:15 PM Oct 24, again after 7.07's faint gain). The simulation is untouched (same 1/4-size
+ *  8-bit field, same maths: the R6.47 look stays locked). What changes is how the field reaches the screen: once per frame
+ *  while the trail is awake, a 4-tap cubic B-spline reconstructs the field into a 2x-size half-float target (smooth C2
+ *  curves, no 8-bit steps, no bilinear diamond creases), and every reader (the scene smear, the full-density fringe in the
+ *  final blit, the type and the heroes) reads that with one plain tap. Asleep = nothing runs. ?trailhr=0 = 7.07 exactly. */
+export const TRAIL_HR = typeof location === 'undefined' || !/[?&]trailhr=0/.test(location.search)
+export const u_trailField = new THREE.Uniform<THREE.Texture | null>(null)
+const DISP_FRAG = /* glsl */ `
+precision highp float;
+uniform sampler2D u_tex; uniform vec2 u_tx; varying vec2 v_uv;
+void main(){
+  vec2 p = v_uv / u_tx - 0.5, f = fract(p); p -= f;
+  vec2 f2 = f * f, f3 = f2 * f;
+  vec2 w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0, w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+  vec2 w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0, w3 = f3 / 6.0;
+  vec2 g0 = w0 + w1, g1 = w2 + w3, h0 = (w1 / g0 - 0.5 + p) * u_tx, h1 = (w3 / g1 + 1.5 + p) * u_tx;
+  gl_FragColor = g0.y * (g0.x * texture2D(u_tex, h0) + g1.x * texture2D(u_tex, vec2(h1.x, h0.y)))
+               + g1.y * (g0.x * texture2D(u_tex, vec2(h0.x, h1.y)) + g1.x * texture2D(u_tex, h1));
+}`
+
 const PAINT_FRAG = /* glsl */ `
 precision highp float;
 uniform sampler2D u_prevPaintTexture;
@@ -157,6 +178,9 @@ export class ScreenPaint {
   private curr = fboHelper.createRenderTarget(1, 1)
   private low = fboHelper.createRenderTarget(1, 1)
   private lowBlur = fboHelper.createRenderTarget(1, 1)
+  /** R7.08: the display field (2x the sim, half float), rebuilt from curr after each sim step */
+  private disp = fboHelper.createRenderTarget(1, 1, { float: true })
+  private dispMat = fboHelper.track(new THREE.ShaderMaterial({ vertexShader: FS_VERT, fragmentShader: DISP_FRAG, uniforms: { u_tex: { value: null }, u_tx: { value: new THREE.Vector2(1, 1) } }, depthTest: false, depthWrite: false, blending: THREE.NoBlending }))
   private from = new THREE.Vector4()
   private to = new THREE.Vector4()
   private v2 = new THREE.Vector2()
@@ -176,6 +200,8 @@ export class ScreenPaint {
   drawEnabled = true
   needsMouseDown = false
   private started = false
+  /** R7.08: false while the field is awake but already empty (paintState.empty): the display field is not rebuilt */
+  displayOn = true
 
   constructor() {
     this.material = fboHelper.track(new THREE.ShaderMaterial({
@@ -195,6 +221,7 @@ export class ScreenPaint {
       depthTest: false, depthWrite: false, blending: THREE.NoBlending,
     }))
     shared.u_currPaintTexture.value = this.curr.texture
+    u_trailField.value = TRAIL_HR ? this.disp.texture : this.curr.texture
     this.listenTouch()
   }
 
@@ -239,10 +266,20 @@ export class ScreenPaint {
     shared.u_paintTextureSize.value.set(pw, ph)
     shared.u_currPaintTexture.value = this.curr.texture
     if (!had) this.material.uniforms.u_vel.value.set(0, 0)
+    if (TRAIL_HR) { this.disp.setSize(pw * 2, ph * 2); this.refine() }
+  }
+  /** R7.08: rebuild the display field from the current sim texture (one 4-tap pass at 2x the sim size) */
+  private refine() {
+    if (!TRAIL_HR || !this.displayOn || (window as any).__trailNoDisp) return
+    this.dispMat.uniforms.u_tex.value = this.curr.texture
+    this.dispMat.uniforms.u_tx.value.set(1 / this.curr.width, 1 / this.curr.height)
+    fboHelper.render(this.dispMat, this.disp)
+    u_trailField.value = this.disp.texture
   }
 
   clear() {
     for (const t of [this.prev, this.curr, this.low, this.lowBlur]) fboHelper.render(FILL, t)
+    if (TRAIL_HR) fboHelper.render(FILL, this.disp)
     this.material.uniforms.u_vel.value.set(0, 0)
   }
 
@@ -325,6 +362,7 @@ export class ScreenPaint {
     fboHelper.render(this.material, this.curr)
     fboHelper.copy(this.curr.texture, this.low)
     blurInPlace(8, this.low, this.lowBlur)
+    this.refine()   // R7.08: the display field, from this frame's sim
   }
   get texture() { return this.curr.texture }
   get lowTexture() { return this.low.texture }

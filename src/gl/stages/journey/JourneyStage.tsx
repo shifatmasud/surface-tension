@@ -22,6 +22,7 @@ const OLDT = typeof location !== 'undefined' && /[?&]oldtrans/.test(location.sea
 
 // R7.05 GROUND: ?oldground = the 7.04 land during the descent (A/B)
 const STK_OLD = typeof location !== 'undefined' && /[?&]stkold/.test(location.search) // R7.07 #8 QA: the 7.06 sticker lift-away
+const HZ_OLD = typeof location !== 'undefined' && /[?&]hzold/.test(location.search)
 const OLD_GROUND = typeof location !== 'undefined' && /[?&]oldground/.test(location.search)
 const _tN = new THREE.Color(0.1, 0.17, 0.3), _tD = new THREE.Color(1.0, 0.7, 0.55)
 const _hz = new THREE.Color(), _hzA = new THREE.Color(), _hzB = new THREE.Color()
@@ -88,6 +89,32 @@ export function JourneyStage(): JSX.Element {
   const { camera: mainCam } = useThree()
   // STICKERS HOOK: drag / peel / keyboard on the CTA wall's stickers (stickerInteract.ts), bound to the real camera
   useEffect(() => { S.cta.attach(mainCam); return () => S.cta.detach() }, [S, mainCam])
+  // R7.08 FOREST->CTA (frame-by-frame on 390 and 1920): the pill rides with the page (the sticky frame) but the GL headline
+  // arrives with the camera, which is still bringing the wall in when the frame pins, so for ~3 frames the pill slid over
+  // "it ripple". Just before the frame renders (camera final), the pill is held at least PILL_GAP px under the headline's
+  // projected descenders. At rest the real gap is larger, so the guard is idle there (layout unchanged); never once the
+  // footer starts to lift (k > 0, the locked settle owns that). ?pillguard=0 = 7.07.
+  useEffect(() => {
+    if (/[?&]pillguard=0/.test(location.search)) return
+    const v = new THREE.Vector3(), PILL_GAP = 10
+    journey.preRender = () => {
+      const P = journey.pill, el = P.el
+      if (!el || P.restTop < 0) return
+      let push = 0
+      if (journey.active && S.cta.group.visible && S.cta.type.visible && P.k <= 0) {
+        const b = S.cta.typeBottom()
+        mainCam.updateMatrixWorld()
+        v.set(b.x + JOURNEY_ORIGIN.x, b.y + JOURNEY_ORIGIN.y, b.z + JOURNEY_ORIGIN.z).project(mainCam)
+        if (v.z < 1) {
+          const sy = (0.5 - v.y * 0.5) * props.height, top = P.restTop + P.y
+          ;(window as any).__pillGap = Math.round(top - sy)
+          push = Math.max(0, Math.ceil(sy + PILL_GAP - top))
+        }
+      }
+      if (push !== P.push) { P.push = push; el.style.transform = `translateX(-50%) translate3d(0, ${P.y + push}px, 0)` }
+    }
+    return () => { journey.preRender = null }
+  }, [S, mainCam])
   // R6.87 SPLIT RESOLUTION: the crewmate that breaks out is a hero subject (drawn at the canvas density, post/heroPass.ts)
   useEffect(() => { const a = heroPass.add(S.crewOut.root), b = S.crewScreen ? heroPass.add(S.crewScreen) : () => {}
     const c = heroPass.add(S.cta.stickers) // R6.89: the CTA wall's stickers are heroes too (Shifat "same hero dpr")
@@ -309,6 +336,7 @@ export function JourneyStage(): JSX.Element {
       // eases into the old day haze before touchdown, so the land meets the sky without a line and the forest is unchanged
       horizonColor(a, _hz)
       fog.color.copy(_hz).lerp(S.c.fogDay, ss(0.72, 1, a))
+      if (!HZ_OLD) { const u = S.skyMat.uniforms.u_hz.value as THREE.Vector4; u.set(fog.color.r, fog.color.g, fog.color.b, ss(0.25, 0.45, a)) }   // R7.07 D: the sky meets the haze (?hzold = 7.06)
       GROUND_U.u_high.value = ss(1.5, 9, I.crew.y) * (I.visible ? 1 : 0)
       GROUND_U.u_tint.value.copy(_tN).lerp(_tD, ss(0.18, 0.45, a)).lerp(_hzA.setRGB(1, 1, 1), ss(0.6, 0.9, a))
     }

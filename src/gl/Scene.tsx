@@ -154,6 +154,8 @@ function Renderer() {
         pi.asleep = asleep; paintState.asleep = asleep
         if (asleep) sys.paint.clear(); else (sys.paint as any).started = false
       }
+      paintState.empty = asleep || props.frame - pi.last > ((window as any).__paintEmpty ?? 80)   // R7.08
+      sys.paint.displayOn = !paintState.empty
       if (!asleep) sys.paint.update(dt)       // paint renders before the scene: distortion and scene shaders see this frame
     }
     { const n = (window as any).__rippleSteps ?? 1; for (let i = 0; i < n; i++) sys.ripple.update(dt) }  // __rippleSteps: QA on slow remote GPUs
@@ -171,6 +173,7 @@ function Renderer() {
     // because the CTA scene now keeps drawing through the runway, Contact.tsx)
     { const cam = camera as THREE.PerspectiveCamera; if (cam.view && cam.view.enabled) cam.clearViewOffset() }
     applyRenderScale(gl, size.width, size.height, wrapFade.want || !!engine.grab) // R7.07 #10: crisp at rest, zero re-allocation
+    journey.preRender?.()   // R7.08: the CTA pill's headline guard, with this frame's final camera
     sys.chain.render(dt)
     if (wrapFade.want) wrapFade.grab(gl.domElement)
     if (engine.grab) { const g = engine.grab; engine.grab = null; g(gl.domElement) }   // R6.83 GIFT: the gift's blurred still   // W21: the loop wrap freezes this exact frame (services/wrapFade.ts)

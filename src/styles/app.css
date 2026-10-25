@@ -126,6 +126,10 @@ html[data-bg='dark'] .level { background: rgba(255,255,255,.12); }
 /* the reel window clips with clip-path (not overflow), so the box keeps the digits' own baseline and sits on the text line */
 .odo { display: inline-flex; height: 1em; line-height: 1em; clip-path: inset(0 -0.15em); font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1; }
 .odo__col { display: block; position: relative; }
+/* R7.08b (Shifat 7:00 PM "Counter number textbox must be trimmed"): the preloader's reel window hugs the digits' glyph band
+   (measured: the figures sit 0.115em under the box top and 0.15em over its bottom), so the neighbouring digits no longer
+   peek in above and below while a reel turns; same font, size, width and position */
+.intro__count .odo { clip-path: inset(0.1em -0.15em 0.135em); }
 .odo__strip { display: flex; flex-direction: column; will-change: transform; }
 .odo__strip span { display: block; height: 1em; line-height: 1em; text-align: center; }
 

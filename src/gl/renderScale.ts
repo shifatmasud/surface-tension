@@ -10,6 +10,9 @@ import { quality } from './quality'
  */
 let applied = 1, sx = 1, sy = 1, wrapped = false, lastBw = 0, lastBh = 0
 ;(window as any).__rscale = () => applied
+/** R7.08c: the sub-rectangle's scale on the canvas grid (x, y) while a moving frame draws into it; 1, 1 for a whole frame.
+ *  Anything that hands gl_FragCoord-space numbers to a canvas shader (heroPass u_box) multiplies by these, as setScissor does. */
+export function renderScaleXY(): [number, number] { return applied > 0 && applied < 1 ? [sx, sy] : [1, 1] }
 export function applyRenderScale(gl: THREE.WebGLRenderer, w: number, h: number, forceWhole = false) {
   if (!wrapped) {
     wrapped = true

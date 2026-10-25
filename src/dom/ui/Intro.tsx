@@ -37,6 +37,11 @@ export function Intro() {
     const s0 = preload.shown()
     let raf = 0, eased = s0, t0 = performance.now(), last = t0, nearT = 0, nearV = 0
     const minDur = preload.repeat ? 350 : 1200
+    // R7.08b (Shifat 7:01 PM: "when it goes 95 or 96 it instantly jumps cuts to 100"): the 12 s stall cap used to set the
+    // counter straight to 100 (his M02s loads for ~12 s+, so it cut from 95/96), and a finished load let the last points run
+    // at the full no-snap speed (a few frames). Once the load is done the rest now rolls on an ease-out tail of at least
+    // 400 ms (longer only when far from 100, keeping <= ~1.25 points a frame), and the drop waits for the painted 100
+    let tailT = 0, tailFrom = 0, tailMs = 400
     const loop = (now: number) => {
       // real elapsed time (not a per-frame cap): during shader warm-up a frame can take seconds, and a capped dt
       // turned the last 3 % of the counter into ~15 more multi-second frames (60 s+ intros at 2560 px)
@@ -64,8 +69,14 @@ export function Intro() {
       const next = target >= 1 ? 1 : mix(eased, target, 1 - Math.exp(-7 * dt))
       // PRELOAD (Shifat 19:14Z, no snapping digits): at most ~1.2 points a frame at 60 fps, so the units reel never skips
       // digits and every carry slides over 2+ frames; long frames (a slow GPU) still catch up by time (dt × 0.6)
-      eased = Math.max(eased, Math.min(next, eased + Math.max(0.012, dt * 0.6)))
-      if (target >= 1 && (eased > 0.999 || now - t0 > 12000)) eased = 1
+      if (target >= 1) {
+        if (!tailT) { tailT = now; tailFrom = eased; tailMs = Math.max(400, (1 - tailFrom) * 100 / 75 * 1000) }
+        const k = Math.min(1, (now - tailT) / tailMs)
+        // and never more than ~1.25 points per painted frame, so 96, 97, 98, 99 each show even when the last load frames are long
+        const tv = k >= 1 ? 1 : tailFrom + (1 - tailFrom) * (1 - (1 - k) * (1 - k))
+        eased = Math.max(eased, Math.min(tv, eased + 0.0125))
+        if (k >= 1 && eased > 0.9995) eased = 1
+      } else eased = Math.max(eased, Math.min(next, eased + Math.max(0.012, dt * 0.6)))
       if (count.current) paintCounter(count.current, eased * 100)
       logo3d.progress(eased) // logo3d hook
       // the curtain starts lifting with the first droplet, so the ring opens as the hero is revealed

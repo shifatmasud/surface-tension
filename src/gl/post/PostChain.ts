@@ -7,7 +7,7 @@ import { clip } from '../systems/clip'
 import { diveRays } from '../stages/dive/diveState'
 import { props, shared } from '../../state/props'
 import { settings } from '../../services/settings'
-import { quality, paintState, PHONE_SHARP } from '../quality' // PERF HOOK
+import { quality, paintState, PHONE_SHARP, DENS_ONE } from '../quality' // PERF HOOK
 import { warmGate } from '../../services/preload'
 import { InlineSharpenEffect } from './perfEffects' // PERF HOOK
 import type { Look } from '../../state/props'
@@ -18,6 +18,7 @@ import { makeSelective, syncSelective } from '../fx/hotBloom' // CINEMATIC: sele
 import { FOOT_MODE, FooterWorldEffect } from './footerWorld' // FOOTER MOCKUP (VITE_FOOT 1|2; 0 = live, effect absent)
 import { heroPass, HeroHidePass, HeroDrawPass, UiHidePass } from './heroPass' // R6.87 SPLIT RESOLUTION
 import { SPLIT } from '../quality'
+import { PHONE } from '../../core/viewport'
 import { gpuTimer } from '../systems/perfGovernor' // SHARP: the governor's GPU frame timer ends after the last draw
 
 /**
@@ -45,6 +46,10 @@ import { gpuTimer } from '../systems/perfGovernor' // SHARP: the governor's GPU 
  */
 type Entry = { name: string; order: number; pass: Pass; needsRender: () => boolean; on?: boolean }
 
+/** R7.08b rest supersampling: ?taa=0 off, ?taa=1 on any device (default: phones); the blend floor (8-frame memory) */
+const TAA_Q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('taa') : null
+const TAA_MODE = TAA_Q === '1' ? 1 : TAA_Q === 'phone' ? 2 : 0   // R7.08c (Shifat 8:22 PM on his M02s: "hero feels jittery"): rest supersampling OFF by default (its sub-pixel jitter + history clamp shimmered on the animated hero and toggled with every touch); ?taa=phone = 7.08b
+const TAA_FLOOR = 0.125
 const NOCAS = typeof location !== 'undefined' && new URLSearchParams(location.search).has('nocas')
 
 export class PostChain {
@@ -89,13 +94,15 @@ export class PostChain {
     makeSelective(this.bloom) // CINEMATIC: the same bloom pass, its luminance pre-pass masked to hot spots
     this.preUfx = new RenderPass(ufxUnder, ufxCamera); this.preUfx.clear = false; this.preUfx.ignoreBackground = true
     this.postUfx = new RenderPass(ufxOver, ufxCamera); this.postUfx.clear = false; this.postUfx.ignoreBackground = true
+    this.jitWrap(this.scenePass, camera); this.jitWrap(this.preUfx, ufxCamera); this.jitWrap(this.postUfx, ufxCamera)   // R7.08b
+    ;(window as any).__taa = () => ({ on: this.taaOn, k: this.taaK })   // R7.08b QA: rest supersampling state
     // W22 (scorer-r614 #3, the stepped stone outline at 390): MEDIUM searches 8 px along an edge, so the stone's long, shallow
     // silhouette (upscaled ~2x on phones) kept its stair steps. HIGH searches 16: same three passes, more taps on edge pixels only
     // R6.95 QUALITY: SMAA ULTRA on every tier: edge threshold 0.1 -> 0.05 and a 32 px search, so the low-contrast silhouettes
     // (the stone's long rim, kelp, the card edges) lose their last stair steps. Same three passes, at the background's own
     // density (0.1-1 Mpx on phones and weak PCs); only edge pixels pay the longer search. ?aa=high = the R6.94 preset.
     const AA_Q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('aa') : null
-    const smaa = new SMAAEffect({ preset: AA_Q === 'high' || (PHONE_SHARP && AA_Q !== 'ultra') ? SMAAPreset.HIGH : SMAAPreset.ULTRA })   // R7.00: budget phones HIGH (16 search steps, was ULTRA 32 + corners): the cost moves into pixels, not edge searches
+    const smaa = new SMAAEffect({ preset: DENS_ONE && !AA_Q ? SMAAPreset.MEDIUM : AA_Q === 'high' || (PHONE_SHARP && AA_Q !== 'ultra') ? SMAAPreset.HIGH : SMAAPreset.ULTRA })   /* R7.08b: at the phone's one density SMAA MEDIUM (8 search steps) is enough */   // R7.00: budget phones HIGH (16 search steps, was ULTRA 32 + corners): the cost moves into pixels, not edge searches
     const fxaa = new FXAAEffect()
     const renderScale = () => props.dpr / Math.max(1, Math.min(window.devicePixelRatio || 1, 2))
     // sharpen (convolution) first, then the grade on its result: one pass instead of two when below native size
@@ -105,18 +112,22 @@ export class PostChain {
     heroPass.attachDepth(this.composer.inputBuffer) // R6.87: the scene pass's depth, for the heroes' occlusion
     const sharpGrade = new EffectPass(camera, new InlineSharpenEffect(), this.grade)
     const sharp = () => false && renderScale() < 0.99   // W18: CAS in the final upscale replaces the inline sharpen
+    const bloomOn = () => settings.USE_BLOOM && props.look.bloom > 0.001
     this.entries = [
       { name: 'HeroHide', order: -1, pass: new HeroHidePass(), needsRender: () => heroPass.active() },   // R6.87 SPLIT
       { name: 'Scene', order: 0, pass: this.scenePass, needsRender: () => true },
       { name: 'HeroDraw', order: 1, pass: new HeroDrawPass(scene, camera), needsRender: () => heroPass.active() },   // R6.87 SPLIT
       { name: 'DiveGodRays', order: 5, pass: new DiveGodRaysPass(camera), needsRender: () => diveRays.on },
-      { name: 'Bloom', order: 10, pass: new EffectPass(camera, this.bloom), needsRender: () => settings.USE_BLOOM && props.look.bloom > 0.001 },
-      { name: 'Grade', order: 30, pass: gradeOnly, needsRender: () => !sharp() },
+      // R7.08c ONE FINAL PASS (first principles: on a tiled, low-bandwidth GPU every full-screen pass is a full write + read of
+      // the frame): bloom's composite and the grade run in ONE EffectPass (the neighbour chain's own pairing), so a frame with
+      // bloom pays one full-screen pass at the scene density instead of two. Same maths, one half-float round trip fewer.
+      { name: 'Bloom+Grade', order: 30, pass: this.footer ? new EffectPass(camera, this.bloom, this.grade, this.footer) : new EffectPass(camera, this.bloom, this.grade), needsRender: () => !sharp() && bloomOn() },
+      { name: 'Grade', order: 30, pass: gradeOnly, needsRender: () => !sharp() && !bloomOn() },
       { name: 'Sharpen+Grade', order: 30, pass: sharpGrade, needsRender: () => sharp() },
       { name: 'UiHide', order: 49, pass: new UiHidePass(false), needsRender: () => heroPass.hasUi() },   // R6.87 SPLIT
       { name: 'PreUfx', order: 50, pass: this.preUfx, needsRender: () => ufxUnder.children.some((c) => c.visible) },
       { name: 'UiShow', order: 51, pass: new UiHidePass(true), needsRender: () => heroPass.hasUi() },   // R6.87 SPLIT
-      { name: 'ScreenPaintDistortion', order: 3100, pass: new EffectPass(camera, this.distortion), needsRender: () => props.look.paintAmount > 0 && !paintState.asleep },
+      { name: 'ScreenPaintDistortion', order: 3100, pass: new EffectPass(camera, this.distortion), needsRender: () => props.look.paintAmount > 0 && !paintState.asleep && !(this.distortion.hr && paintState.empty) },
       { name: 'PostUfx', order: 100, pass: this.postUfx, needsRender: () => ufxOver.children.some((c) => c.visible) },
       { name: 'SMAA', order: 4000, pass: new EffectPass(camera, smaa), needsRender: () => quality.aa === 'smaa' },
       { name: 'FXAA', order: 4000, pass: new EffectPass(camera, fxaa), needsRender: () => quality.aa === 'fxaa' },
@@ -130,7 +141,15 @@ export class PostChain {
   // the one full-density pass: the finished frame (in the composer's input buffer after its last swap) upscaled once
   private blitCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
   private blitMat = new THREE.ShaderMaterial({
-    uniforms: { tMap: { value: null as THREE.Texture | null }, u_texel: { value: new THREE.Vector2(1, 1) }, u_sharp: { value: 0 }, u_up: { value: 0 } },
+    uniforms: { tMap: { value: null as THREE.Texture | null }, u_texel: { value: new THREE.Vector2(1, 1) }, u_sharp: { value: 0 }, u_up: { value: 0 },
+      // R7.08 HI-RES TRAIL: the wake fringe at the canvas's full density (the same numbers the 7.07 trail pass added, now
+      // after the upscale instead of before it), from the display field; u_trail = 0 while the trail sleeps
+      u_trailField: this.distortion.u('u_screenPaintTexture'), u_rgbShift: this.distortion.u('u_rgbShift'),
+      u_shade: this.distortion.u('u_shade'), u_colorMultiplier: this.distortion.u('u_colorMultiplier'),
+      // R7.08b REST SUPERSAMPLING (Shifat 6:37/6:47 PM: phone 3D looks low res, edges pixelated; "best perceived resolution"
+      // at no moving cost): history of the finished upscaled frame (the canvas itself, copied back), the scene's sub-pixel
+      // jitter (scene-buffer uv) and the blend weight; read only by the BLIT_TAA program, which runs only on still frames
+      u_hist: { value: null as THREE.Texture | null }, u_hs: { value: new THREE.Vector2(1, 1) }, u_jit: { value: new THREE.Vector2() }, u_alpha: { value: 1 } },
     vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
     // SHARP UPSCALE (Shifat 15:39Z + the sharp lane): when the scene is upscaled onto the canvas, a Catmull-Rom bicubic
     // in 5 bilinear taps (the same tap count as the old bilinear+CAS cross) instead of bilinear, clamped to the taps'
@@ -138,16 +157,23 @@ export class PostChain {
     // detail, backing off at hard edges and in flat areas) with the strength following the upscale ratio. At 1:1 (the
     // rest refinement: native density) a mild 1-texel CAS only, to take back the softness SMAA leaves on texture.
     fragmentShader: `uniform sampler2D tMap; uniform vec2 u_texel; uniform float u_sharp; uniform float u_up; varying vec2 vUv;
+uniform sampler2D u_trailField; uniform float u_rgbShift, u_shade, u_colorMultiplier;
+uniform sampler2D u_hist; uniform vec2 u_hs, u_jit; uniform float u_alpha;
 vec3 casW(vec3 mn, vec3 mx, float s){ vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, 1e-4), 0.0, 1.0)); return -amp * mix(0.125, 0.2, s); }
 void main(){
-  vec3 e;
+  vec3 e; float tmark = 1.0;   // R7.08: the trail pass marks the pixels it bent (alpha x0.997; read free from the centre tap)
   if (u_up > 0.5) {
     vec2 ts = 1.0 / u_texel;
-    vec2 sp = vUv * ts; vec2 tc = floor(sp - 0.5) + 0.5; vec2 f = sp - tc;
+#ifdef BLIT_TAA
+    vec2 sp = (vUv + u_jit) * ts;   // this frame's scene was drawn shifted by the jitter: read it back in place
+#else
+    vec2 sp = vUv * ts;
+#endif
+    vec2 tc = floor(sp - 0.5) + 0.5; vec2 f = sp - tc;
     vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f)), w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
     vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f)), w3 = f * f * (-0.5 + 0.5 * f);
     vec2 w12 = w1 + w2; vec2 t12 = (tc + w2 / w12) * u_texel, t0 = (tc - 1.0) * u_texel, t3 = (tc + 2.0) * u_texel;
-    vec3 c = texture2D(tMap, t12).rgb;
+    vec4 c4 = texture2D(tMap, t12); vec3 c = c4.rgb; tmark = c4.a;
     vec3 n = texture2D(tMap, vec2(t12.x, t0.y)).rgb, s = texture2D(tMap, vec2(t12.x, t3.y)).rgb;
     vec3 wv = texture2D(tMap, vec2(t0.x, t12.y)).rgb, ea = texture2D(tMap, vec2(t3.x, t12.y)).rgb;
     float kc = w12.x * w12.y, kn = w12.x * w0.y, ks = w12.x * w3.y, kw = w0.x * w12.y, ke = w3.x * w12.y;
@@ -155,8 +181,15 @@ void main(){
     vec3 mn = min(c, min(min(n, s), min(wv, ea))), mx = max(c, max(max(n, s), max(wv, ea)));
     e = clamp(e, mn, mx);
     if (u_sharp > 0.0) { vec3 w = casW(mn, mx, u_sharp) * 0.6; e = clamp((e + (n + s + wv + ea) * w) / (1.0 + 4.0 * w), mn, mx); }
+#ifdef BLIT_TAA
+    // history (the canvas as last drawn: display-encoded 8-bit) back to linear, clamped to this frame's 5-tap neighbourhood
+    // so anything that moved or animated cannot ghost; edges keep both sides in range, so their sub-pixel average survives
+    vec3 hs = texture2D(u_hist, vUv * u_hs).rgb;
+    hs = mix(hs / 12.92, pow((hs + 0.055) / 1.055, vec3(2.4)), step(0.04045, hs));
+    e = mix(clamp(hs, mn, mx), e, u_alpha);
+#endif
   } else {
-    e = texture2D(tMap, vUv).rgb;
+    vec4 e4 = texture2D(tMap, vUv); e = e4.rgb; tmark = e4.a;
     if (u_sharp > 0.0) {
       vec3 b = texture2D(tMap, vUv + vec2(0.0, -u_texel.y)).rgb, d = texture2D(tMap, vUv + vec2(-u_texel.x, 0.0)).rgb;
       vec3 f = texture2D(tMap, vUv + vec2(u_texel.x, 0.0)).rgb, h = texture2D(tMap, vUv + vec2(0.0, u_texel.y)).rgb;
@@ -167,10 +200,39 @@ void main(){
   }
   gl_FragColor = vec4(e, 1.0);
   #include <colorspace_fragment>
+  // R7.08c INVERSION (low-res dither): the 1/255 dither moved here from the grade, which ran at the scene's density (a 1.0
+  // phone scene stretched 1.5x made each dither dot a soft blob, and SMAA saw it as texture); here it lands per canvas
+  // pixel, right where the frame is quantised to 8 bits
+  gl_FragColor.rgb += (fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) - 0.5) / 255.0;
+#ifdef BLIT_TRAIL
+  if (tmark < 0.999) {   // marked by the trail pass (alpha x0.997)
+    // the 7.07 pass added this to the display-encoded (sRGB) average and clamped; gl_FragColor is display-encoded here
+    vec4 data = texture2D(u_trailField, vUv);
+    float weight = (data.z + data.w) * 0.5;
+    if (weight > 0.001) {
+      vec2 vel = (0.5 - data.xy - 0.001) * 2.0 * weight;
+      gl_FragColor.rgb = clamp(gl_FragColor.rgb + sin(vec3(vel.x + vel.y) * 40.0 + vec3(0.0, 2.0, 4.0) * u_rgbShift)
+        * smoothstep(0.4, -0.9, weight) * u_shade * max(abs(vel.x), abs(vel.y)) * u_colorMultiplier, 0.0, 1.0);
+    }
+  }
+#endif
 }`,
     depthTest: false, depthWrite: false, toneMapped: false,
   })
-  private blitScene = (() => { const s = new THREE.Scene(); const m = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.blitMat); m.frustumCulled = false; s.add(m); return s })()
+  /** R7.08: the same blit + the full-density wake fringe, used only on frames with a live trail (and the warm-up frames,
+   *  so it compiles behind the preloader); every other frame runs the 7.07 blit program unchanged */
+  private blitMatTrail = new THREE.ShaderMaterial({ uniforms: this.blitMat.uniforms, vertexShader: this.blitMat.vertexShader, fragmentShader: this.blitMat.fragmentShader, defines: { BLIT_TRAIL: '' }, depthTest: false, depthWrite: false, toneMapped: false })
+  /** R7.08b: the rest-supersampling blit (phones, still frames only; see taaTick). Moving frames never use it. */
+  private blitMatTaa = new THREE.ShaderMaterial({ uniforms: this.blitMat.uniforms, vertexShader: this.blitMat.vertexShader, fragmentShader: this.blitMat.fragmentShader, defines: { BLIT_TAA: '' }, depthTest: false, depthWrite: false, toneMapped: false })
+  private taaTex: THREE.FramebufferTexture | null = null
+  private taaWarm = false; private taaOn = false; private taaK = 0; private taaStill = 0; private taaKey = ''; private taaPrevOn = false
+  private taaVp = new THREE.Vector4(); private taaJx = 0; private taaJy = 0
+  private taaSaved = new THREE.Matrix4(); private taaSavedInv = new THREE.Matrix4()
+  /** Halton(2,3), 8 points, centred: the sub-pixel offsets a still scene cycles through */
+  private static HAL = [[0.5, 0.333], [0.25, 0.667], [0.75, 0.111], [0.125, 0.444], [0.625, 0.778], [0.375, 0.222], [0.875, 0.556], [0.0625, 0.889]].map(([x, y]) => [x - 0.5, y - 0.5])
+  private blitWarm = false
+  private blitMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.blitMat)
+  private blitScene = (() => { const s = new THREE.Scene(); this.blitMesh.frustumCulled = false; s.add(this.blitMesh); return s })()
   private blit() {
     const gl = this.gl, prev = gl.getRenderTarget(), auto = gl.autoClear
     this.blitMat.uniforms.tMap.value = this.composer.inputBuffer.texture
@@ -179,11 +241,62 @@ void main(){
     // SHARP: bicubic + CAS when upscaled (strength by ratio); a mild CAS at 1:1 (rest: native density, SMAA). ?nocas: off
     const up = props.textDpr > props.dpr * 1.05
     this.blitMat.uniforms.u_up.value = up ? 1 : 0
+    const trail = this.distortion.hr && !(window as any).__trailNoBlit && props.look.paintAmount > 0 && !paintState.asleep && !paintState.empty
+    this.blitMesh.material = trail || (this.blitWarm && this.distortion.hr) ? this.blitMatTrail : this.taaOn && up ? this.blitMatTaa : this.blitMat
+    const taa = this.blitMesh.material === this.blitMatTaa
     // R6.87 SPLIT: the background is meant to be soft under the sharp heroes; a strong CAS on a 2.5–4x upscale reads crunchy
-    this.blitMat.uniforms.u_sharp.value = NOCAS ? 0 : up ? Math.min(SPLIT ? 0.4 : 1, (props.textDpr / props.dpr - 1) * 0.8) : 0.25
+    // R7.08c INVERSION (a stretched buffer with sharpening on top = haloed stair steps): phones at their one density get the
+    // clamped Catmull-Rom upscale only, no CAS on top (the stretch is 1.5x now, not 3x; CAS ringed every edge it found)
+    this.blitMat.uniforms.u_sharp.value = NOCAS || DENS_ONE ? 0 : up ? Math.min(SPLIT ? 0.4 : 1, (props.textDpr / props.dpr - 1) * 0.8) : 0.25
     gl.setRenderTarget(null); gl.autoClear = false
+    if (taa) this.taaBind(gl)
+    if (this.blitWarm && !this.taaWarm && TAA_MODE !== 0) {   // R7.08b: link the rest program behind the preloader too
+      const m = this.blitMesh.material; this.blitMesh.material = this.blitMatTaa; gl.compile(this.blitScene, this.blitCam); this.blitMesh.material = m; this.taaWarm = true
+    }
     gl.render(this.blitScene, this.blitCam)
+    if (taa) { gl.copyFramebufferToTexture(this.taaTex!); this.taaK++ }   // before the heroes and the type: history holds the scene only
+    else this.taaK = 0
     gl.autoClear = auto; gl.setRenderTarget(prev)
+  }
+  /** R7.08b: history texture (the canvas's own size, RGB like the canvas) and this frame's blend; a new size or render
+   *  scale (sub-rectangle) restarts the history */
+  private taaBind(gl: THREE.WebGLRenderer) {
+    const el = gl.domElement; gl.getCurrentViewport(this.taaVp)
+    const key = `${el.width}x${el.height}|${this.taaVp.z}x${this.taaVp.w}|${this.bw}x${this.bh}`
+    if (!this.taaTex || this.taaTex.image.width !== el.width || this.taaTex.image.height !== el.height) {
+      this.taaTex?.dispose()
+      this.taaTex = new THREE.FramebufferTexture(el.width, el.height); this.taaTex.format = THREE.RGBFormat
+      this.taaTex.minFilter = this.taaTex.magFilter = THREE.LinearFilter; this.taaK = 0
+    }
+    if (key !== this.taaKey) { this.taaKey = key; this.taaK = 0 }
+    const u = this.blitMat.uniforms
+    u.u_hist.value = this.taaTex
+    u.u_hs.value.set(this.taaVp.z / el.width, this.taaVp.w / el.height)
+    u.u_jit.value.set(this.taaJx / this.bw, this.taaJy / this.bh)
+    u.u_alpha.value = Math.max(1 / (this.taaK + 1), TAA_FLOOR)
+  }
+  /** R7.08b: still = no scroll, no press, no live trail, no overlay, no scene-boundary composite, intro done; four still
+   *  frames in a row arm it. Phones only (SPLIT, the upscaled background); ?taa=0 off, ?taa=1 on any device. */
+  private taaTick() {
+    const still = TAA_MODE !== 0 && ((SPLIT && quality.tier === 'low' && PHONE) || TAA_MODE === 1) && props.introDone && !props.overlayOpen && Math.abs(props.scrollVel) < 0.5
+      && (paintState.asleep || paintState.empty || props.look.paintAmount <= 0) && !(clip.boundary && !clip.cut) && this.warmDone && !this.blitWarm && props.textDpr > props.dpr * 1.05
+    this.taaStill = still ? this.taaStill + 1 : 0
+    this.taaOn = this.taaStill >= 4
+    if (!this.taaOn) { this.taaJx = this.taaJy = 0; this.taaK = 0; return }
+    const h = PostChain.HAL[this.taaK % 8]; this.taaJx = h[0]; this.taaJy = h[1]
+  }
+  /** R7.08b: the scene and GL-text passes draw with the projection shifted by the jitter (clip-space translate, any camera) */
+  private jitWrap(pass: Pass, cam: THREE.Camera) {
+    const orig = pass.render.bind(pass)
+    pass.render = ((...a: any[]) => {
+      if (!this.taaOn) return (orig as any)(...a)
+      const c = ((pass as any).camera as THREE.Camera) || cam, P = c.projectionMatrix, e = P.elements, dx = (2 * this.taaJx) / this.bw, dy = (2 * this.taaJy) / this.bh
+      this.taaSaved.copy(P); this.taaSavedInv.copy(c.projectionMatrixInverse)
+      e[0] += dx * e[3]; e[4] += dx * e[7]; e[8] += dx * e[11]; e[12] += dx * e[15]
+      e[1] += dy * e[3]; e[5] += dy * e[7]; e[9] += dy * e[11]; e[13] += dy * e[15]
+      c.projectionMatrixInverse.copy(P).invert()
+      try { return (orig as any)(...a) } finally { P.copy(this.taaSaved); c.projectionMatrixInverse.copy(this.taaSavedInv) }
+    }) as any
   }
   // W25 R6.46 (Shifat 2:22 AM PT Oct 21, LOCKED: "Only on above water surface, keep logo & sound line black. Then full white"):
   // the measured-frame header picker (R6.36-R6.44: readback, EMA, votes) is gone. The header ink is a fixed rule tied to the
@@ -269,9 +382,10 @@ void main(){
     this.sync()
     let sig = 0  // PERF HOOK: a bitmask, not a string built every frame (no per-frame garbage)
     const warm = this.warmAll
+    this.blitWarm = warm   // R7.08: the warm frame links the trail blit program too
     for (let i = 0; i < this.entries.length; i++) {
       const e = this.entries[i]
-      e.on = warm ? !(e.name === 'Bloom' && !settings.USE_BLOOM) && !(e.name === 'FXAA' && settings.TIER !== 'low') : e.needsRender()
+      e.on = warm ? !(e.name === 'Bloom+Grade' && !settings.USE_BLOOM) && !(e.name === 'FXAA' && settings.TIER !== 'low') : e.needsRender()
       if (e.on) sig |= 1 << i
     }
     if (warm) {
@@ -290,6 +404,7 @@ void main(){
       this.entries.filter((e) => e.on).sort((a, b) => a.order - b.order).forEach((e) => { e.pass.renderToScreen = false; this.composer.addPass(e.pass); e.pass.setSize(this.bw, this.bh) })
       ;(window as any).__chain = this.entries.filter((e) => e.on).map((e) => `${e.order}:${e.name}`)
     }
+    this.taaTick()   // R7.08b: still frames jitter the scene and accumulate in the blit
     this.composer.render(dt)
     this.text.prepare(this.gl) // R7.06 PERF: the type's own target first, so the canvas is bound once (blit, heroes, type)
     this.blit()

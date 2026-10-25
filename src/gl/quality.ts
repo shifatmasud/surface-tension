@@ -1,3 +1,4 @@
+import { PHONE } from '../core/viewport'
 import { settings, browser, MAX_RENDER_PIXELS } from '../services/settings'
 import { props } from '../state/props'
 import { input } from '../services/input'
@@ -127,6 +128,18 @@ const LOW_BG_CAP = 0.75
  *  (one rung at a time, probes only under 70 % of the frame budget, failed probes back off). Phones keep 0.75. */
 const WEAK_BG_CAP = 1.0
 const BG_FLOOR = SPLIT && LOW_END_GPU ? 0.5 : 0.6
+/** R7.08b ONE DENSITY (Shifat 7:32-7:43 PM: "edges still feel pixelated on phone"; first principles for the M02s): the phone
+ *  background was drawn at 0.5-0.75 of the CSS size and stretched 2.3-3.5x onto a 1.5-1.75 canvas (the stairs he sees).
+ *  Phones now draw the scene and the heroes at ONE static density (DENS_PHONE, never moved by the governor or a rest
+ *  toggle: no re-allocation, no pop), so the stretch to the canvas is 1.2x moving / 1.4x at rest. ?dens=old = 7.08 */
+export const DENS_ONE = SPLIT && tier === 'low' && PHONE && q.get('dens') !== 'old'   // phones only (tablet, PC unchanged)
+const DENS_PHONE = Math.max(0.75, Math.min(1.75, parseFloat(q.get('dens') || '') || 1.0))   // simulated: 1.25 cost 1.3-2.3x 7.07 moving, 1.0 holds it outside the hero
+/** R7.08c (Shifat 8:22 PM on his M02s: "hero feels jittery"; 4:20 AM Oct 24: the hero above the water needs "no hi res, just
+ *  performance"): above the water the background (sky, lake, haze: soft by nature) holds 7.07's density (0.5); the gem
+ *  keeps its own sharp MSAA layer. One switch per crossing (it rides the waterline wobble), never while moving inside a
+ *  stage. ?abg=1 = the 7.08b hero background. */
+const DENS_ABOVE = Math.max(0.5, Math.min(1.75, parseFloat(q.get('abg') || '') || 0.5))   // simulated hero frame vs 7.07: 0.5 ~1.15x, 0.75 ~1.35x, 7.08b's 1.0 ~1.8x
+const DENS_HERO = Math.max(0.75, Math.min(1.75, parseFloat(q.get('hdens') || '') || 1.25))  // the heroes (gem, crewmate, slides): 4x MSAA kept
 const PHONE_HERO_DPR = 1  // R6.89 (Shifat 4:09 AM Oct 23): phone heroes at 1.0 (was 1.5 since 3:15 AM; 2 before)
 /** R6.89 (Shifat 4:10 AM Oct 23 "keep the TEXT at 1.5 while heroes go to 1.0"): the phone canvas (the GPU text layer) has
  *  its own density now; the hero pass renders into its own target at PHONE_HERO_DPR and is composited up onto it */
@@ -206,7 +219,7 @@ class Quality {
   nativeFor(w: number, h: number) { return Math.max(1, Math.min(3, window.devicePixelRatio || 1, Math.sqrt(CANVAS_PIXELS / Math.max(1, w * h)))) }
   private cap(w: number, h: number) { return Math.min(browser.dpr, this.nativeFor(w, h), Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h)), tier === 'low' ? (SPLIT && LOW_END_GPU ? (settings.WEAK_GPU ? WEAK_BG_CAP : LOW_BG_CAP) : PHONE_SCENE_DPR) : DESKTOP_SCENE_DPR) }
   /** R6.87 SPLIT: the hero subjects' density — the device's own (canvas cap), phones at most 2x. Never moved by the governor. */
-  heroDprFor(w: number, h: number) { const n = this.nativeFor(w, h); return tier === 'low' ? Math.min(n, PHONE_HERO_DPR) : n }
+  heroDprFor(w: number, h: number) { const n = this.nativeFor(w, h); return tier === 'low' ? Math.min(n, DENS_ONE ? DENS_HERO : PHONE_HERO_DPR) : n }
   /** the rest target before the rest judge: native within 1.2x the scene pixel cap */
   private restTarget(w: number, h: number) { if (PHONE_SHARP) return Math.min(this.nativeFor(w, h), SHARP_BG, PHONE_TEXT_DPR, props.bgCeil > 0 ? props.bgCeil : 9); return Math.min(this.nativeFor(w, h), Math.sqrt(MAX_RENDER_PIXELS / Math.max(1, w * h)) * 1.2, tier === 'low' ? PHONE_SCENE_DPR : DESKTOP_SCENE_DPR) }
   /** the canvas density a rest frame refines to: native, phones capped at PHONE_CANVAS_DPR */
@@ -217,6 +230,7 @@ class Quality {
   dprFor(w: number, h: number, noRest = false) {
     this.w = w; this.h = h
     const td = this.textDprFor(w, h, noRest)
+    if (DENS_ONE) return Math.min(td, this.nativeFor(w, h), props.aboveWater ? DENS_ABOVE : DENS_PHONE)   // R7.08b: static, same moving and still (R7.08c: per side of the waterline)
     const moving = Math.min(td, Math.max(BG_FLOOR, Math.min(this.stepAt(this.level), this.cap(w, h))))
     if (!this.rest || noRest) return moving
     return Math.min(td, Math.max(moving, Math.min(this.restTarget(w, h), this.restCap)))
@@ -257,6 +271,7 @@ class Quality {
    *  hero above the water (never any cost there), the canvas / text layer refines to the screen's own density (max 2x) —
    *  one re-allocation in, one out on the first moving frame; while moving it is exactly 7.06 (1.5x). ?txtrest=0 = 7.06. */
   textRest = false
+  private densAbove = true
   private textStill = 0
   private textRestTick(now: number) {
     if (tier !== 'low' || !SPLIT || TEXT_REST_OFF) return
@@ -276,6 +291,10 @@ class Quality {
   }
   restTick(moving: boolean, now: number) {
     this.textRestTick(now)
+    if (DENS_ONE) {   // R7.08b: one static density, no background rest refinement
+      if (props.aboveWater !== this.densAbove) { this.densAbove = props.aboveWater; if (DENS_ABOVE !== DENS_PHONE) { const s = this.state(); this.listeners.forEach((fn) => fn(s)) } }   // R7.08c: re-size once per waterline crossing
+      return
+    }
     if (PHONE_SHARP) return this.sharpTick(now)
     // PERFGOV-3: a known low-end phone GPU settles with rest suspended (the native-DPR + SMAA still costs ~4–5x its
     // moving frame on an Adreno 50x and is judged straight back down, a few dropped frames every 30–120 s of idle), so it
@@ -526,5 +545,8 @@ class StageWindow {
 export const stageWindow = new StageWindow()
 ;(window as any).__perfWindow = stageWindow // (the builder's window.__stageWindow = {owner, mounted} is the mount state)
 /** PERF HOOK: the trail sim's sleep state (Scene sets it, the post chain drops the distortion pass while asleep) */
-export const paintState = { asleep: false }
+/** R7.08: `empty` = awake but every trail weight is already exactly 0 (more than 80 frames since the last input: the 8-bit
+ *  floor zeroes every weight within ~70). The display-only trail work (the field reconstruction, the smear pass and the
+ *  full-density fringe) skips those frames; the sim itself and its sleep at 120 frames are unchanged. */
+export const paintState = { asleep: false, empty: false }
 ;(window as any).__quality = quality

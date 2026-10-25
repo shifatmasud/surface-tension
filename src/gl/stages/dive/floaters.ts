@@ -83,7 +83,7 @@ ${COMMON}
 attribute vec3 aF;      // x: 0 bell / 1 filament / 2 oral arm, y: 0 apex … 1 rim (bell) or 0 root … 1 tip, z: strip side ±1
 attribute vec4 aSeed;   // xyz cell (0..1), w random
 attribute vec4 aSeed2;  // x size, y/z tilt, w film hue
-varying float vA, vKind, vT, vHue, vCoc, vPulse, vSide;
+varying float vA, vKind, vT, vHue, vCoc, vPulse, vSide, vCov;
 uniform float u_keep;   // 1 while the work cards hold the frame (no jelly over a card)
 uniform vec3 u_camR, u_camU, u_camF; uniform vec2 u_lens;   // the main camera's basis and tan(half fov) x/y
 varying vec3 vN, vV;
@@ -131,7 +131,16 @@ void main(){
   vec4 mv = viewMatrix * vec4(w, 1.0);
   // W25 R6.54 (scorer-r652 #3: hairline, dashed tentacles): a filament is a tapered ribbon with a soft cross-section
   // (vSide feathers its edges in the fragment), wide at the root and thin at the tip; oral arms the same, a little fuller
-  if (aF.x > 0.5 && aF.x < 2.5) mv.x += aF.z * sz * (aF.x < 1.5 ? 0.024 : 0.065) * (1.0 - 0.8 * aF.y);
+  // R7.08c INVERSION (sub-pixel thin geometry; Shifat 8:22 PM "jelly feels low res pixelated"): a ribbon thinner than the
+  // pixel grid rasterised as a dashed, crawling line. It is never drawn thinner than 1.5 buffer px; below that its light
+  // is scaled by the coverage it lost (vCov), so it reads as the same faint thread, continuous, at any density
+  vCov = 1.0;
+  if (aF.x > 0.5 && aF.x < 2.5) {
+    float hw = sz * (aF.x < 1.5 ? 0.024 : 0.065) * (1.0 - 0.8 * aF.y);
+    float hwMin = 0.75 * 2.0 * max(-mv.z, 1e-3) * u_lens.y / max(u_res.y, 1.0);
+    vCov = clamp(hw / hwMin, 0.0, 1.0);
+    mv.x += aF.z * max(hw, hwMin);
+  }
   gl_Position = projectionMatrix * mv;
   vA = floatFade(c, edge, gl_Position, 1.2, 3.0) * depthLight() * mix(1.0, 0.42, coc) * (1.0 - u_keep);
   // safety net: a bell whose centre would ever reach the subject's zone in the middle of the frame fades out
@@ -143,7 +152,7 @@ void main(){
 const jellyFrag = /* glsl */ `
 uniform float u_time, u_split; uniform vec2 u_res;
 ${CLIP}
-varying float vA, vKind, vT, vHue, vCoc, vPulse, vSide;
+varying float vA, vKind, vT, vHue, vCoc, vPulse, vSide, vCov;
 varying vec3 vN, vV;
 void main(){
   splitClip();
@@ -193,6 +202,7 @@ void main(){
     float run = 0.5 + 0.5 * sin(vT * 9.0 - u_time * 2.2 + vHue * 6.2832);
     col += lum * glow * (1.0 - vT) * (1.0 - vT) * (vKind < 1.5 ? 1.1 : 0.7) * (0.6 + 0.4 * run);
     col *= 1.0 - smoothstep(0.25, 1.0, abs(vSide));   // W25 R6.54: a soft ribbon cross-section, no hard 1 px line
+    col *= vCov;   // R7.08c: a widened sub-pixel ribbon keeps its old total light
   }
   gl_FragColor = vec4(col * vA * 0.85, 1.0);
 }`
@@ -397,7 +407,9 @@ export function Floaters({ u }: { u: U }) {
   const geos = useMemo(() => {
     const R = rng(1520)
     // jellies
-    const jelly = jellyGeometry(low ? 14 : hi ? 24 : 18, low ? 6 : hi ? 10 : 8, low ? 8 : 14)
+    // R7.08c (Shifat 8:22 PM "jelly feels low res"): phones drew 14x6 bells with 8-segment tentacles, a polygon outline once
+    // the bells are sharp; 4 instances, so the high-tier mesh costs a few hundred vertices: phones now share it
+    const jelly = jellyGeometry(low || hi ? 24 : 18, low || hi ? 10 : 8, 14)
     const js: number[] = [], js2: number[] = []
     // W19: the four framing slots — ndc x, ndc y, depth (m), bell radius (share of the half-frame height). The subject
     // sits in focus at ~6 m; one jelly shares its plane (sharp), one is near (blurred hardest), two are far (soft)

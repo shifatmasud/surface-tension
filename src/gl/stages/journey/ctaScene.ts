@@ -553,6 +553,8 @@ export function buildCta(portrait: boolean) {
     const em = lay.em * footS, cy = typeY + footDy, half = (widthEm * 0.5 + 0.25) * em
     return { x0: lay.C.x - half, x1: lay.C.x + half, y0: cy - (tU.u_gap.value + 0.6) * em, y1: cy + 1.05 * em, z: lay.textZ }
   }
+  /** R7.08: the visible bottom of the second line (its descenders), tablet-local; the CTA pill keeps clear of it */
+  const typeBottom = () => ({ x: lay.C.x, y: typeY + footDy - (tU.u_gap.value + 0.3) * lay.em * footS, z: lay.textZ })
   /** R6.89 (option C): as the footer comes up the type glides (dy, world units) and eases to its settled size (s); t = 0..1 */
   let footDy = 0, footS = 1, footT = 0, typeT = 0, lastT = -1
   const setFoot = (dy: number, s: number, ft: number, away = 0, morph = 0) => {
@@ -569,5 +571,5 @@ export function buildCta(portrait: boolean) {
     ix = createStickerInteraction({ camera, group, base, aSt, aInt, aProg, lay, typeRect, labels: LOGOS.map((L) => L.label), shapes: LOGOS.map((L) => L.shape), z: () => sU.u_z.value })
   }
   const detach = () => { ix?.dispose(); ix = null }
-  return { group, typeRoot, type, stickers, typeRect, typeAnchor, setFoot, layout, update, lay, attach, detach, get dirty() { return dirty }, set dirty(v: boolean) { dirty = v }, wall }
+  return { group, typeRoot, type, stickers, typeRect, typeBottom, typeAnchor, setFoot, layout, update, lay, attach, detach, get dirty() { return dirty }, set dirty(v: boolean) { dirty = v }, wall }
 }

@@ -229,14 +229,21 @@ export function DeepSea({ u }: { u: Record<string, THREE.IUniform> }) {
       seed.set([1, R(), 0.02 + R() * R() * 0.09, 0.5 + R() * 0.8], k * 4)
       base.set([R(), R(), R()], k * 3)
     }
+    // R7.08b (Shifat 6:48 PM: "Reduce water bubble size & count & speed"): the same layout, every other bubble kept (half
+    // per vent, half the drifters), 35% smaller and 40% slower
+    const NK = N >> 1, seedK = new Float32Array(NK * 4), baseK = new Float32Array(NK * 3)
+    for (let i = 0; i < NK; i++) {
+      seedK.set(seed.subarray(8 * i, 8 * i + 4), i * 4); baseK.set(base.subarray(6 * i, 6 * i + 3), i * 3)
+      seedK[i * 4 + 2] *= 0.65 * 0.6; seedK[i * 4 + 3] *= 0.6 * 0.5   // 7:32/7:34 PM: smaller again, half the speed again
+    }
     const sph = new THREE.IcosahedronGeometry(1, 2)
     const bubbles = new THREE.InstancedBufferGeometry()
     bubbles.index = sph.index
     bubbles.setAttribute('position', sph.getAttribute('position'))
     bubbles.setAttribute('normal', sph.getAttribute('normal'))
-    bubbles.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seed, 4))
-    bubbles.setAttribute('aBase', new THREE.InstancedBufferAttribute(base, 3))
-    bubbles.instanceCount = N
+    bubbles.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seedK, 4))
+    bubbles.setAttribute('aBase', new THREE.InstancedBufferAttribute(baseK, 3))
+    bubbles.instanceCount = NK
     const plN = 160
     const pl = new THREE.BufferGeometry()
     const pp = new Float32Array(plN * 3), pr = new Float32Array(plN * 3)

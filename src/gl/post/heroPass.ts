@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { renderScaleXY } from '../renderScale'   // R7.08c
 import { Pass } from 'postprocessing'
 import { props } from '../../state/props'
 import { settings } from '../../services/settings'
@@ -119,7 +120,7 @@ class HeroPass {
     const k = Math.min(1, (props.heroDpr || gl.getPixelRatio()) / Math.max(1e-3, gl.getPixelRatio()))
     const w = Math.max(1, Math.round(v.x * k)), h = Math.max(1, Math.round(v.y * k))
     if (!this.rt) {
-      this.rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, depthBuffer: true, stencilBuffer: false, samples: (LOW_END_GPU || settings.TIER === 'low') && (props.heroDpr || 2) > 1.01 ? 0 : 4, generateMipmaps: false, resolveDepthBuffer: !HP_ONE })
+      this.rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, depthBuffer: true, stencilBuffer: false, samples: (LOW_END_GPU || settings.TIER === 'low') && (props.heroDpr || 2) > 1.3 ? 0 : 4,   /* R7.08b: the phone's one density (1.25) keeps the heroes' 4x MSAA */ generateMipmaps: false, resolveDepthBuffer: !HP_ONE })
       // R6.89: at the 1.0 phone hero density the silhouettes (the crewmate's rim, the stone's girdle) stepped and read as a
       // thin fringe once upsampled onto the 1.5 canvas; 4x MSAA on this small target (resolved on-chip on tile GPUs) smooths them
       this.rt.texture.minFilter = this.rt.texture.magFilter = THREE.LinearFilter
@@ -245,11 +246,12 @@ class HeroPass {
     const common = (graded: boolean) => ({
       ...un, u_fk: fk, u_ft: ft, u_fasp: fa, u_fvel: fv, u_fb: fb,
       tHero: { value: null as THREE.Texture | null }, u_trail: { value: 0 }, u_curtain: { value: foot ? 1 : 0 },
+      u_box: { value: new THREE.Vector4(-1e5, -1e5, 1e5, 1e5) }, u_band: { value: 1 },   // R7.08: the composite box (drawing-buffer px) and its trail fade band
     })
     // the grade's own functions (mainUv, mainImage) are spliced in as written; `inputBuffer` is never read by them
     const body = (graded: boolean) => /* glsl */ `
 uniform sampler2D tHero; uniform float u_trail, u_curtain; uniform float u_fk, u_ft, u_fasp, u_fvel, u_fb;
-uniform float u_fadeIn;
+uniform float u_fadeIn; uniform vec4 u_box; uniform float u_band;
 uniform sampler2D u_screenPaintTexture; uniform vec2 u_screenPaintTexelSize;
 uniform float u_amount, u_rgbShift, u_multiplier, u_colorMultiplier, u_shade;
 ${graded ? gsrc : `uniform sampler2D u_blueNoise; uniform vec2 u_blueNoiseOffset; uniform vec2 u_blueNoiseSize;
@@ -289,6 +291,10 @@ void main(){
     } else { vec4 s = heroAt(vUv); acc = vec4(s.rgb * s.a, s.a); }
   } else { vec4 s = heroAt(vUv); acc = vec4(s.rgb * s.a, s.a); }
   float a = acc.a * u_fadeIn;
+  // R7.08: a hero dragged by a strong stroke ended in a hard straight line where the composite box stops (a 7.07 bug, seen
+  // as a blue wedge under the gem). The smeared part now fades out across the outer band of the box (the trail's own margin,
+  // outside the hero's bounds; box sides on the screen edge do not fade). ALU only, trail frames only.
+  if (fr > 0.5) { vec2 d2 = min(gl_FragCoord.xy - u_box.xy, u_box.zw - gl_FragCoord.xy); a *= smoothstep(0.0, u_band, min(d2.x, d2.y)); }
   if (a < 0.002) discard;
   vec3 c = acc.rgb / max(acc.a, 1e-4);
   if (fr > 0.5) c += sin(vec3(vel.x + vel.y) * 40.0 + vec3(0.0, 2.0, 4.0) * u_rgbShift) * smoothstep(0.4, -0.9, weight) * u_shade * max(abs(vel.x), abs(vel.y)) * u_colorMultiplier;
@@ -376,6 +382,16 @@ void main(){
     const x = Math.max(0, B.x), y = Math.max(0, B.y + fkPx), x1 = Math.min(W, B.x + B.w), y1 = Math.min(H, B.y + B.h + fkPx)
     if (x1 <= x || y1 <= y) { gl.autoClear = auto; gl.setRenderTarget(prev); return }
     gl.setScissorTest(true); gl.setScissor(x / pr, y / pr, (x1 - x) / pr, (y1 - y) / pr)
+    if (mat.uniforms.u_box) {   // R7.08: the box in drawing-buffer px (what gl_FragCoord reads), screen-edge sides pushed away
+      // R7.08c (Shifat 8:22 PM on his M02s: "weird lines when section transitions"): on a phone every moving frame draws into
+      // the 1.5x sub-rectangle of the canvas (renderScale.ts scales the scissor, so the hero is drawn there), but this box was
+      // still in whole-canvas px. gl_FragCoord sat ~14 % short of it, so on every touch (the trail wakes: fr > 0.5) the hero's
+      // left/bottom part fell outside the "box" and was cut by a hard straight line, wherever a hero's box did not reach the
+      // screen edge (the gem leaving, the slides and the crewmate arriving). Now the same scale the scissor gets.
+      const k = gl.getPixelRatio() / pr, E = 1e5, [fx, fy] = renderScaleXY()
+      mat.uniforms.u_box.value.set(x <= 0 ? -E : x * k * fx, y <= 0 ? -E : y * k * fy, x1 >= W ? E : x1 * k * fx, y1 >= H ? E : y1 * k * fy)
+      mat.uniforms.u_band.value = Math.max(1, 0.06 * Math.max(W, H) * k * Math.min(fx, fy))
+    }
     gl.render(this.qscene, this.qcam)
     gl.setScissorTest(false)
     gl.autoClear = auto; gl.setRenderTarget(prev)

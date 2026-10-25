@@ -20,12 +20,12 @@ float fbm(vec3 p){ float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++){ s += a *
 export function skyMaterial() {
   return new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
-    uniforms: { u_atmos: { value: 0 }, u_sun: { value: SUN_DIR }, u_time: { value: 0 }, u_rich: { value: 1 } },
+    uniforms: { u_atmos: { value: 0 }, u_sun: { value: SUN_DIR }, u_time: { value: 0 }, u_rich: { value: 1 }, u_hz: { value: new THREE.Vector4(0, 0, 0, 0) } },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
       void main(){ vDir = normalize(position); vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0); gl_Position = p.xyww; }`,
     fragmentShader: /* glsl */ `
-      uniform float u_atmos; uniform vec3 u_sun; uniform float u_time; uniform float u_rich;
+      uniform float u_atmos; uniform vec3 u_sun; uniform float u_time; uniform float u_rich; uniform vec4 u_hz;
       varying vec3 vDir;
       ${NOISE}
       void main(){
@@ -88,6 +88,10 @@ export function skyMaterial() {
         vec3 night = space * 1.15 + mix(vec3(0.03, 0.05, 0.11), vec3(0.003, 0.006, 0.022), smoothstep(-0.04, 0.55, y));
         night = mix(vec3(0.006, 0.012, 0.012), night, smoothstep(-0.16, 0.0, y));
         vec3 col = a < 0.5 ? mix(mix(space, night, smoothstep(0.0, 0.22, a)), dusk, smoothstep(0.22, 0.5, a)) : mix(dusk, sky, smoothstep(0.5, 1.0, a));
+        // R7.07 D (phone ~0.69: a flat haze strip with a hard top edge under the sky): the land's far edge melts into the
+        // scene haze (fog colour), but the sky just above it carried the sun's glow, a few levels brighter, so the land's
+        // silhouette read as a band. The sky now eases into the same haze colour over the last few degrees above the horizon.
+        col = mix(u_hz.rgb, col, mix(1.0, smoothstep(-0.01, 0.075, d.y), u_hz.w));
         // dither: the near-black grades would band on 8-bit screens
         col += (h31(vec3(gl_FragCoord.xy, fract(u_time) * 61.0)) - 0.5) * (1.5 / 255.0);
         gl_FragColor = vec4(max(col, 0.0), 1.0);
