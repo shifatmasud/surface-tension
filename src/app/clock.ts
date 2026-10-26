@@ -53,11 +53,17 @@ export function startClock() {
     const ms = lastNow < 0 ? deltaMs : now - lastNow
     lastNow = now
     const dt = props.sceneHold ? 0 : Math.min(Math.max(ms, 0) / 1000, (window as any).__dtCap ?? 1 / 20)   // Shifat 1:55 PM: the page scene never moves while the gift is in or out (time frozen while held)  // __dtCap: QA on slow remote GPUs (camera damping converges)
-    props.dt = dt; props.time += dt; props.frame++
+    // R7.11 QA CLOCK (absent by default: nothing reads it unless a test sets window.__qClock): a fixed-step fake clock so a
+    // headless before/after pair lands on the same moment. On set, the scene time jumps to `reset`, then exactly `frames`
+    // steps of `dt` run, then time holds (dt 0) while frames keep drawing.
+    const qc = (window as any).__qClock
+    let qdt = dt
+    if (qc) { if (qc.reset != null) { props.time = qc.reset; qc.reset = null; qc.n = 0 } qdt = qc.n < qc.frames ? qc.dt : 0; qc.n++ }
+    props.dt = qdt; props.time += qdt; props.frame++
     taskManager.update()
     input.update()
-    scroll.update(dt) // VSCROLL HOOK: the virtual scroll steps and writes the page offset here, before sections and GL read it
-    sections.update(dt)
+    scroll.update(qdt) // VSCROLL HOOK: the virtual scroll steps and writes the page offset here, before sections and GL read it
+    sections.update(qdt)
     const ownerKey0 = clip.ownerKey
     clip.update()
     // R6.96 HAND-OFF: Journey.tsx gates journey.active on clip.allowed('journey') inside sections.update, which runs
@@ -65,7 +71,7 @@ export function startClock() {
     // therefore still gated off while the dive block was already hidden: one near-black frame (R6.94/R6.95, all tiers).
     // Re-read the gate on the frame the owner changes, so the incoming stage draws on the cut frame itself.
     if (clip.ownerKey !== ownerKey0 && journey.activeRaw && !journey.active && clip.allowed('journey')) journey.active = true
-    audio.update(dt)
+    audio.update(qdt)
     // PRELOAD: from the moment the GL canvas exists until the hero's shaders are linked (parallel compile), the
     // frame loop holds, so no frame blocks on a shader link and the counter keeps moving
     // R6.83 GIFT: while the gift dialog is open its blurred still covers the page, so the scene does not draw at all

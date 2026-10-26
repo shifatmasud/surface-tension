@@ -142,6 +142,7 @@ export class ScreenPaintDistortionEffect extends Effect {
  */
 /** the grade's lens mainUv (the waterline meniscus, ripple, droplets, crossing wobble); a no-op while u_waterline < -0.5 */
 const WL_HARD = /[?&]wlhard\b/.test(location.search)   // R7.10 b6: the old sub-pixel waterline edge
+const WL_OLD = /[?&]wlold\b/.test(location.search)   // R7.11 b6: ?wlold = b5's two-band waterline (QA A/B)
 const GRADE_UV = /* glsl */ `void mainUv(inout vec2 uv){
         if (u_waterline > -0.5) {
           float L = wlLine(uv);
@@ -149,8 +150,10 @@ const GRADE_UV = /* glsl */ `void mainUv(inout vec2 uv){
           float t = u_wlTime;
           // the meniscus: water climbing the dome is a thin cylindrical lens along the line; it pulls the image toward
           // the line (a magnified sliver of both worlds) and shivers along x
-          float band = exp(-d * d * 2200.0);
-          uv.y -= band * d * 0.6;
+          // R7.11 b6 (Shifat, real M02s: "Why the double air water intersection line?"): the lens was ±0.02 of the screen wide
+          // at 2.5x, so it blew the crisp line and the slivers either side of it up into bands; now ±0.01 at 1.4x: one line
+          float band = exp(-d * d * ${WL_OLD ? '2200.0' : '9000.0'});
+          uv.y -= band * d * ${WL_OLD ? '0.6' : '0.3'};
           uv.x += band * 0.003 * wlNoise(uv.x * u_aspect * 30.0 + t * 0.8) * u_wlMo;
           // the underwater half: refraction ripple, and the slight magnification of the water (n = 1.33) about the line
           float uw = smoothstep(0.0, -0.012, d) * u_wlK;
@@ -178,6 +181,7 @@ export class GradeEffect extends Effect {
   constructor(withUv = true) {
     super(withUv ? 'Grade' : 'GradeNoUv', /* glsl */ `
       uniform float u_exposure, u_saturation, u_contrast, u_brightness, u_vignette, u_vignetteSoft, u_fade, u_lift;
+      uniform float u_liftK, u_expK;   // R7.11 b6b: the background pass's share of the lift (GRADE_CHAIN only; the hero composite keeps 1)
       uniform vec3 u_tint, u_fadeColor;
       uniform float u_waterline;   // -1 hidden, else the lens waterline's screen y (0 bottom … 1 top; > 1 = just passed above the frame)
       uniform float u_wlK;         // W18-DIVE OVER-UNDER: strength of the underwater half's look (tint, refraction, caustic shimmer)
@@ -243,7 +247,13 @@ export class GradeEffect extends Effect {
           }
         }
         #endif
+        // R7.11 b6d: the background pass's exposure share (u_expK, GRADE_CHAIN only, like u_liftK below): the hero look's 1.12
+        // eases toward the dive look's 1.0 on the lake + sky as the lens drops; the stone (heroPass, no define) keeps 1.12
+        #ifdef GRADE_CHAIN
+        c *= u_exposure * u_expK;
+        #else
         c *= u_exposure;
+        #endif
         float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
         c = mix(vec3(l), c, u_saturation);
         c = (c - 0.5) * u_contrast + 0.5 + u_brightness;
@@ -258,7 +268,14 @@ export class GradeEffect extends Effect {
           float lw = smoothstep(0.52, 0.8, dot(cc, vec3(0.2126, 0.7152, 0.0722)));
           // an equal offset on all channels (toward white by the headroom of the brightest channel) keeps tinted
           // pixels' chroma, so the blue glow's falloff stays smooth (a chroma gate left a grey ring around it)
+          // R7.11 b6b (Shifat's real M02s: the hero's crisp floor turned milky white on scroll): this pass grades the background
+          // (the hero subjects are composited after it by heroPass, which splices this source WITHOUT the effect's defines), so
+          // u_liftK eases the lift on the lake and sky alone as the lens drops; the stone keeps the full lift everywhere
+          #ifdef GRADE_CHAIN
+          c += (1.0 - max(cc.r, max(cc.g, cc.b))) * u_lift * u_liftK * lw;
+          #else
           c += (1.0 - max(cc.r, max(cc.g, cc.b))) * u_lift * lw;
+          #endif
         }
         // fade toward the section colour from a highlight-clipped copy: the HDR buffer carries speculars and caustics
         // far above 1.0, and a 0.97 fade of a value of 20 still leaves a bright blotch (the lab's white patches)
@@ -268,16 +285,19 @@ export class GradeEffect extends Effect {
           // W18-DIVE OVER-UNDER: the split-level shot
           float L = wlLine(uv);
           float d = uv.y - L;
-          float uw = smoothstep(0.002, -0.006, d) * u_wlK;
+          // R7.11 b6: the underwater tint switches on right under the crisp line (b5 ramped it over 0.008 of the screen, which the
+          // lens stretched into a half-tinted slate band: the dark half of the double line)
+          float uw = ${WL_OLD ? 'smoothstep(0.002, -0.006, d)' : 'smoothstep(0.0012, -0.0012, d)'} * u_wlK;
           // the underwater half: teal absorption (red goes first) and caustic light dancing just under the surface
           c = mix(c, c * vec3(0.64, 0.92, 1.0) + vec3(0.0, 0.012, 0.018), uw);
           float cs = wlNoise(uv.x * u_aspect * 21.0 + u_wlTime * 0.9 + 1.5 * sin(uv.y * 26.0 + u_wlTime * 0.7)) * 0.5 + 0.5;
           c *= 1.0 + uw * exp(d * 7.0) * 0.22 * pow(cs, 3.0);
-          // the meniscus: a silvered underside (total internal reflection) just under the line, a crisp bright edge on
-          // it and a thin cool halo above it
-          float sq0 = (d + 0.011) / 0.009;
+          // the meniscus. R7.11 b6 (Shifat, real M02s: "Why the double air water intersection line?"): b5 drew a crisp bright edge,
+          // a silvered underside band 0.011 below it and a cool halo above it, so the eye read a bright line, a dark strip and a
+          // grey band (two lines). Real over-under shots show one thin meniscus: the crisp edge alone now (?wlold = b5's bands)
+          ${WL_OLD ? `float sq0 = (d + 0.011) / 0.009;
           float sil = exp(-(sq0 * sq0)) * min(1.0, u_wlK * 1.5);
-          c = mix(c, c * 0.7 + vec3(0.66, 0.82, 0.86) * 0.36, sil * 0.6);   // W18: lighter underside band
+          c = mix(c, c * 0.7 + vec3(0.66, 0.82, 0.86) * 0.36, sil * 0.6);` : ''}
           // R7.10 b6 (Shifat's real M02s: "jagged waterline"): the crisp edge is 0.0016 of the screen height, under one pixel of
           // the 0.5-density buffer the crossing is drawn in on his phone, so it (and the cut under it) read as stair-steps.
           // Its width never goes under 1.1 buffer pixels now, its peak scaled so the line carries the same light (identical
@@ -290,8 +310,8 @@ export class GradeEffect extends Effect {
           #endif
           float sq1 = d / w1;
           c += vec3(0.93, 0.98, 1.0) * exp(-(sq1 * sq1)) * 0.95 * min(1.0, 0.0016 / w1 * 1.25);
-          float sq2 = (d - 0.004) / 0.006;
-          c += vec3(0.55, 0.82, 0.95) * exp(-(sq2 * sq2)) * 0.12;
+          ${WL_OLD ? `float sq2 = (d - 0.004) / 0.006;
+          c += vec3(0.55, 0.82, 0.95) * exp(-(sq2 * sq2)) * 0.12;` : ''}
           // droplets: a dark rim and a highlight up and to the left (the sky caught in each bead)
           vec3 dr = wlDrop(uv);
           float rim = smoothstep(0.55, 0.95, length(dr.xy));
@@ -314,11 +334,11 @@ export class GradeEffect extends Effect {
         outputColor = vec4(c, inputColor.a);
       }`, {
       blendFunction: BlendFunction.NORMAL,
-      defines: new Map<string, string>(WL_HARD ? [] : [['WL_AA', '1']]),   // R7.10 b6: the waterline AA (the effect pass only; ?wlhard = off)
+      defines: new Map<string, string>([...(WL_HARD ? [] : [['WL_AA', '1']]), ['GRADE_CHAIN', '1']] as [string, string][]),   // GRADE_CHAIN: R7.11 b6b, this pass only (heroPass splices the source without it)   // R7.10 b6: the waterline AA (the effect pass only; ?wlhard = off)
       uniforms: new Map<string, THREE.Uniform<any>>([
         ['u_exposure', new THREE.Uniform(1)], ['u_saturation', new THREE.Uniform(1)], ['u_contrast', new THREE.Uniform(1)],
         ['u_brightness', new THREE.Uniform(0)], ['u_vignette', new THREE.Uniform(0.2)], ['u_vignetteSoft', new THREE.Uniform(0.7)],
-        ['u_fade', new THREE.Uniform(0)], ['u_lift', new THREE.Uniform(0)], ['u_tint', new THREE.Uniform(new THREE.Color(1, 1, 1))],
+        ['u_fade', new THREE.Uniform(0)], ['u_lift', new THREE.Uniform(0)], ['u_liftK', new THREE.Uniform(1)], ['u_expK', new THREE.Uniform(1)], ['u_tint', new THREE.Uniform(new THREE.Color(1, 1, 1))],
         ['u_fadeColor', new THREE.Uniform(new THREE.Color(0, 0, 0))],
         ['u_waterline', new THREE.Uniform(-1)], ['u_aspect', new THREE.Uniform(1)],
         // W18-DIVE OVER-UNDER

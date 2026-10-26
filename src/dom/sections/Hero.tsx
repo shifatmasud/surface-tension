@@ -25,6 +25,8 @@ const B = { pos: new THREE.Vector3(0, 0.78, -4.3), tgt: new THREE.Vector3(0, 0.3
 const HP = { z: 1.7, y: 0.9, ty: 0.06 } // stone ~62% of a phone's width: it breathes
 ;(window as any).__heroP = HP // QA
 const ease = (t: number) => t * t * (3 - 2 * t)
+const HERO_LIFT_EASE = !/[?&]hl=0\b/.test(location.search)   // R7.11 b6
+const HERO_EXP_EASE = !/[?&]he=0\b/.test(location.search)    // R7.11 b6d
 
 /** S1 — Surface. Pinned for 150vh: scrubbing tilts the camera top-down and drifts the tiles apart. */
 export function Hero() {
@@ -43,6 +45,20 @@ export function Hero() {
       // line so it keeps its 16:10 share of the frame height
       const wideK = Math.max(1, Math.tan((14.2 * Math.PI) / 180) / Math.tan((pose.fov * Math.PI) / 360))
       if (wideK > 1.001) pose.pos.sub(pose.target).multiplyScalar(mix(wideK, 1, t)).add(pose.target)
+      // R7.11 b6 (Shifat's real M02s: "This one looks best... then it changes to lighter water" on scroll): the hero's airy lift
+      // (near-white greys pulled to paper white, 0.6) is what turned the lake floor white once the lens dropped: from the low,
+      // level lens the floor reads a little lighter (longer water path, more sky in it), just enough to cross into the lift's
+      // band, and the lift blew it out to a flat milky white (lum 246, no cells). The lift now eases out as the lens drops
+      // (x1 at and above 1.6 m = the hero's first frame, unchanged; x0.15 at 1.0 m and below, where the dive's look (lift 0)
+      // takes over anyway). ?hl=0 = b5
+      // R7.11 b6b (stone lock): only the BACKGROUND pass (lake, sky) takes the eased lift (look.liftLake scales it in the chain's
+      // Grade); the hero composite that draws the stone keeps the full 0.6 at every scroll position (effects.ts GRADE_CHAIN)
+      if (st) {
+        const k = clamp((1.6 - pose.pos.y) / 0.6), s = k * k * (3 - 2 * k)
+        if (HERO_LIFT_EASE) st.look.liftLake = 1 - 0.85 * s
+        // b6d: the background's exposure too, 1.12 -> ~0.99 (the dive look's 1.0, which owns the frame from ~8%); ?he=0 = b5
+        if (HERO_EXP_EASE) st.look.expLake = 1 - 0.12 * s
+      }
       return pose
     }, { vignette: 0.0, bloom: 0.3, contrast: 1.0, saturation: 1.05, exposure: 1.12, lift: 0.6 })
     let handle = null as ReturnType<typeof ufxText> | null

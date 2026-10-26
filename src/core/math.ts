@@ -39,7 +39,10 @@ export class BrownianMotion {
   private t = Math.random() * 100
   value = { x: 0, y: 0, z: 0 }
   constructor(public speed = 0.35, public octaves = 3) {}
+  private qid = 0
   update(dt: number) {
+    const q = (globalThis as any).__qClock   // R7.11 QA CLOCK (absent by default): a fixed-step test restarts every drift at t = 0
+    if (q && this.qid !== q.id) { this.qid = q.id; this.t = 0 }
     this.t += dt * this.speed
     let x = 0, y = 0, z = 0, amp = 1, f = 1, norm = 0
     for (let o = 0; o < this.octaves; o++) {

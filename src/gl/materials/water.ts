@@ -51,6 +51,7 @@ export function createWaterMaterial() {
     u_underOn: { value: 0 },
     u_resolution: hi ? shared.u_resolution : { value: new THREE.Vector2(1, 1) },   // LAKERES: phones set it per draw (HeroStage: the low-res target's size in the lake pass, the scene's otherwise)                                           // stochastic sun glints
     u_fogNear: { value: 7 }, u_fogFar: { value: 26 },
+    u_rLow: { value: 0 },   // R7.11 b6 (Shifat, real M02s: crisp floor -> milky water on scroll): 0 at the hero lens .. 1 at the low, level lens (HeroStage, main camera only)
     u_wlClip: { value: -1 },   // W18-DIVE OVER-UNDER (set per draw by HeroStage: main camera only)
     // LAKERES (Shifat 16:02 PT 'water surface pixel resolution can be turned down a bit … feels slow in phone'): phones only.
     // HeroStage draws the full lake shader into a ~0.65x target first; the main camera's draw of the SAME mesh (same vertex
@@ -90,7 +91,7 @@ export function createWaterMaterial() {
       uniform vec3 u_rippleGate;
       uniform sampler2D u_reflTex; uniform float u_reflOn; uniform float u_gemReflK;
       uniform float u_bedDepth, u_cauRipple, u_refrK; uniform vec3 u_absorb, u_sigS; uniform vec3 u_scatter; uniform vec3 u_bedColor;
-      uniform vec4 u_gem; uniform vec3 u_gemTint; uniform float u_touch, u_lipSoft, u_glint, u_dbg, u_underOn, u_cau; uniform sampler2D u_underTex; uniform vec2 u_resolution; uniform float u_fogNear, u_fogFar;
+      uniform vec4 u_gem; uniform vec3 u_gemTint; uniform float u_touch, u_lipSoft, u_glint, u_dbg, u_underOn, u_cau; uniform sampler2D u_underTex; uniform vec2 u_resolution; uniform float u_fogNear, u_fogFar, u_rLow;
       uniform float u_wlClip;   // W18-DIVE OVER-UNDER: -1 off, else the lens waterline (screen y); the lake draws above it only
 ${hi ? '' : '      uniform sampler2D u_lakeTex; uniform float u_lakeComp; uniform vec2 u_lakeHalf;   // LAKERES (phones); W29: half a low-res texel, the read-back UV inset\n'}      ${WL_EDGE}
       varying vec3 v_world; varying vec2 v_ruv; varying float v_rmask; varying vec4 v_refl;
@@ -244,7 +245,13 @@ ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on p
         vec2 g = swellGrad(v_world.xz);
         vec2 rg = vec2(0.0); float rlap = 0.0;
         float cellM = 2.0 * u_poolSize * u_rippleTexel.x;                  // central-difference span of the sim (m)
-        float rAA = 1.0 - smoothstep(0.6, 1.8, fp / cellM);
+        // R7.11 b6 (Shifat's real M02s: "crisp floor ... then it changes to lighter water" on scroll; emulation never showed it):
+        // on a phone the finger that scrolls the page also paints the lake (waterInput). Seen from the hero's high lens those
+        // rings bend the floor a little; as the scroll lowers and levels the lens, the same rings tilt the surface toward
+        // grazing, where Fresnel and the glints are steep, so the agitated lake mirrored the pale sky and sparkled: the milky
+        // veil, the cells gone. The rings' optical weight now eases down with the lens (x1 at the hero = b5, bit-identical;
+        // x0.25 at the low lens), so the descent keeps the hero's crisp cell floor. Free: one multiply.
+        float rAA = (1.0 - smoothstep(0.6, 1.8, fp / cellM)) * (1.0 - 0.75 * u_rLow);
         if (v_rmask > 0.0 && rAA > 0.0) {
           float hx = texture2D(u_rippleTexture, v_ruv + vec2(u_rippleTexel.x, 0.0)).r - texture2D(u_rippleTexture, v_ruv - vec2(u_rippleTexel.x, 0.0)).r;
           float hy = texture2D(u_rippleTexture, v_ruv + vec2(0.0, u_rippleTexel.y)).r - texture2D(u_rippleTexture, v_ruv - vec2(0.0, u_rippleTexel.y)).r;

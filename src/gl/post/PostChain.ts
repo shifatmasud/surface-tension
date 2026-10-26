@@ -150,7 +150,7 @@ export class PostChain {
     const RAYS_M = !(typeof location !== 'undefined' && /[?&]raysep\b/.test(location.search))   // R7.10 b4: on (?raysep = 7.09's separate rays composite)
     const BD_LO = !(typeof location !== 'undefined' && /[?&]bdfull\b/.test(location.search))   // R7.10 b4: on (?bdfull = shaded at full density as in 7.09)
     const shown = (o: THREE.Object3D | null) => { for (let p = o; p; p = p.parent) if (!p.visible) return false; return !!o }
-    const backdropLo = () => DENS_ONE && PHONE && BD_LO && props.dpr >= 0.99 && !!diveLo.blit && shown(diveLo.mesh) && camera.layers.isEnabled(DIVE_LAYER) && diveLo.split() < -0.5
+    const backdropLo = () => DENS_ONE && PHONE && BD_LO && !(window as any).__bdLoOff && props.dpr >= 0.99 && !!diveLo.blit && shown(diveLo.mesh) && camera.layers.isEnabled(DIVE_LAYER) && diveLo.split() < -0.5
     // R7.10 ONE PASS FEWER (phones + weak PC at the one density; first principles: each full-screen pass is a full write +
     // read of the frame on a tiled, low-bandwidth GPU): SMAA's blend joins the bloom + grade pass (SMAA first, then bloom and
     // the grade on its result) on every frame where nothing is drawn between them (no UI effects, no boundary composite)
@@ -189,7 +189,7 @@ export class PostChain {
       const gx = 40 / Math.max(1, this.gl.domElement.width), gy = 40 / Math.max(1, this.gl.domElement.height)
       keepU.value.set(b.x / rt.width - gx, b.y / rt.height - gy, (b.x + b.w) / rt.width + gx, (b.y + b.h) / rt.height + gy)
     }
-    const diveAA = () => !!smaaD && (keepBox(), true) && ((AA_DIVE && props.stage === 'dive' && !props.aboveWater) || (AA_J && props.stage === 'journey' && !((journey.cta || 0) > 0) && !((journey.lift || 0) > 0)))
+    const diveAA = () => !!smaaD && !(window as any).__aaTwinOff && (keepBox(), true) && ((AA_DIVE && props.stage === 'dive' && !props.aboveWater) || (AA_J && props.stage === 'journey' && !((journey.cta || 0) > 0) && !((journey.lift || 0) > 0)))
     const mergeAA = () => DENS_ONE && !AA_SEP && !((journey.cta || 0) > 0) && (!this.footer || !((journey.lift || 0) > 0)) && quality.aa === 'smaa' && !sharp() && (this.grade.u('u_waterline').value as number) < -0.5
       && !((clip.boundary && !clip.cut) || clip.capture >= 0) && !ufxUnder.children.some((c) => c.visible) && !ufxOver.children.some((c) => c.visible) && !heroPass.hasUi()
     this.entries = [
@@ -442,7 +442,7 @@ void main(){
     const g = (k: string) => n.grade.u(k)
     g('u_exposure').value = look.exposure; g('u_saturation').value = look.saturation; g('u_contrast').value = look.contrast
     g('u_brightness').value = look.brightness; g('u_vignette').value = look.vignette; g('u_vignetteSoft').value = look.vignetteSoft
-    g('u_fade').value = look.fade; g('u_lift').value = look.lift; ;(g('u_tint').value as THREE.Color).copy(look.tint); ;(g('u_fadeColor').value as THREE.Color).copy(look.bg)
+    g('u_fade').value = look.fade; g('u_lift').value = look.lift; g('u_liftK').value = look.liftLake; g('u_expK').value = look.expLake; ;(g('u_tint').value as THREE.Color).copy(look.tint); ;(g('u_fadeColor').value as THREE.Color).copy(look.bg)
     syncSelective(n.bloom, settings.USE_BLOOM ? look.bloom : 0, look.bloomThreshold)
     n.composer.render(dt)
     return (n.swaps % 2 === 1 ? n.composer.outputBuffer : n.composer.inputBuffer).texture
@@ -454,7 +454,7 @@ void main(){
     const g = (n: string) => this.grade.u(n)
     g('u_exposure').value = L.exposure; g('u_saturation').value = L.saturation; g('u_contrast').value = L.contrast
     g('u_brightness').value = L.brightness; g('u_vignette').value = L.vignette; g('u_vignetteSoft').value = L.vignetteSoft
-    g('u_fade').value = L.fade; g('u_lift').value = L.lift; ;(g('u_tint').value as THREE.Color).copy(L.tint); ;(g('u_fadeColor').value as THREE.Color).copy(L.bg)
+    g('u_fade').value = L.fade; g('u_lift').value = L.lift; g('u_liftK').value = L.liftLake; g('u_expK').value = L.expLake; ;(g('u_tint').value as THREE.Color).copy(L.tint); ;(g('u_fadeColor').value as THREE.Color).copy(L.bg)
     syncSelective(this.bloom, L.bloom, L.bloomThreshold)
     const d = (n: string) => this.distortion.u(n)
     d('u_amount').value = L.paintAmount; d('u_rgbShift').value = L.paintRGBShift

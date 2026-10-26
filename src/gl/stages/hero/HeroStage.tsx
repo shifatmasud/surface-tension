@@ -22,6 +22,16 @@ const SURF_FULL = settings.WEAK_GPU && !/[?&]gemtrace\b/.test(location.search)
 const MIRROR_S = Math.max(0.25, Math.min(1, parseFloat(new URLSearchParams(location.search).get('mirror') || '') || (SURF_FULL ? 1 : 0.5)))
 const UNDER_S = Math.max(0.25, Math.min(1, parseFloat(new URLSearchParams(location.search).get('under') || '') || (SURF_FULL ? 1 : 0.5)))
 const LAKE_ONE = DENS_ONE && !/[?&]lksplit\b/.test(location.search)   // R7.10 b5
+// R7.11 b6 (Shifat, real M02s: "This one looks best [the hero]... then it changes to lighter water. Bug." "Only on scroll"):
+// the finger that scrolls also paints the lake; from the low, level lens of 6-12% those rings sit near grazing and turned
+// the lake into a milky sky mirror (water.ts u_rLow). 0 while the lens is at/above 1.6 m (the hero: b5 exactly), 1 at 1.0 m
+// and below. ?rlow=<0..1> scales it (QA; ?rlow=0 = b5)
+const RLOW_K = (() => { const v = parseFloat(new URLSearchParams(location.search).get('rlow') || ''); return isFinite(v) ? Math.max(0, Math.min(1, v)) : 1 })()
+const rLow = (cam: THREE.Camera) => {
+  if (RLOW_K <= 0 || cam.position.y >= 1.6) return 0
+  const t = Math.min(1, Math.max(0, (1.6 - cam.position.y) / (1.6 - 1.0)))   // b6c: full by 1.0 m (the lift's ramp too)
+  return RLOW_K * t * t * (3 - 2 * t)
+}
 const SURF_B4 = /[?&]surfb4\b/.test(location.search)   // R7.10 b5: ?surfb4 = build 4's mirror / under sizes
 import { waterInput } from '../../water/waterInput' // WATER HOOK
 import { gemMask } from '../../systems/stickerMask'
@@ -472,12 +482,14 @@ export function HeroStage() {
         if (comp) lake.comps++
         if (!lake.low) wu.u_resolution.value.copy(shared.u_resolution.value)
         wu.u_wlClip.value = main ? dive.split : -1
+        wu.u_rLow.value = cam === camera ? rLow(cam) : 0   // the main lens only (its own low-res lake pass too): the stone's env/mirror captures keep b5's lake
       } : (_r, _s, cam) => {
         // b6 FIX (Shifat 5:53 AM "Stone cutoff", real M02s): the low tiers' water has its OWN u_resolution (set per draw by the
         // split path above); with b5's one-pass lake nothing set it, so it stayed 1x1: the lens-waterline cut never cut (the lake's
         // underside covered the stone's pavilion and the dive backdrop) and the refraction read the submerged stone at a corner
         if (wu.u_resolution !== shared.u_resolution) wu.u_resolution.value.copy(shared.u_resolution.value)
         wu.u_wlClip.value = cam === camera ? dive.split : -1
+        wu.u_rLow.value = cam === camera ? rLow(cam) : 0   // the main lens only (its own low-res lake pass too): the stone's env/mirror captures keep b5's lake
       }
     }
     // R6.93 WATERLINE: the sheen's meniscus line is seen only from the air (gemSheen.ts): the main camera's draw gets the

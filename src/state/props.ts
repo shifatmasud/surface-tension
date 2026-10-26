@@ -11,13 +11,17 @@ export type Look = {
   vignette: number; vignetteSoft: number; fade: number; tint: THREE.Color
   /** lifts near-white, near-neutral pixels toward paper white (the airy north-star field) without touching colour */
   lift: number
+  /** R7.11 b6b: scales `lift` in the background pass only (lake, sky); the hero composite (the stone) keeps the full lift */
+  liftLake: number
+  /** R7.11 b6d: scales `exposure` in the background pass only (the hero composite keeps the full exposure) */
+  expLake: number
   bloom: number; bloomThreshold: number
   paintAmount: number; paintRGBShift: number; paintOffsetRatio: number; paintColorMultiplier: number; paintMultiplier: number
   dive: number
 }
 export const makeLook = (o: Partial<Record<keyof Look, any>> = {}): Look => ({
   bg: new THREE.Color('#e7e8ea'), fogColor: new THREE.Color('#e7e8ea'),
-  exposure: 1, saturation: 1, contrast: 1.04, brightness: 0, vignette: 0.18, vignetteSoft: 0.75, fade: 0, lift: 0,
+  exposure: 1, saturation: 1, contrast: 1.04, brightness: 0, vignette: 0.18, vignetteSoft: 0.75, fade: 0, lift: 0, liftLake: 1, expLake: 1,
   tint: new THREE.Color('#ffffff'), bloom: 0.25, bloomThreshold: 0.92,
   paintAmount: 3, paintRGBShift: 0.5, paintOffsetRatio: 1, paintColorMultiplier: 10, paintMultiplier: 5,
   dive: 0,

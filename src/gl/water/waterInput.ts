@@ -13,6 +13,9 @@ import { pool } from '../systems/pool'
  *    remote GPU can still show a continuous trail.
  * Mouse input keeps its existing path (pool.ts → props.waterPointer); this module only adds what that path lacks.
  */
+// R7.11 b6 DIAGNOSTIC (Shifat's milky water on scroll, not reproducible in emulation): ?wdraw=0 = the finger that scrolls no
+// longer draws on the lake (default: it draws, as in b5)
+const NO_TOUCH_DRAW = typeof location !== 'undefined' && /[?&]wdraw=0\b/.test(location.search)
 const ray = new THREE.Raycaster()
 const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
 const hit = new THREE.Vector3()
@@ -71,7 +74,7 @@ export const waterInput = {
     const t = this.touch
     // a move since the last frame always paints (a janky >140 ms frame never drops a stroke); a still finger keeps
     // painting for 140 ms so a page that is still gliding under it leaves its trail
-    if (t.down && (t.moved || performance.now() - t.t < 140)) this.active = this.project(t.x, t.y, camera, this.uv)
+    if (t.down && !NO_TOUCH_DRAW && (t.moved || performance.now() - t.t < 140)) this.active = this.project(t.x, t.y, camera, this.uv)
     t.moved = false
   },
 
