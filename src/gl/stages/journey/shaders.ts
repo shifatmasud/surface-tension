@@ -1,4 +1,6 @@
 import * as THREE from 'three'
+/** R7.11 space-v1: ?space=old = b5's Milky Way / nebula dome (QA A/B) */
+const SPACE_OLD = typeof location !== 'undefined' && /[?&]space=old\b/.test(location.search)
 
 /** the low golden-hour sun sits behind the clearing, a little to the right (the camera looks down -z) */
 export const SUN_DIR = new THREE.Vector3(0.28, 0.1, -0.95).normalize()
@@ -20,6 +22,7 @@ float fbm(vec3 p){ float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++){ s += a *
 export function skyMaterial() {
   return new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
+    defines: { SPACE_BLACK: SPACE_OLD ? 0 : 1 },   // R7.11 space-v1
     uniforms: { u_atmos: { value: 0 }, u_sun: { value: SUN_DIR }, u_time: { value: 0 }, u_rich: { value: 1 }, u_hz: { value: new THREE.Vector4(0, 0, 0, 0) } },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
@@ -34,6 +37,14 @@ export function skyMaterial() {
         // (a brighter warm core, mottled star clouds, dark dust lanes along its spine), a dense unresolved star dust
         // that thickens inside the band, and the old nebula kept only as a faint far accent. Kept low so the
         // crewmate stays the one bright, saturated thing in the frame.
+      #if SPACE_BLACK
+        // R7.11 space-v1 (Shifat 9:48 AM Oct 26, his PC video of Playable Worlds: "I think black space scene would be cleaner";
+        // the pale diagonal streak as the section opens was this dome's Milky Way band, x1.75 since R7.01 RICH): space is pure
+        // black. No Milky Way glow, no dust lanes, no nebula; the stars (the 6500 points + the glints, and the fine star
+        // dust below) stay, crisp on black. Cheaper: the five fbm lookups of the band and the nebula are gone. ?space=old = b5
+        vec3 space = vec3(0.0);
+        float band = 0.0, clouds = 0.0, lane = 0.0, wq = 0.0;
+      #else
         float g = smoothstep(-0.8, 0.9, d.y * 0.7 + d.x * 0.3);
         vec3 space = mix(vec3(0.0016, 0.002, 0.006), vec3(0.0045, 0.005, 0.012), g);
         vec3 MWN = normalize(vec3(0.55, 0.83, 0.0));
@@ -58,12 +69,18 @@ export function skyMaterial() {
         float n1 = fbm(q * 1.7 + vec3(wq * 1.6));
         float region = pow(max(dot(d, normalize(vec3(0.7, 0.35, -0.62))), 0.0), 2.0);
         space += mix(vec3(0.12, 0.03, 0.24), vec3(0.42, 0.08, 0.3), smoothstep(0.42, 0.75, n1)) * smoothstep(0.38, 0.8, n1) * region * 0.06 * (1.0 + 1.6 * (u_rich - 1.0));
+      #endif
         // unresolved star dust: two scales, denser inside the band, a few coloured
         for (int L = 0; L < 2; L++) {
           float sc = L == 0 ? 260.0 : 520.0;
           vec3 cp = d * sc, sid = floor(cp); float sh = h31(sid + float(L) * 17.0);
           float sr = length(fract(cp) - 0.5 - (vec3(h31(sid + 1.3), h31(sid + 2.7), h31(sid + 4.1)) - 0.5) * 0.6);
+        #if SPACE_BLACK
+          // b7-space-v3b (Shifat 10:48 AM "Reduce stars"): the fine dust 60 % sparser too (cells lit: 1.4 / 2.2 % -> 0.56 / 0.88 %)
+          float th = L == 0 ? 0.9944 : 0.9912;
+        #else
           float th = mix(L == 0 ? 0.986 : 0.978, L == 0 ? 0.9 : 0.84, band * smoothstep(0.3, 0.7, clouds) * (1.0 - lane));
+        #endif
           float star = step(th, sh) * smoothstep(0.26, 0.0, sr) * (0.25 + 0.75 * pow(h31(sid + 9.1), 3.0));
           vec3 sCol = mix(vec3(0.72, 0.8, 1.0), vec3(1.0, 0.86, 0.72), h31(sid + 5.5));
           space += sCol * star * (L == 0 ? 0.55 : 0.3) * (1.0 + 0.6 * (u_rich - 1.0)) * (0.85 + 0.15 * sin(u_time * 1.3 + sh * 60.0));
@@ -93,7 +110,12 @@ export function skyMaterial() {
         // silhouette read as a band. The sky now eases into the same haze colour over the last few degrees above the horizon.
         col = mix(u_hz.rgb, col, mix(1.0, smoothstep(-0.01, 0.075, d.y), u_hz.w));
         // dither: the near-black grades would band on 8-bit screens
+      #if SPACE_BLACK
+        // (on pure black the dither only lifted the black into grain; it now fades in with the picture's own level)
+        col += (h31(vec3(gl_FragCoord.xy, fract(u_time) * 61.0)) - 0.5) * (1.5 / 255.0) * clamp(max(col.r, max(col.g, col.b)) * 400.0, 0.0, 1.0);
+      #else
         col += (h31(vec3(gl_FragCoord.xy, fract(u_time) * 61.0)) - 0.5) * (1.5 / 255.0);
+      #endif
         gl_FragColor = vec4(max(col, 0.0), 1.0);
       }`,
   })

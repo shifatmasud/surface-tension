@@ -56,6 +56,7 @@ export type Inner = {
 }
 const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3()
 
+const TUN_OLDEXIT_T = typeof location !== 'undefined' && /[?&]tunexit=old\b/.test(location.search)
 export function inner(p: number, out: Inner, portrait = false) {
   // ---- crewmate
   const fall = easeIO(seg(p, 0.22, T.LAND))
@@ -83,7 +84,15 @@ export function inner(p: number, out: Inner, portrait = false) {
   // the crewmate is the same size through the glass, through the portal push and inside
   const far = mix(1.5, 1.0, ss(0.1, 0.3, p))
   const offSpace = _a.set(Math.sin(a) * 6.2 * far, 1.1 * far, Math.cos(a) * 6.2 * far)
-  const offFall = _b.set(2.6, 0.6, 6.8)
+  // b7-tunnel-v2d (root 12:25: "the treeline visible through the mouth across 66-70 %"): out of the tube the camera was
+  // level with the crewmate at ~55 m, so the forest sat below the frame and the exit was a dark dusk gap. It now rises
+  // (v2d 2.2 m; v2f 1.8 m, see below) above the crewmate as the mouth comes in (p 0.26 -> 0.32) and looks down ~15 deg onto it, so the treeline and
+  // the land come up through the mouth; the landing orbit (offLand, p 0.38 -> 0.52) takes it back down exactly as before.
+  // ?tunexit=old = the old level camera (A/B)
+  // v2f (Tester cost: 70 % was x1.25, the foliage/ground pass 575 -> 844 because the raised camera saw land + trees all the
+  // way down): a smaller rise (1.8 m, ~12 deg down) that holds through the mouth and settles back to the old level camera
+  // by p 0.385 (~69 %), so from ~69.5 % on the frame (and its cost) is exactly live's
+  const offFall = _b.set(2.6, 0.6 + (TUN_OLDEXIT_T ? 0 : 1.8 * ss(0.26, 0.32, p) * (1 - ss(0.33, 0.385, p))), 6.8)
   const offLand = _c.set(mix(0, -1.3, easeIO(seg(p, 0.52, 0.74))), mix(0.2, 0.3, seg(p, 0.52, 0.74)), mix(7.6, 7.0, easeIO(seg(p, 0.52, 0.74))))
   const off = offSpace.lerp(offFall, ss(0.22, 0.36, p)).lerp(offLand, ss(0.38, 0.52, p))
   const anchor = _b.set(out.crew.x, alt + 0.85, Math.min(walkZ, 0)) // camera does not follow the walk: it comes to us

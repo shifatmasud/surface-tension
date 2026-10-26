@@ -12,7 +12,7 @@ import { makeEnvs, makeEnvsSteps } from './env'
 import { CrewLayer } from './crewLayer' // R6.87 SPLIT: the crewmate at the canvas density
 import { heroPass } from '../../post/heroPass'
 import { SPLIT } from '../../quality'
-import { buildSpaceSky, SkyExtras, SPACE_LIGHT, starPrFor, isSharedSkyGeometry, JOURNEY_LENS, journeyVisibleTan, glideOffset, glideT, GLIDE_PRE, glideStartBack, SPACE_RICH } from './spaceSky' // R6.87: ONE sky (the journey's), shared
+import { buildSpaceSky, SkyExtras, EarthMoon, EM_PLACE, SPACE_LIGHT, starPrFor, isSharedSkyGeometry, JOURNEY_LENS, journeyVisibleTan, glideOffset, glideT, GLIDE_PRE, glideStartBack, SPACE_RICH } from './spaceSky' // R6.87: ONE sky (the journey's), shared
 import { warmSteps as prewarmSteps, prewarm, runToEnd } from '../../prewarm' // PERFGOV
 
 /**
@@ -66,7 +66,7 @@ uniform vec2 u_texel;
 uniform vec2 u_win;       // window half extents
 uniform float u_time, u_on, u_sweep, u_fill, u_live, u_sheen, u_rot;
 uniform float u_heroA;
-uniform sampler2D u_crew; uniform vec2 u_crewScale; // R6.87: the crewmate at the canvas density (crewLayer.ts)
+uniform sampler2D u_crew; uniform vec2 u_crewScale; uniform vec4 u_crewBox; // R6.87: the crewmate at the canvas density (crewLayer.ts)
 varying vec2 vUv; varying vec3 vWP; varying vec3 vWN;
 float sdBox(vec2 p, vec2 b, float r){ vec2 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r; }
 void main(){
@@ -80,6 +80,10 @@ void main(){
   wu = clamp(wu, u_texel * 0.5, 1.0 - u_texel * 0.5);
 #ifdef CREW_ONLY
   // R6.87 SPLIT: the overlay (hero pass) — the crewmate alone, same mapping, same glass on top; alpha = its coverage
+  // b7-space-v3: only this frame's crewmate box can show (u_crewBox: crewLayer uvBox, the drawn part's uv). Texels of the
+  // crewmate target outside it (a part this frame did not draw, or an earlier, larger draw past the drawn part) never
+  // reach the glass: those were the clipped partial crewmate copies on black rectangles in Shifat's tablet shot
+  if (wu.x < u_crewBox.x || wu.y < u_crewBox.y || wu.x > u_crewBox.z || wu.y > u_crewBox.w) discard;
   vec4 cr = texture2D(u_crew, wu * u_crewScale);
   if (cr.a < 0.003) discard;
   vec3 img = cr.rgb / cr.a * u_live;
@@ -105,16 +109,10 @@ void main(){
   float glass = 1.0 - u_fill;
   c += envc * F * 1.4 * glass;
   c += film * 0.022 * pow(1.0 - ndv, 1.5) * glass * u_sheen;
-  // a thin specular streak that slides with the viewing angle (so it reads as ON the glass, over the depth behind it);
-  // additive on the dark of space only, so it never greys the subject; gone before the picture fills the frame
-  float lum = dot(img, vec3(0.299, 0.587, 0.114));
-  float sh = exp(-pow((lp.x + lp.y * 0.8 - 0.25 + (V.x - V.y) * 0.9) / 0.06, 2.0));
-  c += vec3(0.07) * sh * u_sheen * (1.0 - smoothstep(0.02, 0.25, lum)) * mix(0.3, 1.0, inS);
+  // b7-space-v3 (Shifat 10:48 AM Oct 26, his tablet screenshot): the diagonal specular streak that was here read as a
+  // grey stripe across black space. Removed, and so is the caustic sweep glint below; the space stays pure black.
   // the display edge: a soft inner vignette where the cover glass meets the bezel (no stroke)
   c *= mix(1.0, mix(0.6, 1.0, smoothstep(0.0, 0.012, -scr)), inS * glass);
-  // the stone's caustic light passes across the glass (the light hand-off): a narrow glint, on the dark of space only
-  float sw = exp(-pow((vUv.x + vUv.y * 0.35 - u_sweep) * 26.0, 2.0));
-  c += vec3(0.55, 0.75, 1.0) * sw * 0.07 * glass * u_sheen * (1.0 - smoothstep(0.02, 0.25, lum));
   // CINEMATIC three-point (Shifat 18:50Z), no new lights: the key is the surface softbox in the glass above; the RIM is the
   // glass's bevelled edge catching the surface light from behind/above (strongest along the top, so the black slab
   // separates from the dark water); the FILL is a faint teal lift of the black bezel from the lens side
@@ -152,6 +150,7 @@ export class TabletWindow {
   private extras: SkyExtras
   /** R6.87 SPLIT: the crewmate's own target + the glass's crew-only twin */
   private crewL: CrewLayer | null = null
+  private em!: EarthMoon   // b7-space-v3
   private crewMat: THREE.ShaderMaterial | null = null
   private overlay: THREE.Mesh | null = null
   private offHero = () => {}
@@ -208,7 +207,7 @@ export class TabletWindow {
     })
     // R6.87 SPLIT: the crewmate is drawn out of the background target into its own, at the canvas density, and the glass's
     // twin (same geometry, same uniforms, CREW_ONLY) draws it in the hero pass over the low-res glass
-    this.material.uniforms.u_crew = { value: null }; this.material.uniforms.u_crewScale = { value: new THREE.Vector2(1, 1) }
+    this.material.uniforms.u_crew = { value: null }; this.material.uniforms.u_crewScale = { value: new THREE.Vector2(1, 1) }; this.material.uniforms.u_crewBox = { value: new THREE.Vector4(0, 0, 0, 0) }
     if (SPLIT) {
       this.crewL = new CrewLayer(); CrewLayer.depthFor(this.rt)
       this.material.uniforms.u_crew.value = this.crewL.rt.texture
@@ -219,7 +218,13 @@ export class TabletWindow {
       this.screen.add(this.overlay)
       // the hero pass touches only the crewmate's part of the glass (its uv in the drawn rectangle → the glass's plane)
       const ov = this.overlay, cl = this.crewL, R = this.material.uniforms.u_rect.value as THREE.Vector4
-      ov.userData.heroRect = (cam: THREE.Camera) => cl.rectOn(ov, cam, (u, v, o) => o.set(R.x + u * (R.z - R.x), R.y + v * (R.w - R.y), 0))
+      // b7-space-v3: R is in the glass's VIEW frame; an upright (phone) tablet's view point (x, y) is the glass point
+      // (y, -x) (the inverse of update()'s (gx, gy) -> (-gy, gx)), so the hero rect is now taken on the rotated glass
+      const U = this.material.uniforms.u_rot
+      ov.userData.heroRect = (cam: THREE.Camera) => cl.rectOn(ov, cam, (u, v, o) => {
+        const x = R.x + u * (R.z - R.x), y = R.y + v * (R.w - R.y)
+        return U.value > 0.5 ? o.set(y, -x, 0) : o.set(x, y, 0)
+      })
       this.offHero = heroPass.add(this.overlay)
       // R6.89 (Shifat Oct 23 3:56 AM "treat tab dpr same as hero too"): the glass itself (its thin black bezel and the
       // display's edge, which read jagged at the background's 0.5–0.75) has a twin in the hero pass: same geometry, same
@@ -256,6 +261,8 @@ export class TabletWindow {
     this.extras = new SkyExtras()
 
     sc.add(this.sky, this.stars, this.extras.rocks, this.crew.root, this.extras.dust, hemi, rig)
+    // b7-space-v3: Earth + one tiny moon, in the sky (spaceSky.ts EarthMoon), the same as the journey's
+    this.em = new EarthMoon(gl); this.stars.add(this.em.group)
 
     this.screen.material = this.material
     this.src.addEventListener('dispose', this.onSrcDispose)
@@ -303,6 +310,7 @@ export class TabletWindow {
     this.winC.copy(eye).addScaledVector(fwd, dWin)
     // the sky's rocks + dust: laid out once per viewport by the shared sky (the journey's space places them identically)
     this.extras.layout(isPortrait, W, H)
+    this.em.place(isPortrait, W / Math.max(1, H))   // b7-space-v3
     // light rig follows the crewmate
     this.scene.getObjectByName('rig')!.position.copy(I.crew)
     this.cam.quaternion.setFromRotationMatrix(this.basis)
@@ -395,8 +403,12 @@ export class TabletWindow {
     // first dive frame (scrolling back up) redraws in full before the slab is shown (the stage is set before the frame runs).
     if (!nb.active && props.stage !== 'dive') {
       this.stats.drawn = false; this.sigOk = false
+      if (this.overlay) this.overlay.visible = false   // b7-space-v3: never leave a neighbour pass's crewmate overlay up
       return
     }
+    // b7-space-v3: a neighbour pass that ticked the tablet (its own camera, its own scale) leaves the targets and the
+    // shared uniforms with its picture, whichever way it returned; the main pass that follows always redraws in full
+    if (nb.active) this.sigOk = false
     const t0 = performance.now()
     const screen = this.screen, tablet = screen.parent as THREE.Object3D
     const camP = camera as THREE.PerspectiveCamera
@@ -531,6 +543,12 @@ export class TabletWindow {
     this.cam.projectionMatrixInverse.copy(this.cam.projectionMatrix).invert()
     this.cam.updateMatrixWorld(true)
     this.sky.position.copy(this.cam.position); this.stars.position.copy(this.cam.position)
+    // b7-space-v3b: Earth + Moon sit at fixed spots of the glass's display (low-left, with margin: EM_PLACE in fractions of
+    // the display's half extents), seen through this portal camera, then hand over to the journey's places as h -> 1
+    { const P = isPortrait ? EM_PLACE.tall : EM_PLACE.wide
+      const nx = (fx: number) => ((fx * WX - x0) / Math.max(1e-6, x1 - x0)) * 2 - 1, ny = (fy: number) => ((fy * WY - y0) / Math.max(1e-6, y1 - y0)) * 2 - 1
+      const tanPerUnit = (tp - b) / Math.max(1e-6, y1 - y0)   // the picture's vertical tan per glass unit
+      this.em.aim(this.cam, [nx(P.e[0]), ny(P.e[1])], P.er * WY * tanPerUnit, [nx(P.m[0]), ny(P.m[1])], P.mr * WY * tanPerUnit, h) }
     // ---- animate the world (time-driven drift; frozen under reduced motion, still 3D by the parallax; settles at the hand-off)
     const time = this.reduced ? 0 : props.time
     const drift = (this.reduced ? 0 : 1) * (1 - h)
@@ -545,6 +563,7 @@ export class TabletWindow {
     this.skyMat.uniforms.u_time.value = time
     this.starMat.uniforms.u_time.value = time; this.starMat.uniforms.u_pr.value = pr
     this.glintMat.uniforms.u_time.value = time; this.glintMat.uniforms.u_pr.value = pr
+    this.em.update(time, 1)   // b7-space-v3
     // ---- nothing moved (reduced motion, a still scroll and pointer): the target already holds this picture
     const S = this.sig, cm = camP.matrixWorld.elements, smw = screen.matrixWorld.elements
     let same = this.sigOk && !nb.active
@@ -567,7 +586,8 @@ export class TabletWindow {
     // journey's opening (SPACE_RICH) with no dim in between; the crewmate and rocks keep the old gain exactly
     { const mu = this.material.uniforms, g0 = 0.35 + 1.4 * mu.u_on.value, f = mu.u_fill.value
       const gain = g0 + (1 - g0) * f
-      this.skyMat.uniforms.u_rich.value = gain > 1e-3 ? (g0 + (SPACE_RICH - g0) * f) / gain : 1 }
+      this.skyMat.uniforms.u_rich.value = gain > 1e-3 ? (g0 + (SPACE_RICH - g0) * f) / gain : 1
+      this.em.setGain(gain > 1e-3 ? 1 / gain : 1) }   // b7-space-v3b: Earth + Moon on screen = the journey's (the glass's glow no longer washes them out)
     gl.render(this.scene, this.cam)
     if (split) this.crew.root.visible = true
     gl.autoClear = prevAuto
@@ -580,6 +600,7 @@ export class TabletWindow {
       if (big > lim) { cw *= lim / big; ch *= lim / big }
       this.crewL.render(gl, this.scene, this.cam, this.crew.root, this.rt, this.v2.set(w / this.cap, hh / this.cap), cw, ch)
       ;(u.u_crewScale.value as THREE.Vector2).copy(this.crewL.scale)
+      ;(u.u_crewBox.value as THREE.Vector4).copy(this.crewL.uvBox)   // b7-space-v3: the overlay shows this box only
     }
     if (this.overlay) this.overlay.visible = split
     u.u_rect.value.set(x0, y0, x1, y1)
@@ -601,7 +622,7 @@ export class TabletWindow {
     if (this.overlay) { this.offHero(); this.overlay.parent?.remove(this.overlay); this.crewMat?.dispose(); this.crewL?.dispose() }
     if (this.twin) { this.twin.parent?.remove(this.twin); this.twinMat?.dispose(); this.twin = null }
     this.scene.traverse((o: any) => { if (o.geometry && !isSharedSkyGeometry(o.geometry)) o.geometry.dispose() }) // R6.87: the sky's buffers are shared with the journey
-    this.skyMat.dispose(); this.starMat.dispose(); this.glintMat.dispose(); this.extras.dispose()
+    this.skyMat.dispose(); this.starMat.dispose(); this.glintMat.dispose(); this.extras.dispose(); this.em.dispose()
     this.crewMats.body.dispose(); this.crewMats.visor.dispose()
     if (this.envs) { this.envs.space.dispose(); this.envs.page.dispose() }
   }

@@ -16,10 +16,20 @@ import { buildSunFan, buildMist, buildMotes } from './forestFx'
 import { buildFoliageSteps, GROUND_U } from './foliage' // FOLIAGE HOOK (foliage helper): fluffy grass + trees
 import { runToEnd, prewarm, type CompileJob } from '../../prewarm' // PERFGOV
 import { buildFireflies, buildCanopy } from './nightFx'
-import { buildTunnel, buildTunnelLights } from './tunnel'
+import { buildTunnel, buildTunnelLights, tunnelZoneColor } from './tunnel'
+/** b7-tunnel-v2: ?tunexit=old = the old exit (fade-out + white flash) for A/B */
+const QHIDE = typeof location !== 'undefined' ? (location.search.match(/[?&]qhide=([a-z,]+)/)?.[1] ?? '') : ''
+const TUN_OLDEXIT = /[?&]tunexit=old\b/.test(location.search)
+const CREW_RIM0 = new THREE.Color('#7fdcff'), _zc = new THREE.Color()
 import { buildTunnelBlur } from './tunnelBlur' // TUNNEL DRAMA: half-res zoom blur
 const ROCK_HI = settings.TIER === 'low' && !/[?&]rocklo\b/.test(location.search)   // R7.10 b7
 let _rockL: CrewLayer | null = null
+/** R7.11 space-v1 (Shifat 9:48 AM Oct 26, PC video of Playable Worlds: the crewmate and the red planet smeared into ghost copies
+ *  while moving): once the glass cracks the crewmate is in the inner picture, and the TUNNEL DRAMA zoom blur (6-10 discrete
+ *  taps toward the vanishing point, mixed in up to 65 % with distance from it) plus the chromatic split laid offset copies of
+ *  every object off-centre. Both are off: objects and stars stay crisp; the warp flash and the tunnel's own lines carry the
+ *  speed. Cheaper: the blur pass no longer runs. ?tsmear=1 = b5 */
+const TUNNEL_SMEAR = typeof location !== 'undefined' && /[?&]tsmear=1\b/.test(location.search)
 const rockLayer = () => (_rockL ??= new CrewLayer(13))   // R7.10 b7: the rocks' own layer (13: not the crewmate's 12)
 const OLDT = typeof location !== 'undefined' && /[?&]oldtrans/.test(location.search) // R7.04 QA: ?oldtrans = 7.03 transitions
 
@@ -41,7 +51,7 @@ function horizonColor(a: number, out: THREE.Color) {
 import { buildCta, WALL_Z } from './ctaScene'
 import { screenMaterial, backdropMaterial, SUN_DIR } from './shaders'
 const QA_J = typeof location !== 'undefined' && /[?&]qa\b/.test(location.search)
-import { buildSpaceSky, SkyExtras, SPACE_LIGHT, starPrFor, isSharedSkyGeometry, JOURNEY_LENS, glideOffset, SPACE_RICH } from './spaceSky' // R6.87 SINGLE SKY
+import { buildSpaceSky, SkyExtras, EarthMoon, SPACE_LIGHT, starPrFor, isSharedSkyGeometry, JOURNEY_LENS, glideOffset, SPACE_RICH } from './spaceSky' // R6.87 SINGLE SKY
 import { buildShatterGeometry, shatterMaterial, buildGlints } from './shatter'
 import { inner, outer, T, type Inner, type Outer } from './timeline'
 import { journeyAudio, resetJourneyAudio } from './journeyAudio'
@@ -245,6 +255,7 @@ export function JourneyStage(): JSX.Element {
     S.starMat.uniforms.u_opacity.value = I.stars; S.starMat.uniforms.u_time.value = time
     S.glintMat.uniforms.u_opacity.value = I.stars; S.glintMat.uniforms.u_time.value = time
     S.stars.visible = I.stars > 0.001
+    S.em.place(portrait, W / Math.max(1, H)); S.em.update(time, I.stars)   // b7-space-v3: Earth + moon leave with the stars
     // R6.87 SINGLE SKY: the rocks + dust the glass showed, where it showed them, on the same clock; they leave with space
     // (gone before the tunnel opens at 0.12)
     S.skyExtras.layout(portrait, W, H)
@@ -270,8 +281,32 @@ export function JourneyStage(): JSX.Element {
     {
       const u = Math.min(1, Math.max(0, (p - 0.12) / 0.19))
       const tu = S.tunnel.material.uniforms
-      const inn = ss(0.0, OLDT ? 0.2 : 0.34, u), out = 1 - ss(0.8, 1.0, u) // R7.04: the bore opened over ~250 px (dark → full glow in 2 phone notches); now ~1.7x longer
-      tu.u_on.value = Math.min(inn, out)
+      const inn = ss(0.0, OLDT ? 0.2 : 0.34, u) // R7.04: the bore opened over ~250 px (dark → full glow in 2 phone notches); now ~1.7x longer
+      // b7-tunnel-v2 EXIT (Shifat 10:44 AM "tunnel out & landing on forest is realistic. Not jump cut or fade"): the tube no
+      // longer fades out. Its open MOUTH comes down the bore toward the lens (u 0.66 → 1): the sky and, from p ≈ 0.27, the
+      // treeline show through it, the last 18 m of wall flare open, and the camera flies out of it on its own unbroken path
+      // (inner(): the fall eases down to the clearing at p 0.5). Nothing cuts, nothing fades the picture, no white flash.
+      const mk = ss(0.66, 1.0, u)
+      tu.u_mouth.value = mk <= 0 ? 1e4 : mix(S.tunnel.uniforms.u_len.value + 10, -2, Math.pow(mk, 1.35))
+      // b7-tunnel-v2h ROOT CAUSE of the 66.5 % glow (Tester ?qhide: v2f 34.7, rings off 27.2): a ring OVERLAY hoop
+      // spanning the frame. At 66.5 % the tube is at u ~0.94 and the mouth is still ~25 m down the bore, so v2f's u_mouth
+      // fade (inside 22 m) never reached it; v2g's per-ring depth fade is reverted. Now the ring overlays fade out as the
+      // exit starts (u 0.74 -> 0.80, ~65.3 -> 65.6 %) and stay out through the mouth; the wall's painted rings, the
+      // streaks and the dots carry the tube to the end. ?tunexit=old keeps them
+      // b7-tunnel-v2k: v2h's u-keyed fade changed nothing in the Tester's frames (v2h == v2f at 66.5 %), so the overlay is now
+      // ALSO keyed on the page scroll itself (props.scrollProgress = scroll / scrollHost.max(), the fraction the Tester sets):
+      // the rings fade 65.3 -> 65.6 % of the page and stay out through the exit, whichever key comes first. ?tunexit=old keeps them.
+      // QA probes (plain numbers, no allocation): __tunU, __journeyP, __pageP (+ __pageY / __pageMax px, __ringOn)
+      const pg = props.scrollProgress
+      tu.u_ringOn.value = TUN_OLDEXIT ? 1 : Math.min(1 - ss(0.74, 0.8, u), 1 - ss(0.653, 0.656, pg))
+      // b7-tunnel-v2l: the WALL's painted rings (not the overlays) were the 66.5 % band; they + their glow fade u 0.80 -> 0.84
+      // (~66.1 -> 66.3 % page) and stay out to the mouth. ?tunexit=old keeps them. Probe: __wallRing
+      tu.u_wallRing.value = TUN_OLDEXIT ? 1 : 1 - ss(0.8, 0.84, u)
+      { const w = window as any; w.__tunU = u; w.__journeyP = p; w.__pageP = pg; w.__pageY = props.scroll; w.__pageMax = props.scrollLimit; w.__ringOn = tu.u_ringOn.value; w.__wallRing = tu.u_wallRing.value }
+      tu.u_build.value = ss(0.0, 0.3, u)                                          // the tube lights up far → near as it forms
+      ;(tu.u_outCol.value as THREE.Color).copy((S.inner.fog as THREE.Fog).color) // the outside light on the lip (last frame's haze: the sky's horizon)
+      tu.u_on.value = TUN_OLDEXIT ? Math.min(inn, 1 - ss(0.8, 1.0, u)) : inn
+      if (TUN_OLDEXIT) tu.u_mouth.value = 1e4
       tu.u_stretch.value = Math.min(ss(0.0, OLDT ? 0.28 : 0.4, u), 1 - ss(0.74, 1.0, u))  // stars stretch into streaks, then back to points
       tu.u_travel.value = u * 900 + time * 6                                     // the rush is the scroll; a slow shimmer on top
       tu.u_phase.value = u * 5.0; tu.u_bend.value = 0.6 + 0.4 * Math.sin(u * Math.PI)
@@ -286,7 +321,15 @@ export function JourneyStage(): JSX.Element {
       tu.u_hue.value = u * 0.9 + time * 0.01
       tu.u_pulse.value = 0.6 + 0.4 * Math.sin(tu.u_travel.value * 0.15)
       const vis = u > 0 && u < 1
-      S.tunnel.mesh.visible = vis; S.tunnelLights.orbs.visible = vis; S.tunnelLights.rings.visible = vis
+      S.tunnel.mesh.visible = vis; S.tunnelLights.orbs.visible = vis; S.tunnelLights.rings.visible = vis && tu.u_ringOn.value > 0.001   // v2h: no ring draw once they're out
+      if (QHIDE) { if (QHIDE.includes('wall')) S.tunnel.mesh.visible = false; if (QHIDE.includes('dots')) S.tunnelLights.orbs.visible = false; if (QHIDE.includes('rings')) S.tunnelLights.rings.visible = false }   // v2g QA: ?qhide=rings,wall,dots (per-layer A/B for the Tester)
+      // b7-tunnel-v2: the crewmate's Fresnel rim takes the zone's colour inside the tube (and goes back to its own outside)
+      { const rim = S.innerMats.body.userData.rim as { u_crewRim: { value: number }; u_crewRimCol: { value: THREE.Color } } | undefined
+        if (rim) {
+          const k = vis ? tu.u_on.value * (1 - ss(0.66, 1.0, u)) : 0
+          tunnelZoneColor(tu.u_hue.value, _zc)
+          rim.u_crewRimCol.value.copy(CREW_RIM0).lerp(_zc, k); rim.u_crewRim.value = 0.32 + 0.3 * k
+        } }
       if (vis) {
         S.tunnel.mesh.position.copy(S.icam.position); S.tunnel.mesh.quaternion.copy(S.icam.quaternion)
         S.tunnelLights.orbs.position.copy(S.icam.position); S.tunnelLights.orbs.quaternion.copy(S.icam.quaternion)
@@ -299,7 +342,8 @@ export function JourneyStage(): JSX.Element {
       const ur = (p - 0.12) / 0.19
       // R7.04: the in-flash rose over ~45 px (a strobe on a fling); it rises over ~85 px now, a beat later
       const fIn = (ur - (OLDT ? 0.07 : 0.1)) / (ur < (OLDT ? 0.07 : 0.1) ? (OLDT ? 0.035 : 0.065) : 0.06), fOut = (ur - 0.9) / (ur < 0.9 ? 0.04 : 0.07)
-      const flash = (ur > -0.2 && ur < 1.4) ? Math.exp(-fIn * fIn) * 0.32 + Math.exp(-fOut * fOut) * 0.28 : 0
+      // b7-tunnel-v2: no flash on the way OUT (the mouth carries the exit); the way-in flash stays
+      const flash = (ur > -0.2 && ur < 1.4) ? Math.exp(-fIn * fIn) * 0.32 + (TUN_OLDEXIT ? Math.exp(-fOut * fOut) * 0.28 : 0) : 0
       S.tunnelFx.zoom = vis ? tu.u_stretch.value * tu.u_on.value * (0.35 + 0.65 * S.rush) + flash * 0.6 : 0
       S.tunnelFx.chroma = vis ? 0.028 * tu.u_stretch.value * (0.25 + 0.75 * S.rush) + flash * 0.03 : 0
       S.tunnelFx.flash = flash
@@ -462,7 +506,8 @@ export function JourneyStage(): JSX.Element {
     su.u_bulge.value = O.bulge; su.u_width.value = O.width; su.u_center.value.copy(O.center)
     su.u_ringT.value = O.ringT; su.u_ringAmp.value = O.ringAmp; su.u_bright.value = O.screenBright
     su.u_time.value = time; su.u_gloss.value = O.gloss
-    su.u_zoom.value = S.tunnelFx.zoom; su.u_chroma.value = S.tunnelFx.chroma; su.u_flash.value = S.tunnelFx.flash
+    // R7.11 space-v1: no smear / split (see TUNNEL_SMEAR); the warp flash stays
+    su.u_zoom.value = TUNNEL_SMEAR ? S.tunnelFx.zoom : 0; su.u_chroma.value = TUNNEL_SMEAR ? S.tunnelFx.chroma : 0; su.u_flash.value = S.tunnelFx.flash
     su.u_zoomC.value.set(S.tunnelFx.cx, S.tunnelFx.cy)
     S.backdropMat.uniforms.u_amount.value = O.gloss
     // the backdrop always sits square behind what the REAL camera looks at (the rig damps toward journey.pose, so on
@@ -546,7 +591,7 @@ export function JourneyStage(): JSX.Element {
       }
       if (S.crewScreen) S.crewScreen.visible = split
       // TUNNEL DRAMA: the half-res zoom blur of that picture, only while the tunnel wants it (tunnelBlur.ts)
-      if (S.tunnelFx.zoom > 0.005) {
+      if (TUNNEL_SMEAR && S.tunnelFx.zoom > 0.005) {
         const bu = S.tunnelBlur.material.uniforms
         bu.u_amt.value = 0.3 * Math.min(1, S.tunnelFx.zoom); bu.u_c.value.set(S.tunnelFx.cx, S.tunnelFx.cy)
         S.tunnelBlur.render(gl)
@@ -654,6 +699,8 @@ export function* buildSteps(gl: THREE.WebGLRenderer, portrait: boolean, low: boo
   const SK = buildSpaceSky(starPrFor(rt.width, props.dpr))
   const { sky, skyMat, stars, starMat, glintMat } = SK
   const skyExtras = new SkyExtras()
+  // b7-space-v3: Earth + one tiny moon in the sky (spaceSky.ts EarthMoon), the same as the dive tablet's glass shows
+  const em = new EarthMoon(gl); stars.add(em.group)
   yield // PERFGOV
 
   // Lambert: matte foliage with no grazing sheen against the low sun (and cheaper on phones)
@@ -797,11 +844,11 @@ export function* buildSteps(gl: THREE.WebGLRenderer, portrait: boolean, low: boo
 
   const keep = new Set<THREE.BufferGeometry>([crewIn.body.geometry, crewIn.visor.geometry, (crewIn.legL.children[0] as THREE.Mesh).geometry])
   const dispose = () => {
-    rt.dispose(); Object.values(envs).forEach((t) => t.dispose()); crewL?.dispose()
+    rt.dispose(); Object.values(envs).forEach((t) => t.dispose()); crewL?.dispose(); em.dispose()
     ;[innerScene, outerG].forEach((root) => root.traverse((o: any) => { if (o.geometry && !keep.has(o.geometry) && !isSharedSkyGeometry(o.geometry)) o.geometry.dispose?.(); if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m: any) => m.dispose()) }))
   }
   return {
-    sw, sh, rt, envs, inner: innerScene, skyExtras, crewL, crewScreen, screen, fireflies, canopy, tunnel, tunnelLights, tunnelBlur, rush: 0, tunnelFx: { zoom: 0, chroma: 0, flash: 0, cx: 0.5, cy: 0.5 }, grass, foliage, fan, mist, motes, treeRim, icam, bcam, sky, skyMat, stars, starMat, glintMat, forest, crewIn, innerMats, shadow, shadowMat, hemi, sun, rim, lightRig,
+    sw, sh, rt, envs, inner: innerScene, skyExtras, em, crewL, crewScreen, screen, fireflies, canopy, tunnel, tunnelLights, tunnelBlur, rush: 0, tunnelFx: { zoom: 0, chroma: 0, flash: 0, cx: 0.5, cy: 0.5 }, grass, foliage, fan, mist, motes, treeRim, icam, bcam, sky, skyMat, stars, starMat, glintMat, forest, crewIn, innerMats, shadow, shadowMat, hemi, sun, rim, lightRig,
     outer: outerG, cta, rimU, bezelU, ctaKey: '', par: new THREE.Vector2(), backdrop, backdropMat, screenMat, crewOut, shards, shardMat, shardKey: '', tier, glints, c, I, IB, O, lastP: -1,
     tmp: new THREE.Vector3(), tmp2: new THREE.Vector3(), o3: new THREE.Object3D(), one: new THREE.Vector2(1, 1), dispose,
   }

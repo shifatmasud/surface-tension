@@ -468,32 +468,19 @@ void main(){
   vec2 uv = vUv;
   // W18: the same night the journey opens on (near-black space, a faint cool band of stars) so the hand-off is one push
   vec3 c = mix(vec3(0.004, 0.005, 0.012), vec3(0.010, 0.012, 0.026), smoothstep(0.0, 1.0, uv.y));
-  c += vec3(0.035, 0.045, 0.08) * exp(-pow((uv.y - 0.25 - uv.x * 0.6) * 4.0, 2.0)) * 0.6;
+  // b7-space-v3: no Milky Way band (the space is pure black, as in the journey: SPACE_BLACK)
   for (int L = 0; L < 3; L++) {
     float s = 40.0 + float(L) * 38.0;
     vec2 g = uv * vec2(s * 1.45, s) + float(L) * 7.1; vec2 id = floor(g), f = fract(g) - 0.5;
     float r = h21(id); float tw = 0.6 + 0.4 * sin(u_time * (1.0 + r * 3.0) + r * 40.0);
-    c += vec3(0.9, 0.95, 1.0) * step(0.93, r) * smoothstep(0.12, 0.0, length(f + (vec2(h21(id + 3.1), h21(id + 7.7)) - 0.5) * 0.6)) * tw * (1.2 - float(L) * 0.3);
+    c += vec3(0.9, 0.95, 1.0) * step(0.972, r) * smoothstep(0.12, 0.0, length(f + (vec2(h21(id + 3.1), h21(id + 7.7)) - 0.5) * 0.6)) * tw * (1.2 - float(L) * 0.3);
   }
-  // the crewmate, small, drifting (body, backpack, visor)
-  // where the journey's crewmate sits at its first frame: the left third on wide screens, centred on phones
-  vec2 p = (uv - vec2(mix(0.417, 0.5, u_portrait) + 0.008 * sin(u_time * 0.4), 0.5 + 0.01 * sin(u_time * 0.55))) * vec2(1.5, 1.0) * mix(9.1, 6.5, u_portrait);
-  float a = 0.25 * sin(u_time * 0.3); p = mat2(cos(a), -sin(a), sin(a), cos(a)) * p;
-  float body = min(sdBox(p, vec2(0.42, 0.62), 0.38), sdBox(p - vec2(-0.5, 0.0), vec2(0.16, 0.36), 0.14));
-  float legs = sdBox(p - vec2(0.0, -0.66), vec2(0.4, 0.2), 0.12);
-  float b2 = min(body, legs);
-  vec3 red = vec3(0.86, 0.09, 0.08) * (0.65 + 0.35 * smoothstep(-0.6, 0.6, p.x + p.y));
-  c = mix(c, red, smoothstep(0.03, -0.03, b2));
-  float vis = sdBox(p - vec2(0.17, 0.2), vec2(0.27, 0.15), 0.14);
-  c = mix(c, mix(vec3(0.55, 0.8, 0.95), vec3(0.95), smoothstep(0.1, 0.25, p.y - 0.12)), smoothstep(0.03, -0.03, vis));
+  // b7-space-v3: no painted crewmate (the portal's real crewmate is the only one; TabletWindow swaps this material out at build)
   // bezel + glass
   float bez = sdBox(uv - 0.5, vec2(0.5), 0.06);
   float scr = sdBox(uv - 0.5, vec2(0.46, 0.44), 0.035);
   c = mix(vec3(0.012), c, smoothstep(0.004, -0.004, scr));
-  c += vec3(0.08) * smoothstep(0.35, 0.0, abs(uv.x + uv.y - 1.1)) * step(scr, 0.0) * (1.0 - u_fill);  // the glass sheen clears as the screen fills the frame
-  // the stone's caustic light passes across the glass (the light hand-off)
-  float sw = exp(-pow((uv.x + uv.y * 0.35 - u_sweep) * 7.0, 2.0));
-  c += vec3(0.55, 0.75, 1.0) * sw * 0.32 * (1.0 - u_fill);
+  // b7-space-v3: no diagonal glass sheen and no caustic sweep (grey diagonal streaks over black space)
   gl_FragColor = vec4(c * mix(0.35 + 1.4 * u_on, 1.0, u_fill), 1.0);
 }`
 function makeTablet(M: Mats) {

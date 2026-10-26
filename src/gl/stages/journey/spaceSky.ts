@@ -45,7 +45,12 @@ export function starGeometry() {
   const MWN = new THREE.Vector3(0.55, 0.83, 0).normalize()
   const mwA = new THREE.Vector3(0, 0, -1), mwB = new THREE.Vector3().crossVectors(MWN, mwA).normalize()
   const N = 6500
-  const sp = new Float32Array(N * 3), ss_ = new Float32Array(N), sc = new Float32Array(N * 3)
+  // b7-space-v3 (Shifat 10:48 AM Oct 26 "Reduce stars"): 60 % fewer. The same 6500-star sequence is generated (so the
+  // glints below and every kept star stay exactly where they were) and 2 of every 5 are kept: 2600 stars, same sizes.
+  const KEEP = (i: number) => i % 5 < 2
+  const NK = Math.ceil(N * 2 / 5)
+  const sp = new Float32Array(NK * 3), ss_ = new Float32Array(NK), sc = new Float32Array(NK * 3)
+  let k = 0
   const temp = [new THREE.Color('#9fbfff'), new THREE.Color('#cadaff'), new THREE.Color('#f4f6ff'), new THREE.Color('#fff4e3'), new THREE.Color('#ffd9a8'), new THREE.Color('#ffb98a')]
   const tw = [0.08, 0.2, 0.36, 0.2, 0.11, 0.05]
   const pickT = () => { let x = r(), i = 0; while (i < tw.length - 1 && x > tw[i]) { x -= tw[i]; i++ } return temp[i] }
@@ -58,14 +63,17 @@ export function starGeometry() {
       const u = r() * 2 - 1, th = r() * Math.PI * 2, s = Math.sqrt(1 - u * u)
       v.set(Math.cos(th) * s, u, Math.sin(th) * s)
     }
-    sp.set([v.x * 600, v.y * 600, v.z * 600], i * 3)
     const m = Math.pow(r(), 5.5)
-    ss_[i] = 0.9 + m * 2.1 + r() * 0.35
+    const size = 0.9 + m * 2.1 + r() * 0.35
     const c = pickT(), b = 0.1 + m * 0.95
-    sc.set([c.r * b, c.g * b, c.b * b], i * 3)
+    if (!KEEP(i)) continue
+    sp.set([v.x * 600, v.y * 600, v.z * 600], k * 3)
+    ss_[k] = size
+    sc.set([c.r * b, c.g * b, c.b * b], k * 3)
+    k++
   }
   const stars = new THREE.BufferGeometry()
-  stars.setAttribute('position', new THREE.BufferAttribute(sp, 3)); stars.setAttribute('aSize', new THREE.BufferAttribute(ss_, 1)); stars.setAttribute('aColor', new THREE.BufferAttribute(sc, 3))
+  stars.setAttribute('position', new THREE.BufferAttribute(sp.subarray(0, k * 3), 3)); stars.setAttribute('aSize', new THREE.BufferAttribute(ss_.subarray(0, k), 1)); stars.setAttribute('aColor', new THREE.BufferAttribute(sc.subarray(0, k * 3), 3))
   const GN = 12
   const gp = new Float32Array(GN * 3), gs = new Float32Array(GN), gc = new Float32Array(GN * 3), ga = new Float32Array(GN)
   for (let i = 0; i < GN; i++) {
@@ -74,13 +82,17 @@ export function starGeometry() {
     if (i === 0) v.set(-0.42, 0.3, -0.86).normalize()
     if (i === 1) v.set(0.5, 0.24, -0.83).normalize()
     gp.set([v.x * 580, v.y * 580, v.z * 580], i * 3)
-    gs[i] = (i < 2 ? 44 : 22 + r() * 16)
+    gs[i] = (i < 2 ? 34 : 22 + r() * 16)   // v2f: heroes 44 -> 34 px
     const c = temp[[0, 1, 2, 2, 3, 4][Math.floor(r() * 6)]], b = i < 2 ? 1.0 : 0.55 + r() * 0.35
     gc.set([c.r * b, c.g * b, c.b * b], i * 3)
     ga[i] = r() * Math.PI
   }
+  // b7-space-v3b (root 11:31: "the star cut barely shows"): the 12 bright glints were never cut and they are what the eye
+  // reads as "the stars". Keep the two hero glints + 3 of the other 10 = 5 of 12 (42 %), same places, sizes and colours
+  const GK = [0, 1, 7]   // v2f (Tester: journey top band 38 vs live 51, v2c 21): 3 of 12, the two heroes a size smaller (below)
+  const pick = (a: Float32Array, w: number) => { const o = new Float32Array(GK.length * w); GK.forEach((g, j) => o.set(a.subarray(g * w, g * w + w), j * w)); return o }
   const glints = new THREE.BufferGeometry()
-  glints.setAttribute('position', new THREE.BufferAttribute(gp, 3)); glints.setAttribute('aSize', new THREE.BufferAttribute(gs, 1)); glints.setAttribute('aColor', new THREE.BufferAttribute(gc, 3)); glints.setAttribute('aAngle', new THREE.BufferAttribute(ga, 1))
+  glints.setAttribute('position', new THREE.BufferAttribute(pick(gp, 3), 3)); glints.setAttribute('aSize', new THREE.BufferAttribute(pick(gs, 1), 1)); glints.setAttribute('aColor', new THREE.BufferAttribute(pick(gc, 3), 3)); glints.setAttribute('aAngle', new THREE.BufferAttribute(pick(ga, 1), 1))
   starGeo = { stars, glints }
   return starGeo
 }
@@ -101,7 +113,7 @@ export function buildSpaceSky(starPr: number) {
 }
 /** shared geometry is never disposed by a scene (the other one may still draw it) */
 export function isSharedSkyGeometry(g: THREE.BufferGeometry) {
-  return g === domeGeo || g === starGeo?.stars || g === starGeo?.glints || g === rockGeo || g === dustGeo
+  return g === domeGeo || g === starGeo?.stars || g === starGeo?.glints || g === rockGeo || g === dustGeo || g === earthGeo || g === moonGeo
 }
 
 /** The journey's star point size for an inner target of this width. R6.87: the scene DPR is floored at 0.6 here (the
@@ -114,6 +126,234 @@ export const SPACE_LIGHT = {
   key: '#ffd2c4', keyI: 2.6, keyPos: [5, 6, 6] as const,
   rim: '#5fd8ff', rimI: 3.4, rimPos: [-6, 3, -7] as const,
   bodyEnv: 1.0, visorEnv: 3.0,
+}
+
+// ---------------------------------------------------------------- Earth + one tiny moon (b7-space-v3)
+// Shifat 10:48 AM Oct 26: "Reduce stars & add earth & 1 tiny moon in this scene." Both live in the shared sky (children
+// of each scene's star object, so they sit at sky distance, follow the camera's position and turn with its view): the
+// tablet's glass and the journey's space show the same Earth at the same place, so they match across the glass.
+// Earth: a 32 x 16 sphere, the day map lit from one side (the space key light's direction), the night side black, and a
+// thin blue Fresnel atmosphere rim in the same shader (no extra pass). Moon: a 16 x 8 sphere, procedural grey noise, the
+// same sun. Opaque-looking, drawn after the stars (transparent list, renderOrder -7/-6) so they cover the stars behind them.
+// Day map: NASA Visible Earth, "Blue Marble: Land Surface, Ocean Color and Sea Ice" (public domain, NASA Goddard),
+//   https://eoimages.gsfc.nasa.gov/images/imagerecords/57000/57730/land_ocean_ice_2048.jpg
+//   resized to 1024 x 512, JPEG q85 = 85 KB -> public/textures/earth-day-1k.jpg
+const EARTH_URL = (((import.meta as any).env?.BASE_URL as string | undefined) ?? '/') + 'textures/earth-day-1k.jpg'
+let earthTex: THREE.Texture | null = null
+let earthGeo: THREE.SphereGeometry | null = null, moonGeo: THREE.SphereGeometry | null = null
+const earthGLs = new Set<THREE.WebGLRenderer>()
+const earthReady = { v: false }
+const earthMats = new Set<THREE.ShaderMaterial>()
+function earthTexture() {
+  if (earthTex) return earthTex
+  const t = new THREE.TextureLoader().load(EARTH_URL, (tx) => {
+    earthReady.v = true
+    earthMats.forEach((m) => { m.uniforms.u_ready.value = 1 })
+    earthGLs.forEach((g) => { try { g.initTexture(tx) } catch { /* the first draw uploads it */ } })   // off the scroll path
+  })
+  t.colorSpace = THREE.SRGBColorSpace
+  t.wrapS = THREE.RepeatWrapping
+  t.anisotropy = 4   // v3b: crisper at its small size (mipmaps are three's default: LinearMipmapLinear)
+  earthTex = t
+  return t
+}
+// b7-tunnel-v2e (Shifat 12:38 "Real 3d model of moon, earth used right?"): the moon's surface is NASA's real colour map,
+// NASA Scientific Visualization Studio "CGI Moon Kit" (LRO LROC WAC colour mosaic, public domain), equirect:
+//   https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lroc_color_poles_1k.jpg
+//   b7-tunnel-v2k: the full 1024 x 512 map (was resized to 512 x 256), JPEG q78 = 73 KB -> public/textures/moon-lroc-1k.jpg
+//   (mipmaps: three's default LinearMipmapLinear; anisotropy 4, below)
+const MOON_URL = (((import.meta as any).env?.BASE_URL as string | undefined) ?? '/') + 'textures/moon-lroc-1k.jpg'
+let moonTex: THREE.Texture | null = null
+const moonReady = { v: false }
+const moonMats = new Set<THREE.ShaderMaterial>()
+function moonTexture() {
+  if (moonTex) return moonTex
+  const t = new THREE.TextureLoader().load(MOON_URL, (tx) => {
+    moonReady.v = true
+    moonMats.forEach((m) => { m.uniforms.u_ready.value = 1 })
+    earthGLs.forEach((g) => { try { g.initTexture(tx) } catch { /* the first draw uploads it */ } })
+  })
+  t.colorSpace = THREE.SRGBColorSpace
+  t.wrapS = THREE.RepeatWrapping
+  t.anisotropy = 4
+  moonTex = t
+  return t
+}
+/** the sun on Earth and Moon: the space key light's direction (SPACE_LIGHT.keyPos), so they are lit like the crewmate */
+const SUN = new THREE.Vector3(5, 6, 6).normalize()
+const EM_VS = /* glsl */ `
+varying vec3 vN; varying vec3 vWP; varying vec2 vUv; varying vec3 vP; varying vec3 vC; varying float vR;
+void main(){
+  vUv = uv; vP = position;
+  // v3b: the mesh is drawn over the true sphere (9 %, the moon's 8 rings), so the analytic limb lies inside it.
+  // v2j: Earth's halo shell goes out to 1.24 R, room for the glow just outside the disc. b7-tunnel-v2k: the moon has no glow
+  // (no atmosphere; v2j's faint glow read as a grey sticker edge all round), so its mesh is back to 1.09 R
+#if defined(HALO)
+  vec4 wp = modelMatrix * vec4(position * 1.24, 1.0);
+#else
+  vec4 wp = modelMatrix * vec4(position * 1.09, 1.0);
+#endif
+  vN = normalize(mat3(modelMatrix) * normal); vWP = wp.xyz;
+  vC = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz; vR = length(modelMatrix[0].xyz);
+  gl_Position = projectionMatrix * viewMatrix * wp;
+}`
+const EM_FS = /* glsl */ `
+uniform sampler2D u_day; uniform vec3 u_sun, u_fill; uniform float u_opacity, u_spin, u_ready, u_gain;
+varying vec3 vN; varying vec3 vWP; varying vec2 vUv; varying vec3 vP; varying vec3 vC; varying float vR;
+// v2j glow (Shifat 2:24 "Use glow on earth & moon. Just like real light bounce"): a thin scattering halo just OUTSIDE the
+// disc, brightest on the sun's side and fading round to faint on the night side (ISS-photo atmosphere); x = (d - R) / R
+float halo(float x, float side){ return exp(-max(x, 0.0) * 18.0) * smoothstep(0.22, 0.0, x) * mix(0.1, 1.0, side); }
+void main(){
+  // v3b: the limb is the TRUE sphere's, anti-aliased analytically: the view ray's distance to the centre against the radius,
+  // feathered over one pixel (fwidth). No MSAA, no extra pass; the low-poly mesh's polygon edge never shows
+  vec3 rd = normalize(vWP - cameraPosition), oc = vC - cameraPosition;
+  float tc = dot(oc, rd);
+  float dr = length(oc - rd * tc);
+  float cover = clamp((vR - dr) / max(fwidth(dr), 1e-5) + 0.5, 0.0, 1.0);
+  // which side of the ball this pixel's limb faces: 1 toward the sun, 0 away
+  float side = smoothstep(-0.55, 0.75, dot(normalize(cameraPosition + rd * tc - vC), u_sun));
+  float hx = (dr - vR) / vR;
+#ifdef HALO
+  // Earth's atmosphere glow: its own additive shell (Earth's disc is opaque), outside the disc only; back faces, so the
+  // part behind the disc fails the depth test and is never shaded
+  if (cover >= 1.0 || hx > 0.22) discard;
+  gl_FragColor = vec4(vec3(0.28, 0.55, 1.0) * 0.55 * halo(hx, side) * (1.0 - cover) * u_gain * u_opacity, 0.0);
+  return;
+#endif
+  if (cover <= 0.0) discard;   // b7-tunnel-v2k: the moon's v2j glow is gone (Earth's is the HALO shell above)
+  // b7-tunnel-v2d: the normal is the TRUE sphere's at the view ray's hit, so the terminator curves round the ball
+  float th = tc - sqrt(max(vR * vR - dr * dr, 0.0));
+  vec3 N = normalize(cameraPosition + rd * th - vC), V = -rd;
+  float ndl = dot(N, u_sun), ndv = clamp(dot(N, V), 0.0, 1.0);
+  // v2j: a SOFT terminator (wrap lighting: day -> night is a gentle gradient over ndl -0.3 .. 0.35, not a cut)
+  float lit = smoothstep(-0.3, 0.35, ndl) * (0.35 + 0.65 * max(ndl, 0.0));
+#ifdef MOON
+  // v2e: NASA's LROC colour map; v2j: EARTHSHINE on the dark part, a soft bluish-grey fill (~13 %) lit from Earth's direction
+  vec3 alb = texture2D(u_day, vUv).rgb;
+  vec3 c = alb * lit * (0.8 + 0.2 * ndv) * 2.0;
+  c += alb * vec3(0.78, 0.86, 1.0) * 0.26 * (0.3 + 0.7 * max(dot(N, u_fill), 0.0)) * (1.0 - lit);
+  gl_FragColor = vec4(c * u_gain, cover * u_opacity);   // b7-tunnel-v2k: the 1 px analytic edge fades straight into space (no grey fringe)
+#else
+  vec3 alb = texture2D(u_day, vec2(vUv.x + u_spin, vUv.y)).rgb * u_ready;
+  vec3 c = alb * lit * 1.45;
+  // v2j: BOUNCE FILL on the night side, a faint cool blue (~10 % of the day side), so the map stays faintly readable
+  c += (alb * vec3(0.6, 0.8, 1.15) * 0.15 + vec3(0.004, 0.009, 0.02)) * (1.0 - lit);
+  // the atmosphere: a thin blue Fresnel rim, bright on the lit limb and faint round the night side (it scatters)
+  float rim = pow(1.0 - ndv, 3.0);
+  c += vec3(0.22, 0.5, 1.0) * rim * mix(0.12, 1.0, smoothstep(-0.3, 0.35, ndl)) * 1.1;
+  c = mix(c, vec3(0.16, 0.3, 0.6) * lit, 0.08 * (1.0 - ndv) * u_ready);
+  gl_FragColor = vec4(c * u_gain * cover, 1.0);   // v2i: opaque, the edge premultiplied over black (the halo shell adds on top)
+#endif
+}`
+function emMaterial(moon: boolean, halo = false) {
+  const m = new THREE.ShaderMaterial({
+    vertexShader: EM_VS, fragmentShader: EM_FS, defines: halo ? { HALO: '' } : moon ? { MOON: '' } : {},
+    uniforms: { u_day: { value: moon ? moonTexture() : earthTexture() }, u_sun: { value: SUN.clone() }, u_fill: { value: new THREE.Vector3(0, 1, 0) }, u_opacity: { value: 1 }, u_spin: { value: 0 }, u_ready: { value: (moon ? moonReady.v : earthReady.v) ? 1 : 0 }, u_gain: { value: 1 } },
+    // v2i: Earth is OPAQUE and drawn before the dome (renderOrder -11 < -10), writing depth, so at 3x its size the dome's
+    // fragments behind it are rejected by the depth test instead of shaded and then covered (the cost stays flat). Its
+    // 1 px analytic edge is premultiplied over black (space is black there); it hides rather than fades (update).
+    // v2j: Earth's glow is its own additive back-face shell (HALO); the moon draws its faint glow in its own pass-free draw
+    ...(halo ? { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.BackSide }
+             : { transparent: moon, depthWrite: !moon }),
+    fog: false, toneMapped: false,
+  })
+  if (!moon && !halo) earthMats.add(m); else if (moon) moonMats.add(m)
+  return m
+}
+const _EMI: Inner = { crew: new THREE.Vector3(), yaw: 0, pitch: 0, roll: 0, walk: 0, phase: 0, float: 0, squash: 0, visible: true, cam: new THREE.Vector3(), look: new THREE.Vector3(), fov: 42, atmos: 0, stars: 1, shadow: 0 }
+const _f = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3(), _d = new THREE.Vector3(), _f2 = new THREE.Vector3()
+/** Earth's and the Moon's place in the journey's opening frame (NDC of the visible lens): wide screens put Earth low on
+ *  the left, under the crewmate's lead third; phones (crewmate centred) low on the left, partly off the frame. */
+// v3b (root 11:31: in the tablet at 51 % Earth was a clipped, washed-out sliver in the corner). Placement is in fractions of
+// the frame's half extents (x, y) and the radius in fractions of its half HEIGHT: the journey's opening frame, and, in the
+// tablet, the glass's display (TabletWindow aims them there through its own portal camera, then hands over to these exact
+// journey places as the picture converges, so nothing jumps at the switch). Low-left with margin, clear of the crewmate.
+// b7-tunnel-v2i ART DIRECTION (Shifat 2:13 PM "3x bigger earth & bigger moon would make it lusion.co like no? Art direct"):
+// Earth is the hero planet, 3x its v2h radius, anchored in the LOWER-LEFT corner with about a third of its disc beyond
+// the frame (the curvature reads big); the moon 2x, UPPER-RIGHT on the opposite diagonal (0.40 x Earth's diameter, under
+// Shifat's 80 % cap). Same fractions in the journey's opening frame and in the tablet's display (TabletWindow.aim).
+export const EM_PLACE = {
+  // b7-tunnel-v2k: the moon nudged in from the top-right corner, clear of the menu icon (PC 1366x768: centre (1175,146) ->
+  // ~(1115,196), i.e. 60 px left, 50 px down; M02s 412x915: (309,165) -> ~(290,215)). Sizes unchanged
+  wide: { e: [-0.88, -0.78], er: 0.45, m: [0.633, 0.49], mr: 0.18 },
+  tall: { e: [-0.6, -0.74], er: 0.33, m: [0.41, 0.53], mr: 0.13 },
+}
+const EARTH_D = 420, MOON_D = 400
+export class EarthMoon {
+  readonly group = new THREE.Group()
+  readonly earth: THREE.Mesh; readonly moon: THREE.Mesh
+  readonly earthMat: THREE.ShaderMaterial; readonly moonMat: THREE.ShaderMaterial
+  readonly halo: THREE.Mesh; readonly haloMat: THREE.ShaderMaterial
+  private key = ''
+  constructor(gl?: THREE.WebGLRenderer) {
+    if (gl) earthGLs.add(gl)
+    this.earthMat = emMaterial(false); this.moonMat = emMaterial(true); this.haloMat = emMaterial(false, true)
+    this.earth = new THREE.Mesh(earthGeo ??= new THREE.SphereGeometry(1, 32, 16), this.earthMat)
+    this.moon = new THREE.Mesh(moonGeo ??= new THREE.SphereGeometry(1, 16, 8), this.moonMat)
+    this.earth.renderOrder = -11; this.moon.renderOrder = -6   // v2i: Earth before the dome (opaque list)
+    this.halo = new THREE.Mesh(moonGeo, this.haloMat); this.halo.renderOrder = -5   // v2j: Earth's glow shell (16 x 8, back faces, additive)
+    this.group.add(this.earth, this.moon, this.halo); this.group.name = 'earthMoon'
+  }
+  /** lay out once per orientation (aspect: the viewport's, for the visible lens) */
+  place(isPortrait: boolean, aspect: number) {
+    const key = `${isPortrait}|${aspect.toFixed(2)}`
+    if (key === this.key) return
+    this.key = key
+    const I = inner(0, _EMI, isPortrait)
+    _f.subVectors(I.look, I.cam).normalize()
+    _r.crossVectors(_f, _u.set(0, 1, 0)).normalize(); _u.crossVectors(_r, _f).normalize()
+    const tJ = journeyVisibleTan(I.fov, isPortrait, aspect), tX = tJ * aspect
+    const P = isPortrait ? EM_PLACE.tall : EM_PLACE.wide
+    const at = (nx: number, ny: number, d: number, out: THREE.Vector3) => out.copy(_f).addScaledVector(_r, nx * tX).addScaledVector(_u, ny * tJ).normalize().multiplyScalar(d)
+    at(P.e[0], P.e[1], EARTH_D, this.e0); this.es0 = EARTH_D * P.er * tJ
+    at(P.m[0], P.m[1], MOON_D, this.m0); this.ms0 = MOON_D * P.mr * tJ
+    // b7-tunnel-v2c (Tester 11:46: "night side still lit across the whole disc"): the sun was the world key light, which sits
+    // behind the opening camera, so it lit the face we see. Now it comes from the key's SIDE of the picture (its in-frame
+    // direction), square to the sight line to Earth, a touch toward us: ~55 % of each disc lit, the rest black
+    // v2i: the sun from the UPPER-RIGHT of the frame (art direction), square to each body's sight line: Earth 0.08 away
+    // from us (crisp terminator, ~half its disc black), the moon 0.25 toward us (gibbous)
+    _f2.copy(_r).multiplyScalar(0.8).addScaledVector(_u, 0.6)
+    _d.copy(this.e0).negate().normalize()                                            // Earth -> camera
+    this.earthMat.uniforms.u_sun.value.copy(_f2).addScaledVector(_d, -_f2.dot(_d)).normalize().addScaledVector(_d, -0.08).normalize()
+    _d.copy(this.m0).negate().normalize()                                            // Moon -> camera
+    this.moonMat.uniforms.u_sun.value.copy(_f2).addScaledVector(_d, -_f2.dot(_d)).normalize().addScaledVector(_d, 0.25).normalize()
+    this.haloMat.uniforms.u_sun.value.copy(this.earthMat.uniforms.u_sun.value)
+    // v2j: the moon's earthshine comes from Earth's direction
+    this.moonMat.uniforms.u_fill.value.subVectors(this.e0, this.m0).normalize()
+    this.set(this.e0, this.es0, this.m0, this.ms0)
+  }
+  /** the journey's places (place()), kept for the tablet's hand-over */
+  private e0 = new THREE.Vector3(); private m0 = new THREE.Vector3(); private es0 = 1; private ms0 = 1
+  private set(e: THREE.Vector3, es: number, m: THREE.Vector3, ms: number) {
+    this.earth.position.copy(e); this.earth.scale.setScalar(es)
+    this.halo.position.copy(e); this.halo.scale.setScalar(es)
+    // the day side shown to the lens: the map's longitude 0 (Africa / Europe) faces the camera, the axis tilted 23° in the picture
+    _d.copy(e).negate().normalize()
+    this.earth.rotation.set(0.4, Math.atan2(-_d.z, _d.x), 0, 'YXZ')
+    this.moon.position.copy(m); this.moon.scale.setScalar(ms)
+    // v2e: the near side (the map's longitude 0) faces the lens, as it does from Earth
+    _d.copy(m).negate().normalize()
+    this.moon.rotation.set(0, Math.atan2(-_d.z, _d.x), 0, 'YXZ')
+  }
+  /** v3b, the tablet: Earth and Moon at fixed spots of the glass's display (ndc of the drawn picture, through the portal
+   *  camera `cam`; radius as an angle), handed over to the journey's places by h (the portal's convergence, 0..1) */
+  aim(cam: THREE.Camera, eN: number[], eA: number, mN: number[], mA: number, h: number) {
+    const k = h * h * (3 - 2 * h)
+    _d.set(eN[0], eN[1], 0.5).unproject(cam).sub(cam.position).normalize().multiplyScalar(EARTH_D).lerp(this.e0, k).setLength(EARTH_D)
+    _f.set(mN[0], mN[1], 0.5).unproject(cam).sub(cam.position).normalize().multiplyScalar(MOON_D).lerp(this.m0, k).setLength(MOON_D)
+    _r.copy(_d); _u.copy(_f)
+    this.set(_r, EARTH_D * eA + (this.es0 - EARTH_D * eA) * k, _u, MOON_D * mA + (this.ms0 - MOON_D * mA) * k)
+  }
+  setGain(g: number) { this.earthMat.uniforms.u_gain.value = g; this.moonMat.uniforms.u_gain.value = g; this.haloMat.uniforms.u_gain.value = g }
+  update(time: number, opacity: number) {
+    this.earthMat.uniforms.u_spin.value = (time * 0.0025) % 1
+    this.earthMat.uniforms.u_opacity.value = opacity; this.moonMat.uniforms.u_opacity.value = opacity
+    this.group.visible = opacity > 0.001
+    this.moon.visible = moonReady.v   // v2e: no blank disc before its map arrives (26 KB, loads at stage build)
+    this.earth.visible = earthReady.v && opacity > 0.999
+    this.halo.visible = this.earth.visible; this.haloMat.uniforms.u_opacity.value = opacity   // v2i: opaque, so it hides (it is behind the closed tube by the time the stars fade)   // no black disc before the day map arrives (it loads at stage build, long before 47 %)
+  }
+  dispose() { earthMats.delete(this.earthMat); moonMats.delete(this.moonMat); this.earthMat.dispose(); this.moonMat.dispose(); this.haloMat.dispose() }
 }
 
 // ---------------------------------------------------------------- rocks + dust (part of the sky since R6.87)
@@ -231,13 +471,18 @@ function dustGeometry() {
   if (dustGeo) return dustGeo
   let seed2 = 7; const r2 = () => ((seed2 = (seed2 * 16807) % 2147483647) / 2147483647)
   const dp = new Float32Array(DUST * 3), ds = new Float32Array(DUST), dd = new Float32Array(DUST)
+  // b7-tunnel-v2c (Tester 11:46: journey stars ~unchanged vs live): these 420 near motes are the brightest "stars" in the
+  // journey frame and were never cut. Same sequence, 2 of every 5 kept (168), so the kept ones stay where they were
+  let k = 0
   for (let i = 0; i < DUST; i++) {
     const z = 2 + Math.pow(r2(), 1.6) * 70, spread = 0.25 + z * 0.62
-    dp.set([(r2() * 2 - 1) * spread, (r2() * 2 - 1) * spread * 0.75, -z], i * 3)
-    ds[i] = 0.02 + Math.pow(r2(), 3) * 0.06; dd[i] = r2()
+    const x = (r2() * 2 - 1) * spread, y = (r2() * 2 - 1) * spread * 0.75
+    const sz = 0.02 + Math.pow(r2(), 3) * 0.06, sd = r2()
+    if (i % 5 >= 2) continue
+    dp.set([x, y, -z], k * 3); ds[k] = sz; dd[k] = sd; k++
   }
   const g = new THREE.BufferGeometry()
-  g.setAttribute('position', new THREE.BufferAttribute(dp, 3)); g.setAttribute('aSize', new THREE.BufferAttribute(ds, 1)); g.setAttribute('aSeed', new THREE.BufferAttribute(dd, 1))
+  g.setAttribute('position', new THREE.BufferAttribute(dp.subarray(0, k * 3), 3)); g.setAttribute('aSize', new THREE.BufferAttribute(ds.subarray(0, k), 1)); g.setAttribute('aSeed', new THREE.BufferAttribute(dd.subarray(0, k), 1))
   dustGeo = g
   return g
 }

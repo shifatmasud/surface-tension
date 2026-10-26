@@ -21,6 +21,16 @@ import * as THREE from 'three'
 const BEND = /* glsl */ `
 vec2 bendAt(float d){ return vec2(sin(u_phase + d * 2.2), cos(u_phase * 0.7 + d * 1.7) * 0.6) * u_bend * d * d * u_len * 0.12; }
 `
+const ZONE = /* glsl */ `
+// R7.11 b7v2 COLOUR ZONES (Shifat's palette, linear light): silver #E8ECF5 -> cyan #3FD8FF -> violet #A463FF along the
+// tunnel (short cross-fades); t = the scroll through the tube + a share of the depth, so the next zone shows far ahead first
+vec3 zoneCol(float t){
+  vec3 c = mix(vec3(0.807, 0.838, 0.913), vec3(0.050, 0.686, 1.0), smoothstep(0.30, 0.36, t));
+  return mix(c, vec3(0.371, 0.125, 1.0), smoothstep(0.62, 0.68, t));
+}
+// the mouth: past u_mouth (m ahead) the tube is open (the world shows through); the last metres flare out like a horn
+float mouthOpen(float z){ return smoothstep(u_mouth - 3.0, u_mouth, z); }
+`
 const PAL = /* glsl */ `
 // the tube's colour drifts with the travel: silver-blue → electric violet → cyan (all cool: the site's night palette)
 vec3 pal(float t){ return (vec3(0.30, 0.55, 1.0) * (0.5 + 0.5 * cos(6.2832 * (t + 0.00)))
@@ -28,7 +38,7 @@ vec3 pal(float t){ return (vec3(0.30, 0.55, 1.0) * (0.5 + 0.5 * cos(6.2832 * (t 
                          + vec3(0.20, 0.95, 1.0) * (0.5 + 0.5 * cos(6.2832 * (t + 0.67)))) / 1.5; }
 `
 const VERT = /* glsl */ `
-uniform float u_bend, u_phase, u_len;
+uniform float u_bend, u_phase, u_len, u_mouth;
 varying vec3 vL; varying float vA;
 ${BEND}
 void main(){
@@ -36,14 +46,16 @@ void main(){
   float d = -p.z / u_len;                    // 0 at the lens → 1 far ahead
   vec2 c = bendAt(d);                        // the gentle curve ahead: the centre line swings off in a slow S
   vL = p; vA = atan(p.y, p.x);
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(p.xy + c, p.z, 1.0);
+  float fl = smoothstep(u_mouth - 18.0, u_mouth, -p.z);   // b7v2: the mouth flares open (x2.2) over its last 18 m
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(p.xy * (1.0 + 1.2 * fl * fl) + c, p.z, 1.0);
 }`
 const FRAG = /* glsl */ `
-uniform float u_on, u_travel, u_stretch, u_time, u_len, u_exit, u_hue, u_rush, u_pulse;
+uniform float u_on, u_travel, u_stretch, u_time, u_len, u_exit, u_hue, u_rush, u_pulse, u_mouth, u_build, u_wallRing;
+uniform vec3 u_outCol;
 varying vec3 vL; varying float vA;
 float h11(float x){ return fract(sin(x * 127.1) * 43758.5453); }
 vec3 film(float t){ return 0.5 + 0.5 * cos(6.28318 * (t + vec3(0.0, 0.33, 0.67))); }
-${PAL}
+${ZONE}
 void main(){
   float z = -vL.z;                           // distance ahead of the lens (m)
   float d = z / u_len;
@@ -58,8 +70,8 @@ void main(){
   float len = mix(0.015, 0.55 + 0.35 * r2, u_stretch) * (1.0 + 0.6 * u_rush);
   float dash = smoothstep(0.0, 0.02, seg) * (1.0 - smoothstep(len, len + 0.03, seg)) * step(0.62, h11(floor(s) + lane * 7.0)); // sparser than before: dark gaps make the glow read
   float thin = exp(-fx * fx * 90.0);
-  float halo = exp(-fx * fx * 9.0);          // a soft glow skirt round every line (the cheap bloom: no extra pass)
-  vec3 tint = pal(u_hue + r * 0.15);
+  float halo = exp(-fx * fx * 22.0);         // a glow skirt round every line (the cheap bloom). b7-tunnel-v2d: tighter (was 9), so the black between the lanes stays black
+  vec3 tint = zoneCol(u_hue + d * 0.35 + (r - 0.5) * 0.04);   // b7v2: the zone's colour (was a continuous drift)
   vec3 silver = mix(vec3(0.86, 0.9, 0.98), tint, 0.85);
   vec3 col = silver * dash * (thin * (0.5 + 0.9 * r) + halo * 0.12 * u_stretch);
   // a few lanes are iridescent (thin film along their length)
@@ -72,17 +84,36 @@ void main(){
   float rz = (z + u_travel) / 22.0;
   float rc = fract(rz) - 0.5;
   float ring = exp(-rc * rc * 1400.0) * step(0.35, h11(floor(rz)));
-  float ringGlow = exp(-rc * rc * 90.0) * step(0.35, h11(floor(rz)));
+  float ringGlow = exp(-rc * rc * 160.0) * step(0.35, h11(floor(rz)));   // v2d: tighter (was 90)
   float beat = 0.7 + 0.3 * sin(floor(rz) * 2.1 + u_time * 3.0);
-  col += mix(vec3(0.95, 0.97, 1.0), pal(u_hue + 0.5), 0.5) * (ring * 1.8 + ringGlow * 0.45 * u_pulse) * u_stretch * beat;
+  // b7-tunnel-v2l ROOT CAUSE of the 66.5 % glow (Tester v2k: default 34.7, ?qhide=wall 4.0, ring overlays already out):
+  // the camera passing one of these PAINTED wall rings (and its glow skirt) right at the lens, a soft lavender band round
+  // the frame edge. u_wallRing (JourneyStage) takes the painted ring + its glow out over the last stretch of the bore
+  // (u 0.80 -> 0.84, ~66.1 -> 66.3 % page), so the exit never flies through a bright band. Streaks, zones, mouth stay.
+  col += mix(vec3(0.95, 0.97, 1.0), tint, 0.5) * (ring * 1.8 + ringGlow * 0.45 * u_pulse) * u_stretch * beat * u_wallRing;
   // the wall itself: near-black, a faint cool sheen so the tube reads as a surface, tinted by the drift
-  col += mix(vec3(0.012, 0.014, 0.022), tint * 0.03, 0.4) * (0.6 + 0.4 * sin(vA * 3.0 + z * 0.05));
-  // depth: darker far ahead, then the exit glow (the night sky waiting at the end)
-  col *= mix(1.0, 0.25, smoothstep(0.35, 1.0, d));
-  col += vec3(0.06, 0.09, 0.18) * smoothstep(0.55, 1.0, d) * (0.3 + u_exit * 2.5);
-  // near the lens the wall fades so nothing smears across the frame
+  col += vec3(0.012, 0.014, 0.022) * 0.6 * (0.6 + 0.4 * sin(vA * 3.0 + z * 0.05));   // v2d: neutral (the zone tint lives on the streaks and rings only)
+  // b7v2 depth: the far end is pure black (darkness falloff; the old navy exit glow is gone), and as the tube forms it
+  // lights up from far to near (u_build)
+  col *= 1.0 - smoothstep(0.4, 0.92, d);
+  float front = mix(1.05, -0.05, u_build);
+  col *= smoothstep(front, front + 0.08, d);
+  // near the lens the wall fades so nothing smears across the frame; past the mouth the tube is open (the world shows)
+  // b7-tunnel-v2: the lip catches the outside light (the sky's horizon colour) over its last ~14 m, so the wall and the
+  // world beyond meet in the same light (no dark ring, no glow ring at the seam)
+  // b7-tunnel-v2d (Tester: a one-frame grey-lavender wash at 66 %, mean 47 vs 26): the lit band was 14 m deep, so as the
+  // mouth reached the lens the lit walls filled the frame. Now a thin 5 m band at the very lip, dimmer, and it fades out
+  // as the mouth comes within ~14 m of the lens: the wall goes by dark and the world opens behind it
+  float lip = smoothstep(u_mouth - 5.0, u_mouth, z) * smoothstep(3.0, 14.0, u_mouth);
+  col = mix(col, u_outCol * 0.6, lip * lip * 0.6);
+  // v2d (Tester: the backdrop read dark violet, darkest quartile (8,7,16) vs live (0,0,0)): a black floor, so the wall
+  // between the lines is pure black again; the streaks, dots and rings (far above it) keep their colour
+  // v2f: the last stretch before the lens clears the lip, the tube's light dims (its lines and ring glows to 30 %), so the
+  // exit frame is never brighter than the frames either side of it; the world beyond carries the light from there
+  col *= mix(0.3, 1.0, smoothstep(4.0, 22.0, u_mouth));
+  col = max(col - vec3(0.008), vec3(0.0));
   float near = smoothstep(0.5, 6.0, z);
-  float alpha = u_on * near;
+  float alpha = u_on * near * (1.0 - mouthOpen(z));
   gl_FragColor = vec4(col * alpha, alpha);
 }`
 
@@ -92,6 +123,7 @@ export function tunnelUniforms(len: number) {
     u_on: { value: 0 }, u_travel: { value: 0 }, u_stretch: { value: 0 }, u_time: { value: 0 }, u_len: { value: len },
     u_bend: { value: 1 }, u_phase: { value: 0 }, u_exit: { value: 0 },
     u_hue: { value: 0 }, u_rush: { value: 0 }, u_pulse: { value: 0 },
+    u_mouth: { value: 1e4 }, u_build: { value: 1 }, u_ringOn: { value: 1 }, u_wallRing: { value: 1 }, u_outCol: { value: new THREE.Color(0, 0, 0) },   // b7v2: the open mouth's distance ahead (m; far = closed), the far-to-near build (0..1)
   }
 }
 
@@ -116,11 +148,11 @@ export function buildTunnel(len = 140) {
 // simply come past the lens — no spawn, no pop, reversible with the scroll). Additive, depth-tested, no depth write.
 // ---------------------------------------------------------------------------------------------------------------------
 const LIGHT_VERT = /* glsl */ `
-uniform float u_bend, u_phase, u_len, u_travel, u_stretch, u_rush, u_hue, u_time;
+uniform float u_bend, u_phase, u_len, u_travel, u_stretch, u_rush, u_hue, u_time, u_mouth, u_build;
 attribute vec4 aSeed;                        // x: angle 0..1, y: radius 0..1, z: depth 0..1, w: speed/size seed
 varying vec2 vQ; varying vec3 vC; varying float vA;
 ${BEND}
-${PAL}
+${ZONE}
 void main(){
   float r1 = aSeed.w, r2 = fract(aSeed.w * 7.31 + 0.17);
   // where it lives in the bore: at the wall or floating in the bore (a quarter of them), ahead of the lens
@@ -134,13 +166,15 @@ void main(){
   // view-space billboard, stretched along its own screen-radial direction (the direction it streaks at the lens)
   vec4 vc = modelViewMatrix * vec4(c, 1.0);
   vec2 dir = normalize(vc.xy + vec2(1e-4, 0.0));
-  float size = mix(0.18, 0.6, r2) * (1.0 + 0.4 * sin(u_time * 2.0 + r1 * 20.0) * 0.5);
+  float size = mix(0.12, 0.4, r2) * (1.0 + 0.4 * sin(u_time * 2.0 + r1 * 20.0) * 0.5);   // b7v2: smaller dots
   float stretch = 1.0 + (2.5 + 4.0 * u_rush) * u_stretch * (0.4 + 0.6 * r1);
   vec2 q = position.xy;                      // unit quad -0.5..0.5
   vec2 off = dir * q.x * size * stretch + vec2(-dir.y, dir.x) * q.y * size;
   vc.xy += off;
-  vQ = q * 2.0; vA = smoothstep(0.6, 5.0, z) * (1.0 - smoothstep(0.75, 1.0, d));
-  vC = pal(u_hue + r2 * 0.3 + 0.1) * (0.8 + 0.8 * r1);
+  float front = mix(1.05, -0.05, u_build);
+  vQ = q * 2.0; vA = smoothstep(0.6, 5.0, z) * (1.0 - smoothstep(0.4, 0.92, d)) * smoothstep(front, front + 0.08, d) * (1.0 - mouthOpen(z));
+  vA *= mix(0.3, 1.0, smoothstep(4.0, 22.0, u_mouth));   // v2f: the dots dim as the mouth nears the lens
+  vC = zoneCol(u_hue + d * 0.35 + (r2 - 0.5) * 0.04) * (0.8 + 0.8 * r1);
   gl_Position = projectionMatrix * vc;
 }`
 const LIGHT_FRAG = /* glsl */ `
@@ -148,17 +182,18 @@ uniform float u_on;
 varying vec2 vQ; varying vec3 vC; varying float vA;
 void main(){
   float rr = dot(vQ, vQ);
-  float glow = exp(-rr * 3.0);               // the soft skirt
-  float core = exp(-rr * 22.0);              // the hot centre
-  vec3 col = vC * glow * 0.9 + mix(vC, vec3(1.0), 0.6) * core * 0.9;
+  // b7v2: a hard-edged dot with only a tight rim of glow (was a wide soft skirt)
+  float glow = exp(-rr * 6.0);
+  float core = 1.0 - smoothstep(0.16, 0.16 + fwidth(rr) * 1.5, rr);
+  vec3 col = vC * glow * 0.3 + mix(vC, vec3(1.0), 0.55) * core * 1.1;
   gl_FragColor = vec4(col * vA * u_on, 0.0); // additive (dst keeps its alpha)
 }`
 const RING_VERT = /* glsl */ `
-uniform float u_bend, u_phase, u_len, u_travel, u_stretch, u_hue, u_pulse, u_time;
+uniform float u_bend, u_phase, u_len, u_travel, u_stretch, u_hue, u_pulse, u_time, u_mouth, u_build;
 attribute vec4 aSeed;
 varying vec2 vQ; varying vec3 vC; varying float vA; varying float vW;
 ${BEND}
-${PAL}
+${ZONE}
 void main(){
   float z = mod(aSeed.z * u_len + u_travel * 0.5, u_len);
   float d = z / u_len;
@@ -167,13 +202,15 @@ void main(){
   float R = 4.3 + 0.6 * sin(aSeed.w * 30.0);
   vc.xy += position.xy * R * 2.3;            // a quad wide enough for the ring and its glow
   vQ = position.xy * 2.3;
-  vA = smoothstep(1.5, 8.0, z) * (1.0 - smoothstep(0.7, 1.0, d)) * u_stretch;
+  float front = mix(1.05, -0.05, u_build);
+  vA = smoothstep(1.5, 8.0, z) * (1.0 - smoothstep(0.4, 0.92, d)) * smoothstep(front, front + 0.08, d) * (1.0 - mouthOpen(z)) * u_stretch;
+  vA *= smoothstep(4.0, 22.0, u_mouth);   // b7-tunnel-v2f (Tester: at 66.5 % the ring glow filled the frame, mean 35 vs 17/21): the rings go out as the mouth nears the lens
   vW = 0.5 + 0.5 * sin(u_time * 2.4 + aSeed.w * 40.0);  // each ring breathes on its own beat
-  vC = mix(vec3(0.95, 0.97, 1.0), pal(u_hue + aSeed.w * 0.5), 0.6);
+  vC = mix(vec3(0.95, 0.97, 1.0), zoneCol(u_hue + d * 0.35), 0.6);
   gl_Position = projectionMatrix * vc;
 }`
 const RING_FRAG = /* glsl */ `
-uniform float u_on, u_pulse;
+uniform float u_on, u_pulse, u_ringOn;
 varying vec2 vQ; varying vec3 vC; varying float vA; varying float vW;
 void main(){
   float r = length(vQ);
@@ -181,7 +218,7 @@ void main(){
   float line = exp(-e * e * 900.0);          // the thin bright hoop
   float glow = exp(-e * e * 40.0);           // its halo
   vec3 col = vC * (line * 1.4 + glow * (0.25 + 0.35 * vW) * u_pulse);
-  gl_FragColor = vec4(col * vA * u_on, 0.0);
+  gl_FragColor = vec4(col * vA * u_on * u_ringOn, 0.0);   // b7-tunnel-v2h: u_ringOn (JourneyStage) takes the ring overlays out as the exit starts
 }`
 
 function seeds(n: number, seed: number) {
@@ -190,14 +227,15 @@ function seeds(n: number, seed: number) {
   for (let i = 0; i < n; i++) { a[i * 4] = r(); a[i * 4 + 1] = r(); a[i * 4 + 2] = r(); a[i * 4 + 3] = r() }
   return new THREE.InstancedBufferAttribute(a, 4)
 }
-function instanced(n: number, seed: number) {
+function instanced(n: number, seed: number, shape?: THREE.BufferGeometry) {
   const g = new THREE.InstancedBufferGeometry()
-  const quad = new THREE.PlaneGeometry(1, 1)
+  const quad = shape ?? new THREE.PlaneGeometry(1, 1)
   g.setIndex(quad.getIndex()); g.setAttribute('position', quad.getAttribute('position'))
   g.setAttribute('aSeed', seeds(n, seed)); g.instanceCount = n
   quad.dispose()
   return g
 }
+const RING_QUAD = typeof location !== 'undefined' && /[?&]ringquad\b/.test(location.search)
 const ORBS = 220, RINGS = 18 // PERF HOOK (eng #5): one count on every tier — phones scale the blur, not the lights
 
 /** the glow orbs/streaks (one instanced draw) and the pulse rings (one instanced draw), sharing the wall's uniforms */
@@ -206,7 +244,16 @@ export function buildTunnelLights(uniforms: ReturnType<typeof tunnelUniforms>) {
   const orbMat = new THREE.ShaderMaterial({ ...common, vertexShader: LIGHT_VERT, fragmentShader: LIGHT_FRAG, uniforms })
   const ringMat = new THREE.ShaderMaterial({ ...common, vertexShader: RING_VERT, fragmentShader: RING_FRAG, uniforms })
   const orbs = new THREE.Mesh(instanced(ORBS, 11), orbMat)
-  const rings = new THREE.Mesh(instanced(RINGS, 23), ringMat)
+  // b7-tunnel-v2: each ring is an annulus (|vQ| 0.62..1.3: the hoop and all of its glow above 0.3 %) instead of a full quad,
+  // so its hollow middle is never shaded: the 18 rings were near-fullscreen quads as they passed the lens. Same look (the
+  // halo now ends round instead of at the quad's square edge), far fewer fragments. ?ringquad = the old quads (A/B)
+  const ringShape = RING_QUAD ? undefined : new THREE.RingGeometry(0.62 / 2.3, 1.3 / 2.3, 64, 1)
+  const rings = new THREE.Mesh(instanced(RINGS, 23, ringShape), ringMat)
   for (const m of [orbs, rings]) { m.frustumCulled = false; m.renderOrder = 7; m.visible = false }
   return { orbs, rings, orbMat, ringMat, counts: { orbs: ORBS, rings: RINGS } }
 }
+
+/** b7v2: the zone colour for a hue value (the crewmate's rim takes it inside the tube) */
+const Z0 = new THREE.Color(0.807, 0.838, 0.913), Z1 = new THREE.Color(0.05, 0.686, 1.0), Z2 = new THREE.Color(0.371, 0.125, 1.0)
+const sst = (a: number, b: number, x: number) => { const k = Math.min(1, Math.max(0, (x - a) / (b - a))); return k * k * (3 - 2 * k) }
+export function tunnelZoneColor(t: number, out: THREE.Color) { return out.copy(Z0).lerp(Z1, sst(0.30, 0.36, t)).lerp(Z2, sst(0.62, 0.68, t)) }
