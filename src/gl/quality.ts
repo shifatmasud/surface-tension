@@ -2,6 +2,7 @@ import { PHONE } from '../core/viewport'
 import { settings, browser, MAX_RENDER_PIXELS } from '../services/settings'
 import { props } from '../state/props'
 import { input } from '../services/input'
+import { journey } from './stages/journey/journeyState'   // R7.11 ?pcj
 
 /**
  * PERF HOOK — the adaptive quality governor (Shifat 10:16Z "heavily optimized for fast speed in mobile",
@@ -142,6 +143,10 @@ const DENS_PHONE = Math.max(0.75, Math.min(1.75, parseFloat(q.get('dens') || '')
 /** R7.10 b5 (Shifat 4:42 AM: cost <= riptide v2 on BOTH devices, every section): the weak PC below the water was at its native
  *  1.0 since b1 (1.5-2.2x riptide v2 there, sim); it is back at riptide v2's 0.5 (its governor floor; headless sim). ?pcund=<x> */
 const DENS_UNDER = settings.WEAK_GPU && !PHONE ? Math.max(0.5, Math.min(1, parseFloat(q.get('pcund') || '') || 0.5)) : DENS_PHONE
+/** R7.11 (QA flag only, default off = riptide v3): ?pcj=<0.5–1> draws the weak PC's journey (space → forest → tablet → break)
+ *  at this density instead of DENS_UNDER's 0.5, from the journey's first frame until the CTA wall starts (journey.cta > 0),
+ *  so the footer / CTA (hard lock) keeps its density. One re-size on the way in, one on the way out. Phones: never. */
+const PCJ = DENS_ONE && settings.WEAK_GPU && !PHONE && q.has('pcj') ? Math.max(0.5, Math.min(1, parseFloat(q.get('pcj') || '') || 0.75)) : 0
 /** R7.08c (Shifat 8:22 PM on his M02s: "hero feels jittery"; 4:20 AM Oct 24: the hero above the water needs "no hi res, just
  *  performance"): above the water the background (sky, lake, haze: soft by nature) holds 7.07's density (0.5); the gem
  *  keeps its own sharp MSAA layer. One switch per crossing (it rides the waterline wobble), never while moving inside a
@@ -238,7 +243,7 @@ class Quality {
   dprFor(w: number, h: number, noRest = false) {
     this.w = w; this.h = h
     const td = this.textDprFor(w, h, noRest)
-    if (DENS_ONE) return Math.min(td, this.nativeFor(w, h), props.aboveWater ? DENS_ABOVE : DENS_UNDER)   // R7.08b: static, same moving and still (R7.08c: per side of the waterline)
+    if (DENS_ONE) return Math.min(td, this.nativeFor(w, h), props.aboveWater ? DENS_ABOVE : this.pcjOn ? Math.max(DENS_UNDER, PCJ) : DENS_UNDER)   // R7.08b: static, same moving and still (R7.08c: per side of the waterline; R7.11 ?pcj)
     const moving = Math.min(td, Math.max(BG_FLOOR, Math.min(this.stepAt(this.level), this.cap(w, h))))
     if (!this.rest || noRest) return moving
     return Math.min(td, Math.max(moving, Math.min(this.restTarget(w, h), this.restCap)))
@@ -280,6 +285,8 @@ class Quality {
    *  one re-allocation in, one out on the first moving frame; while moving it is exactly 7.06 (1.5x). ?txtrest=0 = 7.06. */
   textRest = false
   private densAbove = true
+  /** R7.11 ?pcj: the weak PC is in the journey before the CTA (see PCJ) */
+  pcjOn = false
   private textStill = 0
   private textRestTick(now: number) {
     if (tier !== 'low' || !SPLIT || TEXT_REST_OFF) return
@@ -301,6 +308,10 @@ class Quality {
     this.textRestTick(now)
     if (DENS_ONE) {   // R7.08b: one static density, no background rest refinement
       if (props.aboveWater !== this.densAbove) { this.densAbove = props.aboveWater; if (DENS_ABOVE !== DENS_UNDER) { const s = this.state(); this.listeners.forEach((fn) => fn(s)) } }   // R7.08c: re-size once per waterline crossing
+      if (PCJ > 0) {   // R7.11 ?pcj: the journey (before the CTA) at its own density; latched so a CTA hovering at 0 cannot thrash
+        const on = props.stage === 'journey' && !props.aboveWater && (this.pcjOn ? journey.cta < 0.002 : journey.cta < 0.0005)
+        if (on !== this.pcjOn) { this.pcjOn = on; const s = this.state(); this.listeners.forEach((fn) => fn(s)) }
+      }
       return
     }
     if (PHONE_SHARP) return this.sharpTick(now)

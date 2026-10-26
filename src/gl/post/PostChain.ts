@@ -163,6 +163,33 @@ export class PostChain {
     // the curtain stayed down for good. The test now reads the source (journey.lift, as update() does) and the footer's
     // state keeps ticking on merged frames (below), so the curtain, its bar and --kd behave exactly as in 7.08/7.09.
     const AA_SEP = typeof location !== 'undefined' && /[?&]aasep\b/.test(location.search)
+    // R7.11 (seabed far-edge stairs on his M02s): the phone's MEDIUM preset finds edges above 0.1 luma, and the sand's far
+    // crest against the deep water sits just under that (teal on teal), so the crest kept its 1-px stairs. Below the water
+    // in the dive, the phone's AA uses a twin SMAA with ULTRA's 0.05 threshold (same 8-step search, same passes; only the
+    // edge pixels it newly finds pay). A twin, not a switch: the threshold is a shader define, and flipping it would relink
+    // the program at every waterline crossing. Hero, journey and footer keep the original. R7.11 b5: ON by default on the phone path; ?aadive=0 turns it off (= riptide v3)
+    const AA_DIVE = DENS_ONE && PHONE && !AA_Q && typeof location !== 'undefined' && !/[?&]aadive=0\b/.test(location.search)   // b5 default on (phone); ?aadive=0 = riptide v3
+    // R7.11 b4 QA (opt-in ?aaj=1): extends the same twin to the journey (phone only) while neither the CTA nor the footer is up (footer AA stays locked)
+    const AA_J = DENS_ONE && PHONE && !AA_Q && typeof location !== 'undefined' && /[?&]aaj=1\b/.test(location.search)   // b5: stays opt-in (?aaj=1): +~13 ms AA at 85% (grass edges), fails the gate
+    const smaaD = (AA_DIVE || AA_J) ? new SMAAEffect({ preset: SMAAPreset.MEDIUM }) : null
+    if (smaaD) smaaD.edgeDetectionMaterial.edgeDetectionThreshold = 0.05
+    // R7.11 b5 STONE LOCK: inside the heroes' drawn box (the gem, grown 40 px: past SMAA's ~18 px search reach plus a frame of the gem's motion, as the box is last frame's) the twin keeps v3's 0.1, so the
+    // edges, weights and blend over the stone are v3's exactly; only the water and the seabed around it get the lower threshold
+    const keepU = { value: new THREE.Vector4(0, 0, -1, -1) }
+    if (smaaD) {
+      const em = smaaD.edgeDetectionMaterial as any
+      em.uniforms.u_keep = keepU
+      em.fragmentShader = 'uniform vec4 u_keep;\n' + em.fragmentShader.replace('const vec2 threshold=vec2(EDGE_THRESHOLD);',
+        'vec2 threshold=vec2((vUv.x>=u_keep.x&&vUv.y>=u_keep.y&&vUv.x<=u_keep.z&&vUv.y<=u_keep.w)?0.1:EDGE_THRESHOLD);')
+      em.needsUpdate = true
+    }
+    const keepBox = () => {
+      const h = heroPass as any, b = h.box, rt = h.rt
+      if (!rt || !b || !b.on || !heroPass.active()) { keepU.value.set(0, 0, -1, -1); return }
+      const gx = 40 / Math.max(1, this.gl.domElement.width), gy = 40 / Math.max(1, this.gl.domElement.height)
+      keepU.value.set(b.x / rt.width - gx, b.y / rt.height - gy, (b.x + b.w) / rt.width + gx, (b.y + b.h) / rt.height + gy)
+    }
+    const diveAA = () => !!smaaD && (keepBox(), true) && ((AA_DIVE && props.stage === 'dive' && !props.aboveWater) || (AA_J && props.stage === 'journey' && !((journey.cta || 0) > 0) && !((journey.lift || 0) > 0)))
     const mergeAA = () => DENS_ONE && !AA_SEP && !((journey.cta || 0) > 0) && (!this.footer || !((journey.lift || 0) > 0)) && quality.aa === 'smaa' && !sharp() && (this.grade.u('u_waterline').value as number) < -0.5
       && !((clip.boundary && !clip.cut) || clip.capture >= 0) && !ufxUnder.children.some((c) => c.visible) && !ufxOver.children.some((c) => c.visible) && !heroPass.hasUi()
     this.entries = [
@@ -179,16 +206,19 @@ export class PostChain {
       { name: 'Bloom+Grade', order: 30, pass: this.footer ? new EffectPass(camera, this.bloom, this.grade, this.footer) : new EffectPass(camera, this.bloom, this.grade), needsRender: () => !sharp() && bloomOn() && !mergeAA() },
       { name: 'Grade', order: 30, pass: gradeOnly, needsRender: () => !sharp() && !bloomOn() && !mergeAA() },
       { name: 'SMAA+Bloom+Grade', order: 30, pass: new EffectPass(camera, smaa, this.bloom, this.gradeNoUv), needsRender: () => bloomOn() && mergeAA() },   // R7.10
-      { name: 'SMAA+Grade', order: 30, pass: new EffectPass(camera, smaa, this.gradeNoUv), needsRender: () => !bloomOn() && mergeAA() && !(diveRays.on && RAYS_M) },   // R7.10
+      { name: 'SMAA+Grade', order: 30, pass: new EffectPass(camera, smaa, this.gradeNoUv), needsRender: () => !bloomOn() && mergeAA() && !(diveRays.on && RAYS_M) && !diveAA() },   // R7.10
+      ...(smaaD ? [{ name: 'SMAAd+Grade', order: 30, pass: new EffectPass(camera, smaaD, this.gradeNoUv), needsRender: () => !bloomOn() && mergeAA() && !(diveRays.on && RAYS_M) && diveAA() }] : []),   // R7.11
       // R7.10: with no bloom between them (phones), the dive's god-ray add joins too: one full-screen pass for AA + rays + grade
-      { name: 'SMAA+Rays+Grade', order: 30, pass: new EffectPass(camera, smaa, this.rays.effect(), this.gradeNoUv), needsRender: () => !bloomOn() && mergeAA() && diveRays.on && RAYS_M },
+      { name: 'SMAA+Rays+Grade', order: 30, pass: new EffectPass(camera, smaa, this.rays.effect(), this.gradeNoUv), needsRender: () => !bloomOn() && mergeAA() && diveRays.on && RAYS_M && !diveAA() },
+      ...(smaaD ? [{ name: 'SMAAd+Rays+Grade', order: 30, pass: new EffectPass(camera, smaaD, this.rays.effect(), this.gradeNoUv), needsRender: () => !bloomOn() && mergeAA() && diveRays.on && RAYS_M && diveAA() }] : []),   // R7.11
       { name: 'Sharpen+Grade', order: 30, pass: sharpGrade, needsRender: () => sharp() },
       { name: 'UiHide', order: 49, pass: new UiHidePass(false), needsRender: () => heroPass.hasUi() },   // R6.87 SPLIT
       { name: 'PreUfx', order: 50, pass: this.preUfx, needsRender: () => ufxUnder.children.some((c) => c.visible) },
       { name: 'UiShow', order: 51, pass: new UiHidePass(true), needsRender: () => heroPass.hasUi() },   // R6.87 SPLIT
       { name: 'ScreenPaintDistortion', order: 3100, pass: new EffectPass(camera, this.distortion), needsRender: () => props.look.paintAmount > 0 && !paintState.asleep && !(this.distortion.hr && paintState.empty) },
       { name: 'PostUfx', order: 100, pass: this.postUfx, needsRender: () => ufxOver.children.some((c) => c.visible) },
-      { name: 'SMAA', order: 4000, pass: new EffectPass(camera, smaa), needsRender: () => quality.aa === 'smaa' && !mergeAA() },
+      { name: 'SMAA', order: 4000, pass: new EffectPass(camera, smaa), needsRender: () => quality.aa === 'smaa' && !mergeAA() && !diveAA() },
+      ...(smaaD ? [{ name: 'SMAAd', order: 4000, pass: new EffectPass(camera, smaaD), needsRender: () => quality.aa === 'smaa' && !mergeAA() && diveAA() }] : []),   // R7.11
       { name: 'FXAA', order: 4000, pass: new EffectPass(camera, fxaa), needsRender: () => quality.aa === 'fxaa' },
       // W17 GLOBAL TEXT LAYER (Shifat 10:17Z + 11:46Z): all copy in one fixed slot, drawn ONCE over the composited frame
       // (so a boundary never doubles it or slides it with a card) and BEFORE the trail, so the trail still bends it
@@ -450,8 +480,8 @@ void main(){
       e.on = warm ? !((e.name === 'Bloom+Grade' || e.name === 'SMAA+Bloom+Grade') && !settings.USE_BLOOM) && !(e.name === 'FXAA' && settings.TIER !== 'low') && !(e.name.startsWith('SMAA+') && !DENS_ONE) : e.needsRender()
       if (e.on) sig |= 1 << i
     }
-    { const m = this.entries.find((e) => e.name === 'SMAA+Rays+Grade'); this.rays.merged = !warm && !!m && !!m.on }   // R7.10
-    if (this.footer && !warm && this.entries.some((e) => e.on && e.name.startsWith('SMAA+'))) this.footer.update(this.gl, null as any, dt)   // R7.10 FOOTER FIX
+    { this.rays.merged = !warm && this.entries.some((e) => (e.name === 'SMAA+Rays+Grade' || e.name === 'SMAAd+Rays+Grade') && !!e.on) }   // R7.10 (R7.11: or its dive twin)
+    if (this.footer && !warm && this.entries.some((e) => e.on && (e.name.startsWith('SMAA+') || e.name.startsWith('SMAAd+')))) this.footer.update(this.gl, null as any, dt)   // R7.10 FOOTER FIX
     if (warm) {
       this.warmAll = false
       // NEIGHBOUR HOOK: link the neighbour chain's programs (bloom+grade pass, its targets) behind the curtain too
