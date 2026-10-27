@@ -62,6 +62,9 @@ export const grassVert = /* glsl */ `
     vec2 wdir = vec2(0.94, 0.33);
     float gust = fvn(root.xz * 0.16 - wdir * u_time * 0.65); gust = smoothstep(0.25, 0.95, gust);
     float flut = sin(u_time * 3.4 + seed * 40.0 + root.x * 1.3);
+    #ifndef BUSY_GRASS
+    flut *= 0.5;   // b9-grass-v4f: a calmer flutter (less per-blade shimmer)
+    #endif
     vec2 bendDir = outD * aPrm.w * (0.35 + ocn) + wdir * (0.18 + 0.62 * gust) + (dc / dcl) * part * 1.5 + vec2(flut, -flut) * 0.06;
     float t = position.y;
     float c = cos(yaw), s = sin(yaw);
@@ -88,21 +91,44 @@ export const grassFrag = /* glsl */ `
   #include <fog_pars_fragment>
   void main(){
     float pat = fpatch(vW.xz);
+  #ifdef BUSY_GRASS
     vec3 tip = mix(u_tip, u_dry, smoothstep(0.5, 0.9, pat) * 0.55 + vSeed * 0.12);
     tip = mix(tip, u_mid * 1.15, vTint * 0.35);
     vec3 col = mix(u_base, u_mid, smoothstep(0.0, 0.5, vY));
     col = mix(col, tip, smoothstep(0.35, 1.0, vY));
+  #else
+    // b9-grass-v4f (Shifat 10:15 PM "Also grass can be simpler"): the field read as busy pixel noise on the phone because
+    // every blade ran dark root -> bright tip with its own tint. Calmer: the colour follows the big soft meadow swaths,
+    // per-blade/clump variation a third, root-to-tip contrast about half (?busygrass = live)
+    vec3 tip = mix(u_tip, u_dry, smoothstep(0.5, 0.9, pat) * 0.55 + vSeed * 0.04);
+    tip = mix(tip, u_mid * 1.15, vTint * 0.12);
+    vec3 col = mix(mix(u_base, u_mid, 0.5), u_mid, smoothstep(0.0, 0.5, vY));
+    col = mix(col, mix(u_mid, tip, 0.7), smoothstep(0.35, 1.0, vY));
+  #endif
     vec3 V = normalize(cameraPosition - vW);
     vec3 N = normalize(vN);
     float wrap = clamp(dot(N, u_sun) * 0.5 + 0.5, 0.0, 1.0);
     vec3 amb = mix(u_bounce, u_sky, N.y * 0.5 + 0.5);
     float ao = mix(0.5, 1.0, smoothstep(0.0, 0.8, vY));          // soft occlusion down in the turf
+  #ifndef BUSY_GRASS
+    ao = mix(0.76, 1.0, smoothstep(0.0, 0.8, vY));               // b9-grass-v4f: shallower turf darkening
+  #endif
     vec3 c = col * (amb + u_sunCol * wrap * 0.45 * u_light) * ao;
     // translucency: looking toward the low sun, the upper blade transmits warm light
     float back = pow(max(dot(-V, u_sun), 0.0), 2.5);
+  #ifdef BUSY_GRASS
     c += u_trans * col * back * vY * vY * 1.9 * u_light;
+  #else
+    c += u_trans * col * back * vY * 1.2 * u_light;               // b9-grass-v4f: tips glow less sharply (vY, not vY^2)
+  #endif
     c *= 1.0 + vGust * 0.2 * vY;                                // gust sheen rolling across the field
     c *= mix(0.8, 1.04, smoothstep(0.2, 0.7, fvn(vW.xz * 0.045 + 3.1))); // soft cloud-shadow swaths: painterly depth
+  #ifndef BUSY_GRASS
+    // b9-grass-v4f: past ~10 m the blades melt into one soft turf tone (the blade's own lit colour, averaged up its
+    // height), so the far field is a smooth meadow instead of sub-pixel blade noise
+    { float dB = length(cameraPosition - vW); vec3 turf = mix(u_mid, tip, 0.45) * (amb + u_sunCol * wrap * 0.45 * u_light) * 0.92;
+      c = mix(c, turf, smoothstep(9.0, 30.0, dB) * 0.7); }
+  #endif
     c = fdepth(c, length(cameraPosition - vW));
     gl_FragColor = vec4(c, 1.0);
     #include <fog_fragment>

@@ -27,6 +27,7 @@ export function buildFireflies(n = 260) {
   g.setAttribute('aRnd', new THREE.BufferAttribute(rnd, 4))
   const material = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+    defines: (typeof location !== 'undefined' && /[?&]fasttw/.test(location.search)) ? { FAST_TW: 1 } : {},   // b9-twinkle-v4f A/B
     uniforms: { u_time: { value: 0 }, u_on: { value: 0 }, u_px: { value: 900 }, u_day: { value: 0 } },
     vertexShader: /* glsl */ `
       attribute vec4 aRnd;
@@ -38,9 +39,17 @@ export function buildFireflies(n = 260) {
         p += vec3(sin(t) * 0.9, sin(t * 1.3 + 2.0) * 0.45, cos(t * 0.8) * 0.9) * (0.6 + aRnd.z);
         vec4 mv = modelViewMatrix * vec4(p, 1.0);
         // a firefly glows for a second or two, then rests in the dark
+        #ifdef FAST_TW
         float ph = fract(u_time * (0.12 + aRnd.w * 0.16) + aRnd.x * 7.0);
         float blink = smoothstep(0.0, 0.18, ph) * (1.0 - smoothstep(0.32, 0.62, ph));
         vA = u_on * (0.18 + 0.82 * blink);
+        #else
+        // b9-twinkle-v4f (Shifat 10:17 PM "Blinking are too fast in starry sky scene. Make them very slow, calm"): the lights
+        // of the night sky blinked fully on/off on a 3.6-8.3 s clock (a ~1 s flash); now a calm, smooth breath over 14-33 s
+        // that never goes dark (35-65 %, the same mean glow as before)
+        float ph = u_time * (0.03 + aRnd.w * 0.04) * 6.2832 + aRnd.x * 44.0;
+        vA = u_on * (0.35 + 0.3 * (0.5 + 0.5 * sin(ph)));
+        #endif
         vC = mix(vec3(0.85, 1.0, 0.32), vec3(1.0, 0.78, 0.3), aRnd.z);
         float d = max(0.5, -mv.z);
         gl_PointSize = clamp(u_px * (0.2 + 0.1 * aRnd.y) / d, 2.5, 40.0);

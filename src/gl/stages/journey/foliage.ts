@@ -131,6 +131,7 @@ function* buildFluffyGrass(o: FoliageOptions, U: U): Generator<void, { mesh: THR
     side: THREE.DoubleSide, fog: true,
     uniforms: { ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), ...U, u_fadeFar: { value: range }, u_widen: { value: 0.05 }, u_fieldO: { value: new THREE.Vector2(camX, camZ) } },
     vertexShader: grassVert, fragmentShader: grassFrag,
+    defines: (typeof location !== 'undefined' && /[?&]busygrass/.test(location.search)) ? { BUSY_GRASS: 1 } : {},   // b9-grass-v4f A/B
   })
   // LOD by the camera's distance to the chunk's nearest point: full blade within ~10 m (a blade there is still tens of
   // px tall), the half blade to ~17 m, one triangle beyond (a few px tall, and the shader sinks it by 15–30 m anyway)
@@ -391,7 +392,19 @@ function* buildFluffyTrees(o: FoliageOptions, U: U): Generator<void, { meshes: T
     m.name = name
     meshes.push(m)
   }
-  const round = spots.filter((t) => t.kind === 'round'), pine = spots.filter((t) => t.kind === 'pine')
+  // b9-falltrees-v4f (Shifat 11:05 PM "Real ones" for the fall through the trees): the trunkless canopy crowns are off
+  // (JourneyStage); in their place three REAL tall trees (this same instanced broadleaf/conifer, same draw calls, 3 more
+  // instances) stand beside the fall line (6-8 m from it), crowns at ~8-16 m, so the camera drops past real crowns on trunks. Spots chosen
+  // from the inner camera's own path (timeline.inner, d12 + M02s frames): their crowns are in frame through journey
+  // 0.375-0.425 and every part of them is out of frame from 0.45 on (the meadow shot is unchanged), and they stand beside
+  // the camera at the frame edges (never over the crewmate). No shadow decals for them (the meadow floor is unchanged).
+  // OFF by default (B in the A/B, ?falltrees): at the 6-8 m these spots need, the crowns' leaf cards read as huge flat
+  // green blobs and cross the crewmate (frames journey 0.40-0.42, d12 + M02s); A (crowns off) ships
+  const FALL: Spot[] = !(typeof location !== 'undefined' && /[?&]falltrees/.test(location.search)) ? [] : [
+    { x: -4, z: 5, s: 4, kind: 'round' }, { x: -5, z: 6, s: 4, kind: 'pine' }, { x: 9, z: 3, s: 4, kind: 'round' },
+  ]
+  const all = spots.concat(FALL)
+  const round = all.filter((t) => t.kind === 'round'), pine = all.filter((t) => t.kind === 'pine')
   make(yield* broadleaf(q, 11), round.filter(near), 'foliage-round-near'); yield // PERFGOV
   make(yield* broadleaf(q * 0.45, 12), round.filter((t) => !near(t)), 'foliage-round-far'); yield // PERFGOV
   make(yield* conifer(q, 13), pine.filter(near), 'foliage-pine-near'); yield // PERFGOV

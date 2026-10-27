@@ -121,9 +121,13 @@ export function skyMaterial() {
   })
 }
 
+/** b9-twinkle-v4f: ?fasttw = the live twinkle (A/B) */
+const TW_DEF: Record<string, number> = (typeof location !== 'undefined' && /[?&]fasttw/.test(location.search)) ? { FAST_TW: 1 } : {}
+
 /** Star points: a gaussian core with a faint halo (bright ones bloom a touch), a slow, subtle scintillation. */
 export function starMaterial(pr: number) {
   return new THREE.ShaderMaterial({
+    defines: TW_DEF,   // b9-twinkle-v4f
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
     uniforms: { u_opacity: { value: 1 }, u_time: { value: 0 }, u_pr: { value: pr } },
     vertexShader: /* glsl */ `
@@ -131,7 +135,13 @@ export function starMaterial(pr: number) {
       varying vec3 vC; varying float vS;
       void main(){
         float ph = position.x * 3.1 + position.y * 1.7;
+        // b9-twinkle-v4f (Shifat 10:17 PM "Blinking are too fast in starry sky scene. Make them very slow, calm"): the
+        // scintillation was a 2.7-9 s cycle at +-14 %; now a 16-42 s breath at +-6 % (?fasttw = live)
+        #ifdef FAST_TW
         vC = aColor * (0.86 + 0.14 * sin(u_time * (0.7 + fract(ph) * 1.6) + ph));
+        #else
+        vC = aColor * (0.94 + 0.06 * sin(u_time * (0.15 + fract(ph) * 0.24) + ph));
+        #endif
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         gl_Position = projectionMatrix * mv;
         vS = aSize;
@@ -149,6 +159,7 @@ export function starMaterial(pr: number) {
 /** The few bright stars: a tight core, a soft halo and four thin diffraction spikes, gently breathing. */
 export function glintStarMaterial(pr: number) {
   return new THREE.ShaderMaterial({
+    defines: TW_DEF,   // b9-twinkle-v4f
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
     uniforms: { u_opacity: { value: 1 }, u_time: { value: 0 }, u_pr: { value: pr } },
     vertexShader: /* glsl */ `
@@ -156,6 +167,9 @@ export function glintStarMaterial(pr: number) {
       varying vec3 vC; varying float vA; varying float vTw;
       void main(){
         vC = aColor; vA = aAngle * 0.15; vTw = 0.9 + 0.1 * sin(u_time * 0.9 + aAngle * 7.0);
+        #ifndef FAST_TW
+        vTw = 0.94 + 0.06 * sin(u_time * 0.2 + aAngle * 7.0);   // b9-twinkle-v4f: spikes breathe over ~31 s (was ~7 s, +-10 %)
+        #endif
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         gl_Position = projectionMatrix * mv;
         gl_PointSize = aSize * u_pr;
@@ -203,7 +217,7 @@ export function screenMaterial(tex: THREE.Texture, size: THREE.Vector2) {
       // TUNNEL DRAMA (tunnelBlur.ts): the half-res zoom-blurred picture, how much of it to show (u_zoom), the vanishing
       // point it smears toward (u_zoomC, uv), the chromatic split at speed (u_chroma) and the warp flash (u_flash)
       u_blur: { value: tex }, u_zoom: { value: 0 }, u_zoomC: { value: new THREE.Vector2(0.5, 0.5) }, u_chroma: { value: 0 }, u_flash: { value: 0 },
-      u_crew: { value: null }, u_crewScale: { value: new THREE.Vector2(1, 1) },
+      u_crew: { value: null }, u_crewScale: { value: new THREE.Vector2(1, 1) }, u_crewBox: { value: new THREE.Vector4(0, 0, 0, 0) },   // b9-tablet-v4f: this frame's drawn crewmate box
       u_rock: { value: null }, u_rockScale: { value: new THREE.Vector2(1, 1) }, u_rockOn: { value: 0 },   // R7.10 b7: the rock layer
       // b9-earthedge-v1: Earth's limb rebuilt at this pass's pixel (JourneyStage.earthEdge sets these each frame)
       u_emOn: { value: 0 }, u_emO: { value: new THREE.Vector3() }, u_emX: { value: new THREE.Vector3() }, u_emY: { value: new THREE.Vector3() },
@@ -237,7 +251,7 @@ export function screenMaterial(tex: THREE.Texture, size: THREE.Vector2) {
     fragmentShader: /* glsl */ `
       uniform sampler2D u_map; uniform vec2 u_size; uniform float u_bright, u_time, u_gloss;
       uniform sampler2D u_blur; uniform vec2 u_zoomC; uniform float u_zoom, u_chroma, u_flash;
-      uniform sampler2D u_crew; uniform vec2 u_crewScale; // R6.87 SPLIT: the crewmate at the canvas density (crewLayer.ts)
+      uniform sampler2D u_crew; uniform vec2 u_crewScale; uniform vec4 u_crewBox; // R6.87 SPLIT: the crewmate at the canvas density (crewLayer.ts)
       uniform sampler2D u_rock; uniform vec2 u_rockScale; uniform float u_rockOn;   // R7.10 b7: the rocks at the background density
       uniform float u_emOn, u_emCos; uniform vec3 u_emO, u_emX, u_emY, u_emC, u_emBand; uniform vec2 u_emCuv, u_emPx, u_emPxI;   // b9-earthedge-v1
       varying vec2 vUv; varying vec3 vWPos; varying float vH;
@@ -257,7 +271,14 @@ export function screenMaterial(tex: THREE.Texture, size: THREE.Vector2) {
         vec3 col;
       #ifdef CREW_ONLY
         // R6.87 SPLIT: the overlay (hero pass) — the crewmate alone, through the same bent-glass lookup; alpha = coverage
-        vec4 cr = texture2D(u_crew, (vUv - off) * u_crewScale);
+        // b9-tablet-v4f (Shifat 10:11 PM, "Remove reflection here too": a sliced second crewmate beside the real one): only
+        // this frame's crewmate box may show. Outside it the crew target keeps texels of earlier frames (the MSAA resolve
+        // is scissored to the box, so older, larger draws stay in the texture), and the hero pass's box (trail margin, other
+        // heroes) is wider than the crewmate's, so those stale copies reached the screen, cut at the box edge. Same guard
+        // the dive tablet got in b7-space-v3 (tabletWindow.ts u_crewBox).
+        vec2 wu = vUv - off;
+        if (wu.x < u_crewBox.x || wu.y < u_crewBox.y || wu.x > u_crewBox.z || wu.y > u_crewBox.w) discard;
+        vec4 cr = texture2D(u_crew, wu * u_crewScale);
         if (cr.a < 0.003) discard;
         col = cr.rgb / cr.a;
       #else

@@ -18,6 +18,8 @@ import * as THREE from 'three'
  * the camera's own move from the space orbit to the falling chase happens inside it, unseen. Everything is a pure
  * function of the scroll (u) plus a slow shimmer: reversible, never frozen.
  */
+/** b9-gate-v4f: ?gatehard = the live hard rim (A/B) */
+const GATE_DEF: Record<string, number> = (typeof location !== 'undefined' && /[?&]gatehard/.test(location.search)) ? { GATE_HARD: 1 } : {}
 const BEND = /* glsl */ `
 vec2 bendAt(float d){ return vec2(sin(u_phase + d * 2.2), cos(u_phase * 0.7 + d * 1.7) * 0.6) * u_bend * d * d * u_len * 0.12; }
 `
@@ -29,7 +31,15 @@ vec3 zoneCol(float t){
   return mix(c, vec3(0.371, 0.125, 1.0), smoothstep(0.62, 0.68, t));
 }
 // the mouth: past u_mouth (m ahead) the tube is open (the world shows through); the last metres flare out like a horn
-float mouthOpen(float z){ return smoothstep(u_mouth - 3.0, u_mouth, z); }
+// b9-gate-v4f (Shifat 10:16 PM "Fade the circle gate borders"): the opening's rim was a hard circle against the black
+// tube, because 3 m of wall far down the bore projects to a pixel or two. The fade now spans a share of the mouth's own
+// distance (14 %, at least 3 m), so the rim feathers over a few % of the circle's radius at any distance (?gatehard = live)
+#ifdef GATE_HARD
+float mouthW(){ return 3.0; }
+#else
+float mouthW(){ return max(3.0, u_mouth * 0.14); }
+#endif
+float mouthOpen(float z){ float w = mouthW(); return smoothstep(u_mouth - w, u_mouth, z); }
 `
 const PAL = /* glsl */ `
 // the tube's colour drifts with the travel: silver-blue → electric violet → cyan (all cool: the site's night palette)
@@ -114,7 +124,26 @@ void main(){
   col = max(col - vec3(0.008), vec3(0.0));
   float near = smoothstep(0.5, 6.0, z);
   float alpha = u_on * near * (1.0 - mouthOpen(z));
+#ifdef GATE_HARD
   gl_FragColor = vec4(col * alpha, alpha);
+#else
+  // b9-gate-v4f: the hard circle Shifat saw is not the mouth's own fade. Once the mouth is more than ~22 m down the bore,
+  // the flared horn folds over in the picture: its screen radius (R/z) shrinks down the plain tube and grows again along
+  // the flare, so there is a ring of wall seen edge-on (the fold, ~9-15 m before the mouth) where the wall stops at full
+  // alpha: a 1-px edge from black wall to the world. The wall now fades out over the 3 m before that fold, so the rim
+  // feathers over a few % of the circle's radius; under ~22 m (no fold) the mouth fade above does it
+  float sm = u_mouth - z;
+  float kf = smoothstep(21.0, 24.0, u_mouth);
+  float sF = 16.3 - 160.0 / max(u_mouth, 1.0);                 // the fold's distance before the mouth (fitted, +-0.4 m)
+  alpha *= mix(1.0, smoothstep(sF - 0.3, sF + 3.0, sm), kf);
+  // (Shifat 10:17 PM "Add subtle glow too"): a thin, faint cool halo on the wall just outside the feathered rim
+  // (premultiplied add: it lifts the black a touch round the opening, never a bright ring); it goes as the tube goes
+  float mw = mouthW();
+  float gz = (sm - mix(mw * 1.1, sF + 1.0, kf)) / mix(mw * 0.9, 1.6, kf);
+  vec3 glowC = mix(vec3(0.42, 0.62, 1.0), u_outCol * 2.0 + vec3(0.05, 0.08, 0.12), 0.35);
+  vec3 glow = glowC * 0.03 * exp(-gz * gz) * u_on * near * smoothstep(3.0, 14.0, u_mouth);
+  gl_FragColor = vec4(col * alpha + glow, alpha);
+#endif
 }`
 
 /** the wall uniforms every tunnel material shares (one object: the stage sets them once per frame) */
@@ -132,7 +161,7 @@ export function buildTunnel(len = 140) {
   geo.rotateX(-Math.PI / 2)                  // axis along z
   geo.translate(0, 0, -len / 2 + 1.0)        // from just behind the lens to len ahead
   const uniforms = tunnelUniforms(len)
-  const material = new THREE.ShaderMaterial({
+  const material = new THREE.ShaderMaterial({ defines: GATE_DEF,
     vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthWrite: false, side: THREE.BackSide, fog: false,
     blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
     uniforms,
@@ -241,8 +270,8 @@ const ORBS = 220, RINGS = 18 // PERF HOOK (eng #5): one count on every tier — 
 /** the glow orbs/streaks (one instanced draw) and the pulse rings (one instanced draw), sharing the wall's uniforms */
 export function buildTunnelLights(uniforms: ReturnType<typeof tunnelUniforms>) {
   const common = { transparent: true, depthWrite: false, depthTest: true, fog: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide as THREE.Side }
-  const orbMat = new THREE.ShaderMaterial({ ...common, vertexShader: LIGHT_VERT, fragmentShader: LIGHT_FRAG, uniforms })
-  const ringMat = new THREE.ShaderMaterial({ ...common, vertexShader: RING_VERT, fragmentShader: RING_FRAG, uniforms })
+  const orbMat = new THREE.ShaderMaterial({ defines: GATE_DEF, ...common, vertexShader: LIGHT_VERT, fragmentShader: LIGHT_FRAG, uniforms })
+  const ringMat = new THREE.ShaderMaterial({ defines: GATE_DEF, ...common, vertexShader: RING_VERT, fragmentShader: RING_FRAG, uniforms })
   const orbs = new THREE.Mesh(instanced(ORBS, 11), orbMat)
   // b7-tunnel-v2: each ring is an annulus (|vQ| 0.62..1.3: the hoop and all of its glow above 0.3 %) instead of a full quad,
   // so its hollow middle is never shaded: the 18 rings were near-fullscreen quads as they passed the lens. Same look (the

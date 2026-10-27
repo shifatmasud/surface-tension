@@ -20,6 +20,7 @@ import { buildTunnel, buildTunnelLights, tunnelZoneColor } from './tunnel'
 /** b7-tunnel-v2: ?tunexit=old = the old exit (fade-out + white flash) for A/B */
 const QHIDE = typeof location !== 'undefined' ? (location.search.match(/[?&]qhide=([a-z,]+)/)?.[1] ?? '') : ''
 const TUN_OLDEXIT = /[?&]tunexit=old\b/.test(location.search)
+const OLD_CROWNS = /[?&]oldcrowns\b/.test(location.search)   // b9-leaves-v4f A/B
 const CREW_RIM0 = new THREE.Color('#7fdcff'), _zc = new THREE.Color()
 import { buildTunnelBlur } from './tunnelBlur' // TUNNEL DRAMA: half-res zoom blur
 const ROCK_HI = settings.TIER === 'low' && !/[?&]rocklo\b/.test(location.search)   // R7.10 b7
@@ -408,7 +409,12 @@ export function JourneyStage(): JSX.Element {
       fu.u_on.value = ss(0.26, 0.36, p) * mix(1, 0.45, ss(0.5, 0.62, p)) * (1 - ss(0.74, 0.8, p))
       S.fireflies.points.visible = fu.u_on.value > 0.002
       const cu = S.canopy.material.uniforms
-      cu.u_time.value = time; cu.u_on.value = ss(0.3, 0.35, p) * (1 - ss(0.455, 0.49, p))
+      // b9-leaves-v4f (Shifat 10:15 PM "Fix on air leaves too"): the see-through leaves in his video are these crowns: 16
+      // trunkless leaf discs at y 9-18 m that the camera falls through at journey ~0.385-0.415 (their own centre/size fade
+      // leaves them half transparent, so they read as leaves floating in the air), and that then hang in the sky ahead
+      // until 0.49. Frames showed the ghosts ARE the fall (LIVE page 70 %, journey 0.40), so ending them earlier could not
+      // fix it: the crowns are off (one draw fewer). ?oldcrowns = live
+      cu.u_time.value = time; cu.u_on.value = OLD_CROWNS ? ss(0.3, 0.35, p) * (1 - ss(0.455, 0.49, p)) : 0
       S.canopy.mesh.visible = cu.u_on.value > 0.002
     }
     const h = Math.max(0, I.crew.y)
@@ -624,6 +630,7 @@ export function JourneyStage(): JSX.Element {
         if (Math.max(cw, ch) > lim) { const k = lim / Math.max(cw, ch); cw *= k; ch *= k }
         S.crewL.render(gl, S.inner, S.icam, S.crewIn.root, S.rt, S.one, cw, ch)
         ;(S.screenMat.uniforms.u_crewScale.value as THREE.Vector2).copy(S.crewL.scale)
+        ;(S.screenMat.uniforms.u_crewBox.value as THREE.Vector4).copy(S.crewL.uvBox)   // b9-tablet-v4f: the overlay shows this box only
         gl.setRenderTarget(S.rt)
       }
       // R7.10 b7: the rocks at the background density (the screen's own pass samples them: no composite)
