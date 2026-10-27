@@ -282,6 +282,36 @@ export function TextLayer() {
         if (s.dir < 0 && done) { s.on = false; s.ot0 = -1; for (const L of s.lines) L.mat.uniforms.u_opacity.value = 0; if (!gl) s.dom.forEach((d) => { d.style.opacity = '0' }) }   // W19 (P0-4): a cleared beat leaves no glyph tops in the mask
       }
     }
+    // v5.5 (review: "Out of the screen" low-contrast on the bright meadow, phone 76–77%): a soft dark scrim under the
+    // slot, drawn in the slot pass just before the lines, only while the journey2 beat holds the slot. Full width, runs
+    // off the bottom and both sides, alpha rises from 0 on a smoothstep and is dithered: no edge, no band.
+    const J2 = IDX.get('journey2')!
+    let scrimA = 0
+    const scrimMat = gl ? new THREE.ShaderMaterial({
+      vertexShader: 'varying vec2 v_uv; void main(){ v_uv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: `uniform float u_a; uniform float u_ramp; varying vec2 v_uv;
+        float h(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+        void main(){ float y = clamp((1.0 - v_uv.y) / u_ramp, 0.0, 1.0); float a = u_a * y * y * (3.0 - 2.0 * y);
+          a += (h(gl_FragCoord.xy) - 0.5) / 255.0; gl_FragColor = vec4(0.0, 0.0, 0.0, clamp(a, 0.0, 1.0)); }`,
+      uniforms: { u_a: { value: 0 }, u_ramp: { value: 0.5 } },
+      transparent: true, depthTest: false, depthWrite: false,
+    }) : null
+    const scrim: UfxItem | null = scrimMat ? {
+      el: host, mesh: new THREE.Mesh(new THREE.PlaneGeometry(1, 1), scrimMat), layer: 'slot', fixed: true, selfPlaced: true,
+      docTop: 0, docLeft: 0, w: 0, h: 0, section: '', measure() { /* placed every frame */ },
+      visibleWhen: () => scrimA > 0.003,
+      onUpdate(it) {
+        const vw = ufx.w, vh = ufx.h, top = Math.min(slotBox.top, vh * 0.85) - 170, h = vh - top + 40
+        it.mesh.position.set(0, -(top + h / 2 - vh / 2), 0); it.mesh.scale.set(vw + 80, h, 1)
+        scrimMat!.uniforms.u_ramp.value = 230 / h; scrimMat!.uniforms.u_a.value = scrimA
+      },
+    } : null
+    if (scrim) { scrim.mesh.renderOrder = 5; ufx.add(scrim) }
+    const scrimTick = () => {
+      const on = active === J2 && document.documentElement.dataset.bg === 'dark'
+      scrimA += ((on ? 0.5 : 0) - scrimA) * (1 - Math.exp(-4 * Math.min(props.dt, 0.1)))
+    }
+    gsap.ticker.add(scrimTick)
     gsap.ticker.add(tick)
     let ro: ResizeObserver | null = null
     let gone = false
@@ -295,7 +325,7 @@ export function TextLayer() {
     const offVp = onViewport(onResize) // R7.07: real resizes only (not the address bar)
     return () => {
       gone = true; gen++
-      gsap.ticker.remove(tick); offVp(); window.removeEventListener('st:drop', onDrop); ro?.disconnect()
+      gsap.ticker.remove(tick); gsap.ticker.remove(scrimTick); if (scrim) { ufx.remove(scrim); scrim.mesh.geometry.dispose(); scrimMat!.dispose() }; offVp(); window.removeEventListener('st:drop', onDrop); ro?.disconnect()
       st.forEach((s) => s.lines.forEach((l) => ufx.remove(l.it))); splits.forEach((s) => s.revert())
       document.documentElement.classList.remove('slot-on')
     }
