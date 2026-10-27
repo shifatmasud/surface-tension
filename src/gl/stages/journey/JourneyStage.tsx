@@ -438,7 +438,7 @@ export function JourneyStage(): JSX.Element {
       // eases into the old day haze before touchdown, so the land meets the sky without a line and the forest is unchanged
       horizonColor(a, _hz)
       fog.color.copy(_hz).lerp(S.c.fogDay, ss(0.72, 1, a))
-      if (!HZ_OLD) { const u = S.skyMat.uniforms.u_hz.value as THREE.Vector4; u.set(fog.color.r, fog.color.g, fog.color.b, ss(0.25, 0.45, a)) }   // R7.07 D: the sky meets the haze (?hzold = 7.06)
+      if (!HZ_OLD) { const u = S.skyMat.uniforms.u_hz.value as THREE.Vector4; u.set(fog.color.r, fog.color.g, fog.color.b, ss(0.04, 0.1, a)) }   // R7.07 D: the sky meets the haze (?hzold = 7.06); v5.3: on from the moment the land shows (atmos 0.1, was 0.25-0.45: at page 67-68 % the fully hazed land met an un-hazed sky in a hard line)
       GROUND_U.u_high.value = ss(1.5, 9, I.crew.y) * (I.visible ? 1 : 0)
       GROUND_U.u_tint.value.copy(_tN).lerp(_tD, ss(0.18, 0.45, a)).lerp(_hzA.setRGB(1, 1, 1), ss(0.6, 0.9, a))
     }

@@ -179,14 +179,22 @@ export const floorFrag = /* glsl */ `
     if (u_high > 0.001) {
       float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
       float pt = fvn(vW.xz * 0.03) * 0.65 + fvn(vW.xz * 0.1 + 7.0) * 0.35;
-      vec3 c1 = mix(vec3(0.05, 0.16, 0.035), vec3(0.18, 0.34, 0.045), smoothstep(0.3, 0.72, pt));
+      float mw = smoothstep(0.38, 0.64, pt);   // v5.3: crisper woodland / meadow edges (was 0.3-0.72: soft blotches read as blur)
+      vec3 c1 = mix(vec3(0.05, 0.16, 0.035), vec3(0.18, 0.34, 0.045), mw);
       c1 = mix(c1, vec3(0.32, 0.43, 0.07), smoothstep(0.64, 0.82, fvn(vW.xz * 0.055 + 3.0)) * 0.55); // sunlit meadows
+      // v5.3 (phone 66-70 %: the land from high up had no detail below ~10 m, a still frame read as out of focus): tree
+      // crowns as clumps in the woodland, a fine grain in the meadows; faded out with distance (the haze has it there)
+      float dk = 1.0 - smoothstep(120.0, 270.0, d), dk2 = 1.0 - smoothstep(50.0, 130.0, d);
+      // (three rotated octaves, so the value-noise grid never shows as square blobs)
+      vec2 q1 = mat2(0.8, -0.6, 0.6, 0.8) * vW.xz, q2 = mat2(0.26, -0.97, 0.97, 0.26) * vW.xz;
+      float cr = fvn(vW.xz * 0.27 + 11.0) * 0.5 + fvn(q1 * 0.57 + 5.0) * 0.3 + mix(0.1, fvn(q2 * 1.13 + 2.0) * 0.2, dk2);
+      c1 *= mix(1.0, mix(0.7 + 0.5 * smoothstep(0.25, 0.75, cr), 0.92 + 0.16 * cr, mw), dk);
       c1 *= u_tint * (0.85 + 0.3 * clamp(l * 3.0, 0.0, 1.0));
       cd = mix(cd, c1, u_high);
     }
     gl_FragColor = vec4(cd, 1.0);
     #ifdef USE_FOG
-      float fogFactor = pow(smoothstep(fogNear, fogFar, vFogDepth), 1.0 + 1.4 * u_high);
+      float fogFactor = pow(smoothstep(fogNear, fogFar, vFogDepth), 1.0 + 2.2 * u_high);   // v5.3: 1.4 -> 2.2, near/mid land keeps its greens from high up (far land still fully hazed)
       gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, fogFactor);
     #endif
   }
