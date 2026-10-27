@@ -181,6 +181,7 @@ export function shatterMaterial(tex: THREE.Texture) {
       u_map: { value: tex }, u_t: { value: -1 }, u_crackR: { value: 0 }, u_ringR: { value: 0 }, u_tilt: { value: 0 },
       u_hole: { value: 4 }, u_k: { value: 1 }, u_time: { value: 0 }, u_impact: { value: new THREE.Vector2() },
       u_bright: { value: 1 }, u_gloss: { value: 0 }, u_frost: { value: 0 }, u_out: { value: 0 },
+      u_crackW: { value: 1.05 },
     },
     vertexShader: /* glsl */ `
       ${COMMON}
@@ -224,7 +225,7 @@ export function shatterMaterial(tex: THREE.Texture) {
       }`,
     fragmentShader: /* glsl */ `
       ${COMMON}
-      uniform sampler2D u_map; uniform float u_bright, u_gloss, u_frost;
+      uniform sampler2D u_map; uniform float u_bright, u_gloss, u_frost, u_crackW;
       varying vec2 vUv; varying float vEdge; varying float vKind; varying vec3 vN; varying vec3 vV; varying vec2 vRest; varying float vMove; varying vec4 vRand;
       vec3 thinFilm(float cosT, float d){ return 0.5 + 0.5 * cos(6.2831853 * (vec3(0.0, 0.33, 0.67) + d * (1.0 + 1.6 * (1.0 - cosT)))); }
       // a studio in view space: a big softbox up-left, a warm rim behind-right, a dim graphite room
@@ -263,7 +264,7 @@ export function shatterMaterial(tex: THREE.Texture) {
           col = mix(col, vec3(0.92, 0.95, 1.0), fr * 0.85);
           // cracks: drawn along the piece's own outline (constant pixel width), once the fracture front has passed
           float w = fwidth(vEdge);
-          float line = (1.0 - smoothstep(0.0, w * 1.05, vEdge)) * (0.55 + 0.45 * fract(sin(dot(floor(vRest * 9.0), vec2(12.9898, 78.233))) * 43758.5453));
+          float line = (1.0 - smoothstep(0.0, w * u_crackW, vEdge)) * (0.55 + 0.45 * fract(sin(dot(floor(vRest * 9.0), vec2(12.9898, 78.233))) * 43758.5453));
           float halo = 1.0 - smoothstep(0.0, w * 5.0, vEdge);
           float reach = vKind < 0.5 ? step(dist, u_crackR) : vKind < 1.5 ? step(dist, u_ringR) : 0.0;
           float lineA = line * reach * (1.0 - vMove) * (1.0 - u_out);

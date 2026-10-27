@@ -57,7 +57,7 @@ import { buildShatterGeometry, shatterMaterial, buildGlints } from './shatter'
 import { inner, outer, T, type Inner, type Outer } from './timeline'
 import { journeyAudio, resetJourneyAudio } from './journeyAudio'
 import { heroPass } from '../../post/heroPass' // R6.87 SPLIT
-import { SPLIT } from '../../quality'
+import { SPLIT, DENS_ONE, LOW_END_GPU } from '../../quality'
 import { CrewLayer } from './crewLayer'
 import { audio } from '../../../services/audio' // W29 R6.74: mute the primed cue calls
 import { viewport } from '../../../core/viewport'
@@ -91,6 +91,9 @@ function bezelGeometry(w: number, h: number, r: number, sw: number, sh: number) 
  * The stage never renders the main scene and never moves the camera: it writes journey.pose.
  */
 const RIM_PX = +(new URLSearchParams(location.search).get('rimpx') ?? 3) || 0   // R6.96: min rim width, background px (v5.11: 2 → 3; at 2 the top rim still broke into dashes on lowend phone / weak PC)
+// v5m: crack line width in pixels (x fwidth). At 1.05 a near-vertical crack broke into dashes in the low-density
+// background pass (lowend phone / weak PC); 1.6 keeps it one continuous thin line there. Sharp tiers keep 1.05. ?crackw=N overrides.
+const CRACK_W = +(new URLSearchParams(location.search).get('crackw') ?? ((DENS_ONE || LOW_END_GPU) ? 1.6 : 1.05)) || 1.05
 const CTA_GLIDE = new URLSearchParams(location.search).has('ctaglide')   // R6.92b: off = the CTA rides up as a sheet
 // b9-earthedge-v1: Earth's limb rebuilt in the screen pass at its own pixel (shaders.ts screenMaterial); ?eedge=0 = live
 const EARTH_EDGE = !/[?&]eedge=0\b/.test(location.search)
@@ -596,6 +599,7 @@ export function JourneyStage(): JSX.Element {
       u.u_t.value = O.shatterT; u.u_crackR.value = O.crackR; u.u_ringR.value = O.ringR; u.u_frost.value = O.frost; u.u_tilt.value = O.tilt
       u.u_hole.value = O.hole; u.u_k.value = start.k; u.u_impact.value.set(start.x, start.y); u.u_time.value = time
       u.u_bright.value = O.bright; u.u_gloss.value = O.gloss; u.u_out.value = shardOut
+      u.u_crackW.value = CRACK_W
     }
     S.glints.points.visible = O.shatterT > 0 && O.shatterT < 4
     if (S.glints.points.visible) {
