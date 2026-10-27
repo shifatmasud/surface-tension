@@ -301,7 +301,7 @@ ${hi ? '' : '      uniform sampler2D u_lakeTex; uniform float u_lakeComp; unifor
       }
 
       void main(){
-        if (u_wlClip > -0.5 && gl_FragCoord.y < (u_wlClip + wlEdgeS(gl_FragCoord.x / u_resolution.y, u_time)) * u_resolution.y) discard;   // W18-DIVE OVER-UNDER
+        if (u_wlClip > -0.5 && gl_FragCoord.y < (u_wlClip + wlEdge(gl_FragCoord.x / u_resolution.y, u_time)) * u_resolution.y) discard;   // W18-DIVE OVER-UNDER
 ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on phones = read back the low-res lake (alpha-normalised, so the lake's own edge never pulls in the cleared texels)
           vec4 lk = texture2D(u_lakeTex, clamp(gl_FragCoord.xy / u_resolution, u_lakeHalf, 1.0 - u_lakeHalf));
           // W29 R6.72 (Shifat: 'black lines at the end of the water surface'): the far lake is sub-texel slivers under the

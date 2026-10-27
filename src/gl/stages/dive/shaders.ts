@@ -1,4 +1,4 @@
-import { WL_EDGE, WS_OLD } from '../../water/waterline'
+import { WL_EDGE } from '../../water/waterline'
 /**
  * Dive shaders — written fresh. Underwater optics by cheap, honest approximations:
  *  - Beer–Lambert absorption per channel (red dies first): light reaching depth d is exp(−K·d)
@@ -145,7 +145,7 @@ void splitClip(){
   // world draws below it only (the air render shows above). The edge is shared with the lake and the post meniscus.
   if (u_split < -0.5) return;
   float x = gl_FragCoord.x / u_res.y;
-  float edge = u_split + wlEdgeS(x, u_time);   // R7.12 b8-water-v1
+  float edge = u_split + wlEdge(x, u_time);
   if (gl_FragCoord.y > edge * u_res.y) discard;
 }
 `
@@ -202,23 +202,8 @@ vec3 skyAir(vec3 a){
   return c;
 }
 
-#ifdef BD_LO_PASS
-// R7.12 b8-water-v1: the half-density shading now also runs through the over-under crossing (PostChain backdropLo), so
-// its own clip works in this target's pixels (u_loK = full / half size) and stops 3 half-density texels ABOVE the line:
-// the full-density blit's 5-tap footprint never reads a texel this pass skipped; the crisp cut is the blit's own splitClip
-uniform vec2 u_loK;
-void splitClipLo(){
-  if (u_split < -0.5) return;
-  vec2 fc = gl_FragCoord.xy * u_loK;
-  if (fc.y > (u_split + wlEdgeS(fc.x / u_res.y, u_time)) * u_res.y + 3.0 * u_loK.y) discard;
-}
-#endif
 void main(){
-#ifdef BD_LO_PASS
-  splitClipLo();
-#else
   splitClip();
-#endif
   vec3 dir = normalize(vDir);
   float dc = max(-u_cam.y, 0.02);
   float deepView = dc + max(-dir.y, 0.0) * 4.0;
@@ -262,11 +247,8 @@ void main(){
   }
 
   // god rays: march toward the surface / into the blue
-  float jit = texture2D(u_bn, gl_FragCoord.xy / 64.0).r;   // static blue noise: no pattern, no shimmer
-  // R7.12 b8-water-v1: phones run the shafts in the screen-space pass (u_rayGain 0 here); the march and its texture reads
-  // were still paid per pixel and multiplied by 0. Skipped now (a uniform branch). ?wsplit=old = paid as before
-  if (${WS_OLD ? 'true' : 'u_rayGain > 0.0'}) {
   float N = u_raySteps;
+  float jit = texture2D(u_bn, gl_FragCoord.xy / 64.0).r;   // static blue noise: no pattern, no shimmer
   vec3 acc = vec3(0.0);
   float dt = tEnd / N;
   for (int i = 0; i < 16; i++){
@@ -280,7 +262,6 @@ void main(){
   }
   float fwd = max(dot(dir, -u_sun), 0.0);
   col += acc * dt * u_rayGain * vec3(0.30, 0.78, 0.86) * (0.07 + 0.52 * pow(fwd, 2.5)) * (1.0 - u_deep); // shafts read as the star of the open-water frames
-  }
 
   col *= 1.0 - u_deep * 0.9;
   // v3: the deep's own glow, and the last light shafts slanting down into it (fading with depth)

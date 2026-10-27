@@ -36,8 +36,6 @@ const SURF_B4 = /[?&]surfb4\b/.test(location.search)   // R7.10 b5: ?surfb4 = bu
 import { waterInput } from '../../water/waterInput' // WATER HOOK
 import { gemMask } from '../../systems/stickerMask'
 import { heroPass } from '../../post/heroPass' // R6.87 SPLIT
-import { WS_OLD, wlEdgeJ, wlEdgeSJ } from '../../water/waterline' // R7.12 b8-water-v2
-const _wlP = new THREE.Vector3()
 /** PERFGOV: the water plane's normal, shared (the reflection pass rebuilt it every frame) */
 const WATER_UP = new THREE.Vector3(0, 1, 0)
 
@@ -502,15 +500,6 @@ export function HeroStage() {
       sheenMesh.current.onBeforeRender = (_r, _s, cam) => {
         const main = cam === camera
         su.u_split.value = main ? dive.split : -1
-        // R7.12 b8-water-v2: the sheen (locked gemSheen.ts) hides its air-side meniscus at the OLD edge (wlEdge); the lens line
-        // is now wlEdgeS. Shift its scalar split by the two edges' difference at the stone's screen x, so its band follows the
-        // new line through the stone's centre (exact there; off by the old edge's fine ripple toward the stone's sides)
-        if (main && dive.split > -0.5 && !WS_OLD) {
-          sheenMesh.current!.getWorldPosition(_wlP).project(cam)
-          const ax = (cam as THREE.PerspectiveCamera).aspect || 1
-          const x = (_wlP.x * 0.5 + 0.5) * ax, t = shared.u_time.value as number
-          su.u_split.value = dive.split + wlEdgeSJ(x, t) - wlEdgeJ(x, t)
-        }
         su.u_air.value = main ? (cam.position.y > 0 ? 1 : 0) : 1
       }
     }

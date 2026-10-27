@@ -5,7 +5,6 @@ import { DiveGodRaysPass } from './DiveGodRays'
 import { ClipCompositeEffect } from './ClipComposite'
 import { clip } from '../systems/clip'
 import { diveRays, diveLo, DIVE_LAYER } from '../stages/dive/diveState'
-import { WS_OLD } from '../water/waterline'   // R7.12 b8-water-v1
 import { journey } from '../stages/journey/journeyState'
 import { props, shared } from '../../state/props'
 import { settings } from '../../services/settings'
@@ -66,7 +65,6 @@ class BackdropLoPass extends Pass {
     if (this.rt.texture.type !== inputBuffer.texture.type) { this.rt.dispose(); this.rt.texture.type = inputBuffer.texture.type }
     if (this.rt.width !== w || this.rt.height !== h) this.rt.setSize(w, h)
     m.material = L.lo ?? L.full!
-    { const k = (m.material as THREE.ShaderMaterial).uniforms?.u_loK; if (k) k.value.set(W / w, H / h) }   // R7.12 b8-water-v1: the half-density pass's own lens clip
     const sc = renderer.getScissorTest(), ac = renderer.autoClear
     renderer.setScissorTest(false); renderer.autoClear = false   // the sphere covers every pixel
     renderer.setRenderTarget(this.rt); renderer.render(m, this.cam)
@@ -152,7 +150,7 @@ export class PostChain {
     const RAYS_M = !(typeof location !== 'undefined' && /[?&]raysep\b/.test(location.search))   // R7.10 b4: on (?raysep = 7.09's separate rays composite)
     const BD_LO = !(typeof location !== 'undefined' && /[?&]bdfull\b/.test(location.search))   // R7.10 b4: on (?bdfull = shaded at full density as in 7.09)
     const shown = (o: THREE.Object3D | null) => { for (let p = o; p; p = p.parent) if (!p.visible) return false; return !!o }
-    const backdropLo = () => DENS_ONE && PHONE && BD_LO && !(window as any).__bdLoOff && props.dpr >= 0.99 && !!diveLo.blit && shown(diveLo.mesh) && camera.layers.isEnabled(DIVE_LAYER) && (!WS_OLD || diveLo.split() < -0.5)   // R7.12 b8-water-v1: now also through the over-under crossing (the half pass clips 3 texels above the line, the full-density blit cuts it crisp); ?wsplit=old = full density while the line is in frame
+    const backdropLo = () => DENS_ONE && PHONE && BD_LO && !(window as any).__bdLoOff && props.dpr >= 0.99 && !!diveLo.blit && shown(diveLo.mesh) && camera.layers.isEnabled(DIVE_LAYER) && diveLo.split() < -0.5
     // R7.10 ONE PASS FEWER (phones + weak PC at the one density; first principles: each full-screen pass is a full write +
     // read of the frame on a tiled, low-bandwidth GPU): SMAA's blend joins the bloom + grade pass (SMAA first, then bloom and
     // the grade on its result) on every frame where nothing is drawn between them (no UI effects, no boundary composite)
