@@ -90,7 +90,7 @@ function bezelGeometry(w: number, h: number, r: number, sw: number, sh: number) 
  * picture that fly at the lens in a slow-motion beat (shatter.ts).
  * The stage never renders the main scene and never moves the camera: it writes journey.pose.
  */
-const RIM_PX = +(new URLSearchParams(location.search).get('rimpx') ?? 2) || 0   // R6.96: min rim width, background px
+const RIM_PX = +(new URLSearchParams(location.search).get('rimpx') ?? 3) || 0   // R6.96: min rim width, background px (v5.11: 2 → 3; at 2 the top rim still broke into dashes on lowend phone / weak PC)
 const CTA_GLIDE = new URLSearchParams(location.search).has('ctaglide')   // R6.92b: off = the CTA rides up as a sheet
 // b9-earthedge-v1: Earth's limb rebuilt in the screen pass at its own pixel (shaders.ts screenMaterial); ?eedge=0 = live
 const EARTH_EDGE = !/[?&]eedge=0\b/.test(location.search)
