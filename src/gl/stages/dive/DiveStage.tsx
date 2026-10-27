@@ -18,7 +18,7 @@ import { applyCaustics, causticUniforms, causticsFrame } from '../../water/caust
 import { DeepSea } from './DeepSea'
 import { UiCylinder } from './UiCylinder'
 import { prewarm, runToEnd } from '../../prewarm' // PERFGOV
-import { backdropVert, backdropFrag, BACKDROP_AMB, DIVE_COMMON as DC_LO, floorVert, floorFrag, siltVert, siltFrag, starVert, starFrag } from './shaders'
+import { backdropVert, backdropFrag, BACKDROP_AMB, DIVE_COMMON as DC_LO, CLIP as BD_CLIP, floorVert, floorFrag, siltVert, siltFrag, starVert, starFrag } from './shaders'
 
 const ss = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
 const Q = typeof location !== 'undefined' ? location.search : ''
@@ -164,7 +164,7 @@ export function DiveStage() {
     const defines = low ? { LOW: 1 } : {}
     const backdrop = new THREE.ShaderMaterial({
       vertexShader: backdropVert, fragmentShader: backdropFrag,
-      uniforms: { ...u, u_raySteps: { value: hi ? 14 : low ? 1 : 10 }, u_rayGain: { value: QA.noRays ? 1 : low ? 0 : 0.85 } },   // phones: the screen-space pass carries the shafts alone
+      uniforms: { ...u, u_raySteps: { value: hi ? 14 : low ? 1 : 10 }, u_rayGain: { value: QA.noRays ? 1 : low ? 0 : 0.85 }, u_loK: { value: new THREE.Vector2(2, 2) } },   // u_loK: R7.12 b8-water-v1 (the half-density pass's clip)   // phones: the screen-space pass carries the shafts alone
       side: THREE.BackSide, depthTest: false, depthWrite: false, defines,
     })
     const floor = new THREE.ShaderMaterial({ vertexShader: floorVert, fragmentShader: floorFrag, uniforms: { ...u }, defines, transparent: true })
@@ -188,9 +188,11 @@ export function DiveStage() {
     const backdropLo = new THREE.ShaderMaterial({
       vertexShader: backdropVert, fragmentShader: /* glsl */ `
 ${DC_LO}
+${BD_CLIP}
 uniform sampler2D tLo; uniform vec2 u_full, u_loSize;
 varying vec3 vDir;
 void main(){
+  splitClip();   // R7.12 b8-water-v1: the crossing's crisp lens cut, at the full density (the half-density pass stops just above it)
   // Catmull-Rom from 5 bilinear taps: as crisp as the smooth volume ever is, no bilinear blur, no ringing worth a pixel
   vec2 sp = gl_FragCoord.xy / u_full * u_loSize, tp = floor(sp - 0.5) + 0.5, f = sp - tp;
   vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f)), w1 = 1.0 + f * f * (-2.5 + 1.5 * f), w2 = f * (0.5 + f * (2.0 - 1.5 * f)), w3 = f * f * (-0.5 + 0.5 * f);

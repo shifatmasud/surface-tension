@@ -78,4 +78,8 @@ Add `?grid` to the URL to see the 12-column grid overlay.
 
 ## Credits
 
-All code, shaders and design are original, written for this site. Techniques (single clock, scroll sync, HTML-in-WebGL, post chain, fluid cursor trail, and the rest) were learned from Shifat's own handbook, *Lusion.co Decoded — Frontend Handbook*, and reimplemented from scratch. **No third-party site code, models, textures, copy or layouts were copied.** Project media is Shifat's own work; textures are generated or public domain.
+All code, shaders and design are original, written for this site. Techniques (single clock, scroll sync, HTML-in-WebGL, post chain, fluid cursor trail, and the rest) were learned from Shifat's own handbook, *Lusion.co Decoded — Frontend Handbook*, and reimplemented from scratch. **No third-party site code, models, textures, copy or layouts were copied.** Project media is Shifat's own work; textures are generated or public domain, except the two photo-derived water textures credited below.
+
+**Third-party texture credits.**
+- Lake bed texture (public/textures/water-bed.jpg) derived from 'Stones through the shallow water', Wikimedia Commons, CC BY-SA 3.0 — photo by Gareth Hart (Panoramio), https://commons.wikimedia.org/wiki/File:Stones_through_the_shallow_water_-_panoramio.jpg
+- Water ripple map (public/textures/water-ripple-n.jpg) derived from 'Mallnitz Stappitzer See Wasseroberfläche 02', Wikimedia Commons, CC BY-SA 4.0 — photo by Uoaei1, https://commons.wikimedia.org/wiki/File:Mallnitz_Stappitzer_See_Wasseroberfl%C3%A4che_02.jpg

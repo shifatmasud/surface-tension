@@ -17,6 +17,69 @@ import { settings } from '../../services/settings'
  *  - from below (dive): Snell's window, total internal reflection outside it
  * Units are metres; the camera floats ~1.4 m over a calm lake.
  */
+// R7.12 b8-surface-v1 (Shifat 5:03 "touch water surface", 5:04 "A bit transparent refractive water lake"): the fine
+// ripples and the bed's caustic light now come from a real photo (files/r711/refs/surface/s00, Mallnitz Stappitzer See,
+// Wikimedia Commons, CC BY-SA 4.0): its near rows de-foreshortened 2.1x, high-passed, made seamless; R,G = the ripple
+// slope (luminance taken as height), B = the caustic filaments. 256 px JPEG, 27 KB. ?wsurf=old = the procedural b8 lake
+// R7.12 b8-surface-v3 (Shifat 5:58 "Stone reflection, underwater refraction, ambience can be better on water surface"):
+// a crisper, brighter, Fresnel-led stone mirror + a soft contact reflection; the bed and the submerged stone bend
+// further with the ripples and the swell, a dancing caustic net, depth blur/darkening; a calm white-sky gradient,
+// a soft sun path, crest sparkle and a longer haze; the mid-distance swell bands damped; finer near ripples.
+// R7.12 b8-surface-v4 (Shifat 6:28 "We can go better water surface. No?", 7:20 "cleaner. Bigger ripples waves"): a real
+// photo bed (s09 pebbles, one textureLod, replaces the procedural bed), ~3.6x longer and softer photo waves, soft broad
+// highlights instead of crest twinkle/glints, a larger softer net, depth tint; CPU-built mips (the warm-up upload left
+// black mips); v3 extras cut on the low tiers for cost (contact pool HI only, fog/horizon pow removed, 2nd net layer ≤4 m)
+export const WSURF_OLD = typeof location !== 'undefined' && /[?&]wsurf=old\b/.test(location.search)
+// R7.12 b8-surface-v4 (found in the M02s sim): a photo texture uploaded early in the page's life came out with every mip
+// level above 0 black (generateMipmap during the warm-up): the bed read black under textureLod, and the ripple map's
+// mid-distance mips too (v1–v3's sim frames read black ripple/net texels past ~1 texel per pixel). The mip chain is now
+// built on the CPU at load (2x box halving on a canvas, ~1 ms) and uploaded explicitly, so no generateMipmap is involved
+function withMips(tx: THREE.Texture, on: { value: number }) {
+  const img = tx.image as HTMLImageElement | undefined
+  try {
+    if (img && img.width > 0 && typeof document !== 'undefined') {
+      const mips: HTMLCanvasElement[] = []
+      let w = img.width, h = img.height, src: CanvasImageSource = img
+      for (;;) {
+        const c = document.createElement('canvas'); c.width = w; c.height = h
+        const g = c.getContext('2d'); if (!g) throw new Error('no 2d')
+        g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high'; g.drawImage(src, 0, 0, w, h)
+        mips.push(c); src = c
+        if (w === 1 && h === 1) break
+        w = Math.max(1, w >> 1); h = Math.max(1, h >> 1)
+      }
+      tx.mipmaps = mips as any; tx.generateMipmaps = false
+    }
+  } catch { /* fall back to three's generated mips */ }
+  tx.needsUpdate = true; on.value = 1
+}
+const RIPN_URL = (((import.meta as any).env?.BASE_URL as string | undefined) ?? '/') + 'textures/water-ripple-n.jpg'
+let ripN: THREE.Texture | null = null
+function ripTex(on: { value: number }) {
+  if (!ripN) {
+    ripN = new THREE.TextureLoader().load(RIPN_URL, (tx) => withMips(tx, on))
+    ripN.wrapS = ripN.wrapT = THREE.RepeatWrapping
+    ripN.colorSpace = THREE.NoColorSpace
+    ripN.generateMipmaps = true; ripN.minFilter = THREE.LinearMipmapLinearFilter; ripN.anisotropy = settings.TIER === 'high' ? 4 : 2   // b8-surface-v3 (Tester: PC weakgpu ×1.06 in v2, the 4x reads): 2 on the phone/weak tier; b8-surface-v2: grazing ripples stay sharp along the view instead of smearing flat (three clamps to the GPU's max)
+  } else if (ripN.image) on.value = 1
+  return ripN
+}
+// R7.12 b8-surface-v4 (Shifat 6:28 "We can go better water surface. No?"; root: the bed read as a grey light net, the refs
+// r03/r08 show a real bed): the lake bed's albedo is a real photo of pebbles under shallow water — files/r711/refs/surface/
+// s09 "Stones through the shallow water" (Wikimedia Commons, panoramio, CC BY-SA 3.0; the ref folder's pebble shot, same
+// shore type as r07/r08 Sand Harbor): rows 335–700 de-foreshortened, illumination flattened, made seamless, green
+// neutralised to a warm/cool grey; 512x256 (the 2:1 tile is world-square at 5.6 x 2.8 m: rounded stones ~20–50 cm), 53 KB JPEG
+const BED_URL = (((import.meta as any).env?.BASE_URL as string | undefined) ?? '/') + 'textures/water-bed.jpg'
+let bedT: THREE.Texture | null = null
+function bedTex(on: { value: number }) {
+  if (!bedT) {
+    bedT = new THREE.TextureLoader().load(BED_URL, (tx) => withMips(tx, on))
+    bedT.wrapS = bedT.wrapT = THREE.RepeatWrapping
+    bedT.colorSpace = THREE.NoColorSpace   // read as the albedo multiplier the old procedural bed used (linear-ish, palette-matched)
+    bedT.generateMipmaps = true; bedT.minFilter = THREE.LinearMipmapLinearFilter
+  } else if (bedT.image) on.value = 1
+  return bedT
+}
 export function createWaterMaterial() {
   const hi = settings.TIER === 'high' || settings.TIER === 'mid'
   const uniforms = {
@@ -46,6 +109,10 @@ export function createWaterMaterial() {
     u_touch: { value: 0 },                                           // 0..1 how deep the stone's tip is in the water (meniscus)
     u_lipSoft: { value: 1 },                                          // R7.10 PATCHER: the low tiers' soft meniscus lip (0 = build 7, QA)
     u_glint: { value: 1 },
+    u_ripOn: { value: 0 },   // R7.12 b8-surface-v1: 1 once the photo ripple map has loaded
+    u_ripN: { value: null as THREE.Texture | null },
+    u_bedOn: { value: 0 },   // R7.12 b8-surface-v4: 1 once the photo bed has loaded
+    u_bedTex: { value: null as THREE.Texture | null },
     u_dbg: { value: 0 },
     u_underTex: { value: null as THREE.Texture | null },          // the submerged stone (screen space), for refraction
     u_underOn: { value: 0 },
@@ -58,10 +125,12 @@ export function createWaterMaterial() {
     // shader, so the depth is full-res and exact: the stone's edge and the meniscus line stay crisp) then only reads it back.
     ...(hi ? {} : { u_lakeTex: { value: null as THREE.Texture | null }, u_lakeComp: { value: 0 }, u_lakeHalf: { value: new THREE.Vector2(0, 0) } }),
   }
+  if (!WSURF_OLD) uniforms.u_ripN.value = ripTex(uniforms.u_ripOn)
+  if (!WSURF_OLD) uniforms.u_bedTex.value = bedTex(uniforms.u_bedOn)
   if (/[?&]qa\b/.test(location.search)) ((window as any).__wus ??= []).push(uniforms)   // R7.10 PATCHER QA: lip A/B
   const material = new THREE.ShaderMaterial({
     uniforms,
-    defines: { HI: hi ? 1 : 0, WSIN: /[?&]whash\b/.test(location.search) ? 0 : 1, WAB: parseInt(new URLSearchParams(location.search).get('wab') || '0') | 0, RX5: /[?&]rx3\b/.test(location.search) ? 0 : 1, RXW: (parseFloat(new URLSearchParams(location.search).get('rxw') || '') || 2.2).toFixed(3), RSV: (parseFloat(new URLSearchParams(location.search).get('rsv') || '') || 0.004).toFixed(5) },   // R7.10 b5: ?wsin = the sine hash
+    defines: { WSURF: WSURF_OLD ? 0 : 1, HI: hi ? 1 : 0, WSIN: /[?&]whash\b/.test(location.search) ? 0 : 1, WAB: parseInt(new URLSearchParams(location.search).get('wab') || '0') | 0, RX5: /[?&]rx3\b/.test(location.search) ? 0 : 1, RXW: (parseFloat(new URLSearchParams(location.search).get('rxw') || '') || 2.2).toFixed(3), RSV: (parseFloat(new URLSearchParams(location.search).get('rsv') || '') || 0.004).toFixed(5) },   // R7.10 b5: ?wsin = the sine hash
     side: THREE.DoubleSide,
     vertexShader: /* glsl */ `
       uniform sampler2D u_rippleTexture; uniform vec2 u_rippleTexel; uniform float u_poolSize, u_rippleAmp, u_time, u_swell, u_rippleShade;
@@ -91,7 +160,12 @@ export function createWaterMaterial() {
       uniform vec3 u_rippleGate;
       uniform sampler2D u_reflTex; uniform float u_reflOn; uniform float u_gemReflK;
       uniform float u_bedDepth, u_cauRipple, u_refrK; uniform vec3 u_absorb, u_sigS; uniform vec3 u_scatter; uniform vec3 u_bedColor;
-      uniform vec4 u_gem; uniform vec3 u_gemTint; uniform float u_touch, u_lipSoft, u_glint, u_dbg, u_underOn, u_cau; uniform sampler2D u_underTex; uniform vec2 u_resolution; uniform float u_fogNear, u_fogFar, u_rLow;
+      uniform vec4 u_gem; uniform vec3 u_gemTint; uniform float u_touch, u_lipSoft, u_glint, u_dbg, u_underOn, u_cau;
+      #if WSURF
+      uniform sampler2D u_ripN; uniform float u_ripOn; uniform sampler2D u_bedTex; uniform float u_bedOn;
+      uniform highp mat4 projectionMatrix;   // b8-surface-v3: the analytic pixel footprint
+      #endif
+      uniform sampler2D u_underTex; uniform vec2 u_resolution; uniform float u_fogNear, u_fogFar, u_rLow;
       uniform float u_wlClip;   // W18-DIVE OVER-UNDER: -1 off, else the lens waterline (screen y); the lake draws above it only
 ${hi ? '' : '      uniform sampler2D u_lakeTex; uniform float u_lakeComp; uniform vec2 u_lakeHalf;   // LAKERES (phones); W29: half a low-res texel, the read-back UV inset\n'}      ${WL_EDGE}
       varying vec3 v_world; varying vec2 v_ruv; varying float v_rmask; varying vec4 v_refl;
@@ -104,13 +178,22 @@ ${hi ? '' : '      uniform sampler2D u_lakeTex; uniform float u_lakeComp; unifor
         float c = cos(dot(p, d) * k - u_time * w + ph);
         return d * (a * k * c);
       }
-      vec2 swellGrad(vec2 p){
+      vec2 swellGrad(vec2 p, float far){
         vec2 g = vec2(0.0);
         g += wave(p, vec2(0.83, 0.55), 0.92, 0.016, 0.0);
         g += wave(p, vec2(-0.42, 0.91), 1.55, 0.010, 1.7);
-        g += wave(p, vec2(0.97, -0.24), 2.9, 0.0045, 4.1);
-        g += wave(p, vec2(0.2, 0.98), 4.6, 0.0026, 2.3);
-        g += wave(p, vec2(-0.88, 0.47), 7.4, 0.0013, 5.9);
+        #if WSURF
+        // R7.12 b8-surface-v3 (4–6 %: faint horizontal swell bands mid-distance): seen at grazing angles the long-crested
+        // 2.9–7.4 /m swells tilt whole rows of the reflected horizon band at once, which prints as stripes across the lake;
+        // they ease off with distance (the photo ripples carry the texture there) and the longest two calm a little
+        g *= (1.0 - 0.35 * far) * 1.15;   // b8-surface-v4 (Shifat 7:20 "bigger waves"): the long swells a touch taller
+        float hiK = (1.0 - 0.8 * far) * 0.5;   // b8-surface-v4: the short 2.9–7.4 /m swells halved (cleaner)
+        #else
+        const float hiK = 1.0;
+        #endif
+        g += wave(p, vec2(0.97, -0.24), 2.9, 0.0045, 4.1) * hiK;
+        g += wave(p, vec2(0.2, 0.98), 4.6, 0.0026, 2.3) * hiK;
+        g += wave(p, vec2(-0.88, 0.47), 7.4, 0.0013, 5.9) * hiK;
         return g * u_swell;
       }
       // ---- micro detail: gradient noise with analytic derivatives (fresh implementation) ------
@@ -180,7 +263,11 @@ ${hi ? '' : '      uniform sampler2D u_lakeTex; uniform float u_lakeComp; unifor
         vec2 so = (rot * (dc + normalize(u_sunDir.xz + 1e-4) * rad * 0.35)); so.x *= 0.8 + 0.45 * hh.x;
         float sh = (1.0 - smoothstep(-0.02, 0.07, length(so) - rad)) * present;
         vec3 pc = u_bedColor * mix(0.74, 0.93, fract(h3 * 7.13)) * (0.94 + 0.06 * sqrt(max(0.0, 1.0 - pow(length(d) / rad, 2.0))))
-                * (0.95 + 0.05 * gnoise(p * 31.0 + h3 * 9.0).x);   // close to the sand's value, mottled: stones, not holes
+                #if WSURF
+                * (0.95 + 0.05 * gnoise(p * 31.0 + h3 * 9.0).x * (1.0 - smoothstep(0.15, 0.4, w * 31.0)));   // R7.12 b8-surface-v2: AA'd (aliased to grain on the phone's reduced lake target)
+                #else
+                * (0.95 + 0.05 * gnoise(p * 31.0 + h3 * 9.0).x);
+                #endif   // close to the sand's value, mottled: stones, not holes
         c *= 1.0 - sh * (1.0 - m) * 0.08;
         return mix(c, pc, m);
       }
@@ -214,7 +301,7 @@ ${hi ? '' : '      uniform sampler2D u_lakeTex; uniform float u_lakeComp; unifor
       }
 
       void main(){
-        if (u_wlClip > -0.5 && gl_FragCoord.y < (u_wlClip + wlEdge(gl_FragCoord.x / u_resolution.y, u_time)) * u_resolution.y) discard;   // W18-DIVE OVER-UNDER
+        if (u_wlClip > -0.5 && gl_FragCoord.y < (u_wlClip + wlEdgeS(gl_FragCoord.x / u_resolution.y, u_time)) * u_resolution.y) discard;   // W18-DIVE OVER-UNDER
 ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on phones = read back the low-res lake (alpha-normalised, so the lake's own edge never pulls in the cleared texels)
           vec4 lk = texture2D(u_lakeTex, clamp(gl_FragCoord.xy / u_resolution, u_lakeHalf, 1.0 - u_lakeHalf));
           // W29 R6.72 (Shifat: 'black lines at the end of the water surface'): the far lake is sub-texel slivers under the
@@ -232,7 +319,16 @@ ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on p
         // WATER LANE: derivative-aware detail. fp = the pixel's footprint on the water in metres; each octave fades as
         // its wavelength approaches two pixels (no shimmer at grazing angles), and the sim's ripples fade once a pixel
         // spans its texels. The old fixed distance fade stays only as a far backstop.
+        #if WSURF
+        // R7.12 b8-surface-v3 (Tester, v2 3x crop: stair-stepped square edges in the light net): fwidth() is one value per
+        // 2x2 quad, so every footprint-driven fade (ripple octaves, net contrast, bed blur) stepped in quads, which the
+        // 0.65x lake target upscaled into ~3 px blocks. The footprint of a level water plane is analytic and smooth per
+        // pixel: across = dist·θ, along the view = dist·θ/|V.y| (θ = one pixel's angle). Cheaper than fwidth, too
+        float pxA = 2.0 / (projectionMatrix[1][1] * u_resolution.y);
+        float fp = max(dist * pxA * sqrt(1.0 + 1.0 / max(V.y * V.y, 0.0025)), 1e-4);
+        #else
         float fp = max(length(fwidth(v_world.xz)), 1e-4);
+        #endif
         // PERF (water-perf, Shifat "heavy & wide for phone"): past u_fogFar the aerial-perspective fog is exactly 1, so the
         // lake's final colour there is exactly u_skyHorizon whatever the optics computed. Most of the 500 m plane's
         // triangles sit out there as thin slivers under the horizon; they now cost one colour instead of the full shader
@@ -242,7 +338,8 @@ ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on p
           #include <colorspace_fragment>
           return;
         }
-        vec2 g = swellGrad(v_world.xz);
+        vec2 g = swellGrad(v_world.xz, smoothstep(3.5, 12.0, dist));
+        vec2 gSw = g;   // R7.12 b8-surface-v3: the smooth swell alone (sun path, slow bed wobble)
         vec2 rg = vec2(0.0); float rlap = 0.0;
         float cellM = 2.0 * u_poolSize * u_rippleTexel.x;                  // central-difference span of the sim (m)
         // R7.11 b6 (Shifat's real M02s: "crisp floor ... then it changes to lighter water" on scroll; emulation never showed it):
@@ -260,14 +357,44 @@ ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on p
           g += rg;
         }
         float detailFade = 1.0 - smoothstep(14.0, 40.0, dist);
+        vec2 gTex = vec2(0.0);   // R7.12 b8-surface-v2: the photo ripple's own slope (the stone mirror takes less of it)
+        #if WSURF
+        vec2 wind = vec2(0.32, 0.11) * u_time * (u_ripOn > 0.5 ? 0.75 : 1.0);   // b8-surface-v3: softer, slower drift
+        #else
         vec2 wind = vec2(0.32, 0.11) * u_time;
+        #endif
         // cat's paws: wind gusts drift across the lake, so the fine chop comes and goes in soft patches (calm glassy
         // lanes beside rougher ones) instead of one uniform texture: the cue that sells real water at a glance
         // PERF (water-perf): the chop's weight (detailFade × octAA, and the finer octaves fade before the coarse one) is
         // exactly 0 where a pixel spans its wavelength: skip the noise there (adding x * 0 changes nothing)
-        if (detailFade * octAA(fp, 2.1) > 0.0 && (WAB & 16) == 0) {
+        #if WSURF
+        const float CHOPF = 1.9;   // b8-surface-v4: the gate follows the bigger photo waves' own fade (no step where k1 > 0)
+        #else
+        const float CHOPF = 2.1;
+        #endif
+        if (detailFade * octAA(fp, CHOPF) > 0.0 && (WAB & 16) == 0) {
         float gust = 0.5 + 0.5 * gnoise(v_world.xz * 0.16 + vec2(u_time * 0.05, -u_time * 0.02)).x;
         float gustK = mix(0.45, 1.5, smoothstep(0.25, 0.8, gust));
+        #if WSURF
+        if (u_ripOn > 0.5) {
+          // R7.12 b8-surface-v1: two scales of the photo's own ripple slope (s00), the second turned 90° and drifting
+          // the other way so the tile never repeats visibly; mipmapped, so far ripples blur instead of shimmering
+          // b8-surface-v3: ~1.35x finer near the lens (refs r03/r08), drifting ~25 % slower (calm), faded at the new scale
+          // R7.12 b8-surface-v4 (Shifat 7:20 "The water surface need to be cleaner. Bigger ripples waves"): the photo ripples
+          // ~3.6x longer (0.325 → 0.09 /m, 0.74 → 0.2 /m), read one mip softer (bias 1.2: the photo's fine crinkle is gone,
+          // the waves are broad and rounded), drifting slowly; the second layer is weaker (fewer, larger waves). Faded at
+          // their new, larger scale (they hold further out: big waves are visible further)
+          float k1 = detailFade * gustK * octAA(fp, 1.9), k2 = detailFade * gustK * octAA(fp, 4.0);
+          // PERF (b8-surface-v3): a read whose weight is exactly 0 is skipped (bit-identical): the fine one past ~14 px/m
+          if (k1 > 0.0) { const mat2 R1 = mat2(0.9703, -0.2419, 0.2419, 0.9703); gTex = ((texture2D(u_ripN, R1 * v_world.xz * 0.09 + wind * 0.055, 1.2).rg * 2.0 - 1.0) * R1) * 0.125 * k1; }   // 14°: off the world grid
+          // b8-surface-v3 (Tester: a square grid at 4 %): the second layer turned 61° (v2: exactly 90°, which kept both layers
+          // on the tile's axes and printed its repeat as a grid); its slope is turned back into world axes (v·R = Rᵀv)
+          if (k2 > 0.0) { const mat2 R2 = mat2(0.4848, -0.8746, 0.8746, 0.4848); vec2 t2 = texture2D(u_ripN, R2 * v_world.xz * 0.2 - wind * 0.1 + 0.37, 1.2).rg * 2.0 - 1.0; gTex += (t2 * R2) * 0.035 * k2; }
+          g += gTex;
+        }
+        #else
+        // b8-surface-v4 (cost): the procedural chop is the ?wsurf=old lake only; the photo lake compiles without it (on the
+        // low tiers the sim pays for every instruction in the program, taken branch or not)
         vec3 n1 = gnoise(v_world.xz * 2.1 + wind);
         g += n1.yz * 0.05 * detailFade * gustK * octAA(fp, 2.1);
         #if HI
@@ -275,6 +402,7 @@ ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on p
           g += n2.yz * 0.012 * detailFade * gustK * octAA(fp, 5.3);
           vec3 n3 = gnoise(v_world.xz * 13.0 + wind * 2.6 - 4.0);
           g += n3.yz * 0.005 * detailFade * gustK * octAA(fp, 13.0);
+        #endif
         #endif
         }
         vec3 N = normalize(vec3(-g.x, 1.0, -g.y));
@@ -295,11 +423,29 @@ ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on p
             float strip = max(s1, s2 * 0.8) * smoothstep(9.0, 3.0, abs(q.y));
             refl = mix(refl, refl * vec3(0.8, 0.85, 0.93), strip * 0.7);   // cool dark flags (background darker & cooler)
           }
+          #if WSURF
+          if (u_ripOn > 0.5) {
+            // R7.12 b8-surface-v2 (refs s02/s05/s07: at grazing angles a lake mirrors a darker far shore under a brighter
+            // sky, so every ripple's tilt swaps the two and the ripple shape reads far away): a soft cool-grey horizon band
+            // in the reflected sky (low R.y), and a gentle brighter step above it; neutral white-grey, ≤ −7 %
+            // b8-surface-v3 (ambience): a wider, gentler band (−4.5 %, σ 0.09: its slope in R.y is ~half v2's, so the swell no
+            // longer prints it as stripes at 4–6 %) and a long soft white gradient up to the zenith — calm, still pure white
+            float hbx = (R.y - 0.05) / 0.09; float hb = exp(-hbx * hbx);   // b8-surface-v4: x·x, not pow (cost)
+            refl *= mix(1.0, 0.955, hb) * (0.965 + 0.05 * smoothstep(0.03, 0.55, R.y));   // neutral (Shifat 5:38: "our sky is pure white peaceful color. Water reflects it")
+          }
+          #endif
           // planar reflection of the diamond, wobbled by the surface normal
           if (u_reflOn > 0.5 && (WAB & 4) == 0) {
             // ripples wobble it (more across than along: water breaks a reflection into horizontal bands), and a short
             // vertical smear of taps stretches it the way a slightly moving surface does
+            #if WSURF
+            // R7.12 b8-surface-v3 (Shifat 5:58 "Stone reflection"): the mirror takes the slow swell in full (a gentle waver)
+            // but only a fifth of the fine photo chop (v2: 70 %), so the stone stays readable, distorted, not shredded
+            vec2 Nm = normalize(vec3(-(g.x - 0.8 * gTex.x), 1.0, -(g.y - 0.8 * gTex.y))).xz;
+            vec4 ruv = v_refl; ruv.xy += Nm * vec2(0.1, 0.26) * ruv.w;
+            #else
             vec4 ruv = v_refl; ruv.xy += N.xz * vec2(0.1, 0.26) * ruv.w;
+            #endif
             // water breaks a near reflection into horizontal bands that slide sideways: a band-limited wobble across
             // (x) that varies along the view depth (z), growing away from the waterline
             if (octAA(fp, 6.0) > 0.0) {   // PERF (water-perf): the band wobble's weight is exactly 0 past ~2 px bands: skip its 2 noises + 1 tap
@@ -321,6 +467,9 @@ ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on p
             // along the view, more the farther the reflected point is from where the stone meets the water; the smear now grows
             // from the contact out (riptide v2 got its softness from a 20x45 mirror instead). ?rsv=<base> (b5: 0.0008, flat)
             vec2 sv = vec2(0.0, RSV) * (1.0 + 4.0 * length(rg)) * mix(0.5, 1.5, smoothstep(0.1, 1.2, length(v_world.xz - u_gem.xz)));
+            #if WSURF
+            sv *= 0.72;   // b8-surface-v3: a crisper mirror (the 5-tap X keeps its edges soft, no steps)
+            #endif
             #if HI
             vec4 pr = texture2DProj(u_reflTex, ruv) * 0.28;
             pr += (texture2DProj(u_reflTex, ruv + vec4(sv, 0.0, 0.0) * ruv.w) + texture2DProj(u_reflTex, ruv - vec4(sv, 0.0, 0.0) * ruv.w)) * 0.22;
@@ -353,14 +502,48 @@ ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on p
           float depthHere = u_bedDepth + smoothstep(3.0, 20.0, length(v_world.xz - cameraPosition.xz)) * 2.0; // shelves away from the viewer
           float tb = (depthHere + v_world.y) / max(-T.y, 0.05);
           vec3 bed = v_world + T * tb;
+          #if WSURF
+          // R7.12 b8-surface-v2 (refs s07/s09: the bed visibly wobbles under the ripples): the true Snell shift at this
+          // depth is a few mm, too small to read on a phone; the photo ripple's slope bends the bed ~2.5x further
+          // b8-surface-v3 (Shifat 5:58 "underwater refraction"; r03/r08: the floor visibly bends, offsets and wobbles): the
+          // photo ripple bends it ~1.6x further, and the slow swell slides it as a whole (a gentle wobble; low frequency, so
+          // it never aliases); both fade with distance where the bed is under the Fresnel sheen anyway
+          bed.xz += (gTex * 1.15 * (1.0 - smoothstep(0.02, 0.06, fp)) + (gSw + rg) * 2.2) * depthHere * (1.0 - smoothstep(3.0, 9.0, dist));
+          #endif
           vec3 Ls = refract(-u_sunDir, vec3(0, 1, 0), 1.0 / 1.333);       // sunlight inside the water
           float ls = depthHere / max(-Ls.y, 0.1);
           vec2 cp = bed.xz + N.xz * depthHere * 0.35;                      // the local normal shears the network
+          #if WSURF
+          cp += gSw * depthHere * 3.0;   // b8-surface-v3: the swell overhead focuses and slides the net (it dances, not drifts)
+          #endif
           // PERF (water-perf): the caustic network's only visible use is cauFade × (cau − 0.32); past 8 m cauFade is exactly 0,
           // so the 9-cell search + domain warp is skipped there (the pixel is bit-identical)
+          #if WSURF
+          // PERF (b8-surface-v3): the photo net fades out nearer (1.5–6 m, smooth: no seam) so its 2 reads stop sooner
+          float cauFade = (1.0 - (u_ripOn > 0.5 ? smoothstep(1.5, 6.0, dist) : smoothstep(2.0, 8.0, dist))) * u_cau;
+          #else
           float cauFade = (1.0 - smoothstep(2.0, 8.0, dist)) * u_cau;    // shallow-bed caustics through clear water
+          #endif
           float cau = 0.32;
-          if (cauFade > 0.0 && (WAB & 1) == 0) cau = caustic(cp * 2.0, u_time * 0.7);
+          #if WSURF
+          // R7.12 b8-surface-v1: the bed's light network is the photo's own caustic filaments (s00, B channel), two drifting
+          // layers combined like real overlapping lenses: 2 texture reads instead of the 9-cell search + warp
+          if (cauFade > 0.0 && (WAB & 1) == 0 && u_ripOn > 0.5) {
+            // b8-surface-v3 (Tester: the net formed a regular square grid at 4 %, "paving"): the two layers sat at 0° and 90°
+            // on the same tile axes, so their repeats lined up into squares. Now 23° and −41°, scales 0.30 / 0.47 (an
+            // irrational-ish ratio): the repeats never align; livelier drift (v2 0.015/0.009)
+            const mat2 C1 = mat2(0.9205, -0.3907, 0.3907, 0.9205), C2 = mat2(0.7547, 0.6561, -0.6561, 0.7547);
+            float c1 = texture2D(u_ripN, C1 * cp * 0.14 + vec2(0.011, 0.0065) * u_time, 1.0).b;   // b8-surface-v4 (Shifat 7:20 cleaner): a larger, softer, slower net
+            // b8-surface-v4 (cost, root 6:36): the second layer only near the lens (≤4 m); beyond, the net is one layer
+            // (c2 → c1 makes sqrt(c1·c2) = c1: the same brightness, a smooth hand-over, no seam)
+            float k2c = 1.0 - smoothstep(2.5, 4.0, dist);
+            float c2 = c1;
+            if (k2c > 0.0) c2 = mix(c1, texture2D(u_ripN, C2 * cp * 0.22 - vec2(0.009, 0.0125) * u_time + 0.5, 1.0).b, k2c);
+            cau = 0.16 + 2.0 * sqrt(c1 * c2) + 0.4 * max(c1, c2);
+          }
+          #else
+          if (cauFade > 0.0 && (WAB & 1) == 0) cau = caustic(cp * 2.0, u_time * 0.7);   // ?wsurf=old only (b8-surface-v4: the photo lake compiles without the 9-cell search)
+          #endif
           float focus = 1.0; vec3 focusC = vec3(1.0);
           {
             // where the sun ray that lands here crossed the surface, the sim's curvature acts as a lens: a crest
@@ -378,10 +561,51 @@ ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on p
               #endif
             }
           }
+          #if WSURF
+          // b8-surface-v3 (depth): the bed softens with distance and depth (a wider footprint blurs pebbles and grain away)
+          vec3 alb;
+          float bedFar = smoothstep(2.0, 6.0, dist);   // b8-surface-v4: 0 near (the photo bed, sharp) .. 1 far (a soft mean bed under the sky mirror)
+          if (u_bedOn > 0.5 && (WAB & 2) == 0) {
+            // R7.12 b8-surface-v4: a REAL bed (photo pebbles + sand, s09), read where the refracted ray lands, so it bends
+            // with the ripples and the swell like r03/r08, and the caustic light (sunOnBed) rides on top of it. ONE texture
+            // read (root 6:36: v3 cost x1.13–1.15, v4 pays for the bed by cutting extras): it replaces the procedural
+            // sand/pebble bed (3–4 noises with sine hashes + a pebble cell), so it is cheaper than v2/v3's bed. Anti-repeat
+            // without a second read: the tile (31°, off the world grid) is domain-warped by two slow sines, and the same
+            // sines open pale-sand patches between the stone fields like Sand Harbor. The mip level comes from the analytic
+            // footprint (smooth per pixel: no 2x2-quad steps, no anisotropic reads), widened with distance and depth, so
+            // the bed is crisp under the lens and goes soft farther out (v3's wider-blur footprint, as a LOD bias)
+            float fb = fp * (1.0 + tb / max(dist, 0.1)) * (1.0 + 0.12 * dist + 0.2 * depthHere);
+            vec3 bm = u_bedColor * 0.9;
+            vec3 pb = bm;
+            if (bedFar < 1.0) {
+              const mat2 B1 = mat2(0.8572, -0.5150, 0.5150, 0.8572);
+              vec2 bp = B1 * bed.xz;
+              vec2 sw = sin(bp.yx * vec2(0.37, 0.29) + vec2(1.3, 4.1));
+              vec3 tx = textureLod(u_bedTex, (bp + sw * 0.8) * vec2(1.0 / 5.6, 1.0 / 2.8), log2(max(fb * 91.0, 1e-3)) + 1.6).rgb;
+              float sand = smoothstep(0.35, 0.95, sw.x * sw.y + 0.25 * sw.x);   // open sand between the stone fields
+              tx = mix(tx, vec3(0.86, 0.855, 0.84) + 0.08 * (tx - 0.76), sand * 0.7);
+              pb = u_bedColor * (0.78 + 0.22 * tx);   // Shifat 7:20 "cleaner": big soft stones at ~25 % of the photo's contrast, two mips softer: a quiet presence under clear water, never texture
+            }
+            alb = mix(pb, bm, bedFar);
+          } else {
+            alb = u_bedColor * 0.9;   // b8-surface-v4 (cost): until the photo bed loads (a few frames), the mean bed; the procedural bed is ?wsurf=old only
+          }
+          #else
           vec3 alb = (WAB & 2) != 0 ? u_bedColor : bedAlbedo(bed.xz, fp * (1.0 + tb / max(dist, 0.1)), 1.0 - smoothstep(3.0, 10.0, dist));
+          #endif
+          #if WSURF
+          // R7.12 b8-surface-v1: the ref's bed reads by its bright filaments over a darker floor (s00 near rows: p5 ≈ 0.45x,
+          // p95 ≈ 1.8x the mean), so the network carries more contrast; the floor itself is a touch darker and takes a
+          // quarter of the ref's olive-grey hue (#5b673f) — the site's pale palette kept, the water no longer milk
+          float cauL = u_ripOn > 0.5 ? 0.9 + cauFade * (1.0 - smoothstep(0.03, 0.09, fp)) * (cau - 0.32) * mix(0.5, 0.3, smoothstep(1.5, 6.0, dist)) : 0.84 + cauFade * (cau - 0.32) * 0.32;   // b8-surface-v3: crisper net near, softer with distance   // R7.12 b8-surface-v2: bright filaments over a darker floor (v1: 0.84, 0.72)
+          #else
           float cauL = 0.9 + cauFade * (cau - 0.32) * 0.32;              // a soft network, not a pool-tile cliché
+          #endif
           vec3 sunOnBed = u_sunColor * max(-Ls.y, 0.0) * cauL * focus * focusC * exp(-u_absorb * ls);
           vec3 amb = mix(u_skyMid, u_skyHorizon, 0.4) * 0.42 * exp(-u_absorb * depthHere);
+          #if WSURF
+          alb *= u_ripOn > 0.5 ? vec3(0.93, 0.96, 0.98) : vec3(0.93, 0.955, 0.89);   // R7.12 b8-surface-v2: blue-grey see-through floor (v1's olive quarter dropped)
+          #endif
           vec3 bedCol = alb * (sunOnBed * 1.15 + amb);
           // the diamond focuses blue light into a soft, rippling caustic under itself
           // (its weight is 0.0: switched off; PERF water-perf removed the dead exp() it still cost per pixel)
@@ -389,7 +613,23 @@ ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on p
           vec3 Tr = exp(-u_absorb * L);
           vec3 sigT = u_absorb + u_sigS;
           vec3 inscatter = u_scatter * (u_sunColor * 0.7 + amb) * (u_sigS / sigT) * (1.0 - exp(-sigT * L));
+          #if WSURF
+          inscatter *= u_bedOn > 0.5 ? mix(0.5, 0.88, smoothstep(1.5, 9.0, dist)) : mix(0.66, 0.8, smoothstep(2.0, 9.0, dist));   // b8-surface-v4: clearer near, hazier with depth   // R7.12 b8-surface-v1/v2 (Shifat 5:04 "a bit transparent"): a thinner veil near the lens, the bed shows through (v1: 0.7 flat)
+          #endif
           vec3 refr = bedCol * Tr + inscatter;
+          #if WSURF
+          // R7.12 b8-surface-v2 (Shifat 5:38: refs r03 Plitvice + r08 Tahoe; "our sky is pure white"): only the water over the
+          // bed takes the refs' clear-water hue (r03 mid (102,173,179), r08 mid (58,147,176)) at ~25 %, near the lens; the
+          // reflection stays our white sky, so with distance (Fresnel) the lake goes calm white
+          // b8-surface-v3 (depth): the floor darkens a little with distance as the path through the water grows (Beer's
+          // cool blue-grey, no milk), before Fresnel turns the far lake white
+          if (u_bedOn > 0.5) {
+            // b8-surface-v4 (depth & clarity, refs clear → reflective): glass-clear and true under the lens, then a gentle
+            // blue-grey deepening with the path through the water (no milk), before Fresnel turns the far lake white
+            refr *= mix(vec3(0.975, 0.99, 1.0), vec3(0.875, 0.92, 0.955), smoothstep(1.5, 8.5, dist));
+          } else
+          if (u_ripOn > 0.5) refr *= mix(vec3(0.94, 0.985, 1.0), vec3(1.0), smoothstep(3.0, 10.0, dist)) * mix(vec3(1.0), vec3(0.93, 0.955, 0.975), smoothstep(1.2, 6.5, dist));
+          #endif
           // the stone where it is under the surface, seen THROUGH the water (screen-space refraction): the offset is
           // the refracted ray's lateral shift over the stone's depth, so a deeper stone and a steeper ripple bend it
           // more; the three channels refract apart (a fine fringe that widens on ripple crests); sunlight through the
@@ -398,7 +638,11 @@ ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on p
             float gdp = max(0.0, -(u_gem.y - 0.25)) + 0.08;
             vec2 suv = gl_FragCoord.xy / u_resolution;
             // the ripple slope drives the bend (review P1: the swell alone barely moved it), clamped so it never tears
+            #if WSURF
+            vec2 off = (N.xz * vec2(0.035, 0.05) + gTex * 0.3 + gSw * 0.6 + rg * 0.25) * (0.7 + 2.2 * gdp) * u_refrK;   // b8-surface-v3: bends further along the ripples + wobbles with the swell (v2: 0.18)   // R7.12 b8-surface-v2: the submerged stone bends along the photo ripples
+            #else
             vec2 off = (N.xz * vec2(0.035, 0.05) + rg * 0.25) * (0.7 + 2.2 * gdp) * u_refrK;
+            #endif
             off *= min(1.0, 0.06 / max(length(off), 1e-4));
             // W24 R6.38 (scorer-r636 #3: spikes on the ghost's edge are the offset pushing samples past the outline): the bend
             // is scaled by the stone's own coverage at this pixel, so outside the true silhouette it nearly vanishes
@@ -437,20 +681,47 @@ ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on p
           float glitter = 1.0 - smoothstep(0.45, 0.85, NoV);
           // sun glint (WATER LANE): an anisotropic Ward lobe in the wave's own frame, stretched toward the viewer the
           // way a sun path streaks on water, plus the tight specular core
+          #if WSURF
+          // PERF (b8-surface-v3): both glint lobes are × glitter, exactly 0 on steep views (the near lake): skipped there
+          if ((WAB & 8) == 0 && glitter > 0.0) {
+          #else
           if ((WAB & 8) == 0) {
+          #endif
             vec3 tv = normalize(vec3(-V.x, 0.0, -V.z) + vec3(1e-4, 0.0, 0.0));
             vec3 t1 = normalize(tv - N * dot(tv, N)), b1 = cross(N, t1);
             float ht = dot(H, t1), hb = dot(H, b1), hn = max(dot(H, N), 1e-3);
             float NoL = max(dot(N, u_sunDir), 0.0);
+            #if WSURF
+            // R7.12 b8-surface-v2 (Tester, v1 at 4–6 %: rows of blocky bright dashes mid-distance): specular anti-aliasing —
+            // where the ripples get sub-pixel the lobes widen (energy kept), so a sub-pixel facet never flashes a texel. Driven
+            // by the pixel footprint (smooth), not fwidth(N): a derivative of the normal is constant per 2x2 quad and printed
+            // the quads as blocks
+            float nv = min(fp * 4.0, 0.5);
+            float ax = sqrt(0.0025 + nv * nv * 0.5), ay = sqrt(0.000256 + nv * nv * 0.5);
+            float ce = 1600.0 / (1.0 + 1600.0 * nv * nv * 2.0);
+            float core = pow(NoH, ce) * (ce / 1600.0);
+            #else
             const float ax = 0.05, ay = 0.016;
+            float core = pow(NoH, 1600.0);
+            #endif
             float ward = exp(-((ht * ht) / (ax * ax) + (hb * hb) / (ay * ay)) / (hn * hn)) / (12.566 * ax * ay * sqrt(max(NoL * NoV, 1e-3)));
             float Fh = 0.02 + 0.98 * pow(1.0 - max(dot(H, V), 0.0), 5.0);
-            col += u_sunColor * (min(ward, 400.0) * NoL * Fh * 0.8 + pow(NoH, 1600.0) * 60.0 * F * 4.0) * glitter;
+            col += u_sunColor * (min(ward, 400.0) * NoL * Fh * 0.8 + core * 60.0 * F * 4.0) * glitter;
           }
+          #if WSURF
+          if (u_ripOn > 0.5 && (WAB & 8) == 0) {
+            // R7.12 b8-surface-v4 (Shifat 7:20 "The water surface need to be cleaner. Bigger ripples waves"): soft, broad
+            // highlights riding the big rounded waves — the sun's lobe off the clean wave normal, by repeated squaring (no
+            // pow, cheap on every tier). v3's crest twinkle and sun-path pow are gone (the twinkle read as speckle)
+            float hx = max(dot(N, H), 0.0); hx *= hx; hx *= hx; hx *= hx; hx *= hx; hx *= hx;   // ^32: broad sheen
+            float hx2 = hx * hx; hx2 *= hx2;                                                     // ^128: a soft core
+            col += u_sunColor * (hx * 0.03 + hx2 * 0.08) * mix(0.6, 1.0, min(F * 4.0, 1.0));
+          }
+          #endif
           // stochastic glints: sparse micro-facets that catch the sun for a moment and go (twinkle, not a static
           // sparkle texture). One random cell per 6 cm, each with its own phase; only cells whose facet points near
           // the half vector light up, so they gather along the glitter path and get sparser away from it
-          #if HI
+          #if HI && !WSURF   // b8-surface-v4 (Shifat 7:20 "cleaner"): no sparkle speckle on the photo lake (?wsurf=old keeps it)
           if (dist < 14.0) {   // PERF (water-perf): (1 − smoothstep(4, 14, dist)) is exactly 0 beyond 14 m
             vec2 gc = floor(v_world.xz * 16.0);
             float hr = fract(sin(dot(gc, vec2(127.1, 311.7))) * 43758.5453);
@@ -514,14 +785,42 @@ ${hi ? '' : `        if (u_lakeComp > 0.5) {   // LAKERES: main-camera draw on p
           // (0.7 -> 0.5) once the stone has sunk to the waterline (the dive); the floating hero stone keeps 0.7. The lobe recedes. (A higher coverage-ramp start, 0.18, was tried: it cut the
           // spikes' tips but left a harder, more jagged outline; not kept)
           float hFade = 1.0 - smoothstep(0.02, mix(0.5, 0.7, smoothstep(0.15, 0.35, u_gem.y)), hAx);   // hero (stone floating, y≈0.45): unchanged 0.7
+          #if WSURF
+          // R7.12 b8-surface-v3 (Shifat 5:58 "Stone reflection"): stronger and clearer than live — Fresnel-led (rises
+          // toward grazing), a higher cap, a sharper coverage ramp, and a brighter, truer mirror colour (water reflects
+          // ~all of a grazing image: the stone reads as a bright gem in the lake, its dark facets still dark)
+          hFade = 1.0 - smoothstep(0.02, mix(0.5, 1.05, smoothstep(0.15, 0.35, u_gem.y)), hAx);   // more of the floating stone mirrors (v2: 0.7, the crown faded out)
+          float gw = smoothstep(0.04, 0.6, gemR.a) * hFade * clamp(u_gemReflK * (0.45 + F * 7.5), 0.0, GWCAP + 0.22) * (1.0 - 0.75 * underA);
+          vec3 rc = mix(gemR.rgb, gemR.rgb * gemR.rgb * 1.2, 0.22) * vec3(0.84, 0.91, 1.0);
+          float rl = dot(rc, vec3(0.2126, 0.7152, 0.0722)); rc = max(mix(vec3(rl), rc, 1.2), 0.0);
+          // a slow shimmer along the mirror (the swell's light rolling through it), never a flicker
+          rc *= 1.0 + 0.07 * clamp(dot(gSw, normalize(u_sunDir.xz + vec2(1e-4, 0.0))) * 30.0, -1.0, 1.0);
+          col = mix(col, rc, gw);
+          // soft contact reflection right under the stone: the water there mirrors the stone's underside (darker, tinted)
+          // instead of the white sky — a soft cool pool that ties the floating stone to the lake. Fades as the stone rises
+          #if HI   // b8-surface-v4 (cost, root 6:36): the contact pool only on the high tiers
+          {
+            float cr = exp(-dot(gq, gq) * 9.0) * exp(-max(u_gem.y - 0.15, 0.0) * 1.6) * u_reflOn * (1.0 - 0.75 * underA);
+            col = mix(col, col * mix(vec3(0.86, 0.9, 0.97), u_gemTint * 0.9 + 0.35, 0.25), clamp(cr * (0.35 + 1.5 * F), 0.0, 0.42));
+          }
+          #endif
+          #else
           float gw = smoothstep(0.05, 0.85, gemR.a) * hFade * clamp(u_gemReflK * (0.2 + F * 6.0), 0.0, GWCAP) * (1.0 - 0.75 * underA);   // WATER LANE: Fresnel-led, capped lower (muddy blob in review #13)
           // colour-depth: the mirrored stone sits deeper and cooler than the warm-lit stone above it
           vec3 rc = mix(gemR.rgb, gemR.rgb * gemR.rgb * 1.2, 0.5) * vec3(0.7, 0.8, 1.0);
           float rl = dot(rc, vec3(0.2126, 0.7152, 0.0722)); rc = max(mix(vec3(rl), rc, 1.3), 0.0);
           col = mix(col, rc, gw);
+          #endif
           if (u_dbg > 2.5) col = vec3(0.5 + texture2D(u_rippleTexture, v_ruv).r * 12.0); else if (u_dbg > 1.5) col = gemR.rgb; else if (u_dbg > 0.5) col = vec3(hAx, hFade, gemR.a);   // 3 = sim height (WATER LANE QA)
           // aerial perspective toward the horizon
+          #if WSURF
+          // R7.12 b8-surface-v3 (ambience): a longer, gentler haze — the far lake dissolves into the white sky (starts nearer,
+          // eases in, same end at u_fogFar so the far-plane shortcut above stays exact)
+          float fog = smoothstep(u_ripOn > 0.5 ? u_fogNear * 0.55 : u_fogNear, u_fogFar, dist);
+          if (u_ripOn > 0.5) fog *= 0.65 + 0.35 * fog;   // b8-surface-v4 (cost): ≈ v3's pow(x, 1.35) eased haze, without the pow
+          #else
           float fog = smoothstep(u_fogNear, u_fogFar, dist);
+          #endif
           col = mix(col, u_skyHorizon, fog);
         } else {
           // underwater looking up: Snell's window (≈48.6° half-angle), TIR outside it
