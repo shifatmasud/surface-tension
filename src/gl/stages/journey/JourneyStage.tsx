@@ -91,6 +91,55 @@ function bezelGeometry(w: number, h: number, r: number, sw: number, sh: number) 
  */
 const RIM_PX = +(new URLSearchParams(location.search).get('rimpx') ?? 2) || 0   // R6.96: min rim width, background px
 const CTA_GLIDE = new URLSearchParams(location.search).has('ctaglide')   // R6.92b: off = the CTA rides up as a sheet
+// b9-earthedge-v1: Earth's limb rebuilt in the screen pass at its own pixel (shaders.ts screenMaterial); ?eedge=0 = live
+const EARTH_EDGE = !/[?&]eedge=0\b/.test(location.search)
+const _emV = new THREE.Vector3(), _emA = new THREE.Vector3()
+function earthEdge(S: any, on: boolean) {
+  const u = S.screenMat.uniforms, e = S.em.earth as THREE.Mesh, ud = S.screen.userData
+  ud.emOk = false
+  if (!EARTH_EDGE || !on || !e.visible || !S.stars.visible) return
+  S.icam.updateMatrixWorld(); e.updateWorldMatrix(true, false)
+  _emV.setFromMatrixPosition(e.matrixWorld).applyMatrix4(S.icam.matrixWorldInverse)
+  const R = _emA.setFromMatrixColumn(e.matrixWorld, 0).length(), D = _emV.length()
+  if (!(D > R * 1.001) || _emV.z > -R) return   // inside it / not in front: leave the target's own edge
+  u.u_emC.value.copy(_emV).divideScalar(D); u.u_emCos.value = Math.sqrt(1 - (R / D) * (R / D))
+  // the inner target's uv -> the view ray (a plane of constant NDC z: linear in uv, exact under interpolation)
+  const PI = S.icam.projectionMatrixInverse as THREE.Matrix4, O = u.u_emO.value as THREE.Vector3
+  O.set(-1, -1, 0.5).applyMatrix4(PI)
+  ;(u.u_emX.value as THREE.Vector3).set(1, -1, 0.5).applyMatrix4(PI).sub(O)
+  ;(u.u_emY.value as THREE.Vector3).set(-1, 1, 0.5).applyMatrix4(PI).sub(O)
+  _emA.copy(_emV).applyMatrix4(S.icam.projectionMatrix); u.u_emCuv.value.set(_emA.x * 0.5 + 0.5, _emA.y * 0.5 + 0.5)
+  u.u_emPx.value.set(S.rt.width, S.rt.height); u.u_emPxI.value.set(1 / S.rt.width, 1 / S.rt.height)
+  // eq per target texel at the limb point nearest the view axis (d eq / d angle = sin A there; a texel's angle =
+  // 2 tan(fov/2) / rows, x cos of that point's off-axis angle). This pass's pixel size is read at the draw (earthEdgeDraw).
+  const C = u.u_emC.value as THREE.Vector3, sinA = R / D
+  _emA.set(0, 0, -1).addScaledVector(C, C.z); const tl = _emA.length()
+  const lz = tl > 1e-4 ? C.z * u.u_emCos.value + (_emA.z / tl) * sinA : C.z   // the limb point's view-axis cosine (negated z)
+  const texAng = 2 / (S.icam.projectionMatrix.elements[5] * S.rt.height) * Math.max(0.3, -lz)
+  const K = 1 / Math.max(1e-9, sinA * texAng)   // eq -> target texels, folded into the two uniforms
+  C.multiplyScalar(K); u.u_emCos.value *= K
+  ud.emOk = true
+}
+/** b9-earthedge-v1, at the screen's own draw: its height in THIS draw's pixels (the viewport of whatever target the post
+ *  chain renders it into: 412x915 on the M02s, 683x384 on the weak PC) over the inner target's rows. The warp runs only
+ *  where the target is magnified; x = half of this draw's pixel in target texels. */
+const _emVp = new THREE.Vector4(), _emP = new THREE.Vector3()
+function earthEdgeDraw(this: THREE.Mesh, r: THREE.WebGLRenderer, _s: THREE.Scene, cam: THREE.Camera) {
+  const u = (this.material as THREE.ShaderMaterial).uniforms, ud = this.userData
+  u.u_emOn.value = 0
+  if (!ud.emOk) return
+  let y0 = 1e9, y1 = -1e9
+  for (let i = 0; i < 4; i++) {
+    _emP.set((i & 1 ? 0.5 : -0.5) * ud.sw, (i & 2 ? 0.5 : -0.5) * ud.sh, 0).applyMatrix4(this.matrixWorld).project(cam)
+    if (_emP.z > 1) return
+    y0 = Math.min(y0, _emP.y); y1 = Math.max(y1, _emP.y)
+  }
+  const pxPerTex = (y1 - y0) * 0.5 * r.getCurrentViewport(_emVp).w / ud.rtH
+  if (!(pxPerTex > 1.05)) return
+  const ed = 0.5 / pxPerTex, a2 = 1.1 / (2.2 - ed)   // the read-depth curve (shaders.ts): x a1 to (ed, 1.1), then to (2.2, 2.2)
+  u.u_emBand.value.set(1.1 / ed, 1.1 - ed * a2, a2)
+  u.u_emOn.value = 1
+}
 
 export function JourneyStage(): JSX.Element {
   const { gl } = useThree()
@@ -563,6 +612,7 @@ export function JourneyStage(): JSX.Element {
       const rocks = S.skyExtras.rocks, rockHi = split && ROCK_HI && rocks.visible && S.skyExtras.rockMat.opacity > 0.002
       if (split) S.crewIn.root.visible = false
       if (rockHi) rocks.visible = false
+      earthEdge(S, true)   // b9-earthedge-v1
       gl.render(S.inner, S.icam)
       if (split) S.crewIn.root.visible = true
       if (rockHi) rocks.visible = true
@@ -785,6 +835,7 @@ export function* buildSteps(gl: THREE.WebGLRenderer, portrait: boolean, low: boo
   screenMat.side = THREE.DoubleSide
   const screen = new THREE.Mesh(new THREE.PlaneGeometry(sw, sh, segX, segY), screenMat)
   screen.position.z = SCREEN_Z; screen.frustumCulled = false
+  screen.userData.sw = sw; screen.userData.sh = sh; screen.userData.rtH = rt.height; screen.onBeforeRender = earthEdgeDraw as any   // b9-earthedge-v1
   // R6.87 SPLIT RESOLUTION: the inner target holds the space/forest only; the crewmate is drawn into its own target at the
   // canvas density (crewLayer.ts) and this twin of the screen (same geometry, same uniforms, CREW_ONLY) lays it over the
   // low-res screen in the hero pass. (From the first crack on, the crewmate goes back into the inner target: the cracks

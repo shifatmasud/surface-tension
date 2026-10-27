@@ -88,6 +88,15 @@ function* plantForestSteps(nKelp: number, nGrass: number): Generator<unknown, Pl
     fore.push(x, y, z, H, x, y, z, H)
     fShape.push(wd, ph, tw, 0, wd, ph, tw + 1.5708, 0)
   }
+  // v4e (Shifat 9:39 PM, the v3 reel: "two green vegetation… I loved these"): W19's straight-down dive put the
+  // just-under-the-waterline beat at z ≈ −3…+2, ~13 m short of every kelp (z ≥ 10) and of the fore fronds (z ≥ 10.6),
+  // so that shot lost its foreground. Two near kelp plants frame the diamond there again (right: tall; lower-left:
+  // short), lit like the rest of the forest, same draw call. Fixed shape values: the seeded layout above is unchanged.
+  for (const [x, z, top, ph, tw] of [[1.2, 0.5, -1.5, 0.9, 0.4], [-1.3, -0.4, -2.7, 3.7, 1.9]]) {
+    const y = floorH(x, z) - 0.05, H = top - y
+    kelp.push(x, y, z, H, x, y, z, H)
+    kShape.push(1.0, ph, tw, 0, 1.0, ph, tw + 1.5708, 0)
+  }
   return { kelp, kShape, grass, gShape, fore, fShape }
 }
 

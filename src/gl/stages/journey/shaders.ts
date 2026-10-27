@@ -205,6 +205,9 @@ export function screenMaterial(tex: THREE.Texture, size: THREE.Vector2) {
       u_blur: { value: tex }, u_zoom: { value: 0 }, u_zoomC: { value: new THREE.Vector2(0.5, 0.5) }, u_chroma: { value: 0 }, u_flash: { value: 0 },
       u_crew: { value: null }, u_crewScale: { value: new THREE.Vector2(1, 1) },
       u_rock: { value: null }, u_rockScale: { value: new THREE.Vector2(1, 1) }, u_rockOn: { value: 0 },   // R7.10 b7: the rock layer
+      // b9-earthedge-v1: Earth's limb rebuilt at this pass's pixel (JourneyStage.earthEdge sets these each frame)
+      u_emOn: { value: 0 }, u_emO: { value: new THREE.Vector3() }, u_emX: { value: new THREE.Vector3() }, u_emY: { value: new THREE.Vector3() },
+      u_emC: { value: new THREE.Vector3(0, 0, -1) }, u_emCos: { value: 1 }, u_emCuv: { value: new THREE.Vector2() }, u_emPx: { value: new THREE.Vector2(1, 1) }, u_emPxI: { value: new THREE.Vector2(1, 1) }, u_emBand: { value: new THREE.Vector3(4, 0.5, 0.5) },
     },
     vertexShader: /* glsl */ `
       uniform vec2 u_center; uniform float u_bulge, u_width, u_ringT, u_ringAmp, u_time;
@@ -236,6 +239,7 @@ export function screenMaterial(tex: THREE.Texture, size: THREE.Vector2) {
       uniform sampler2D u_blur; uniform vec2 u_zoomC; uniform float u_zoom, u_chroma, u_flash;
       uniform sampler2D u_crew; uniform vec2 u_crewScale; // R6.87 SPLIT: the crewmate at the canvas density (crewLayer.ts)
       uniform sampler2D u_rock; uniform vec2 u_rockScale; uniform float u_rockOn;   // R7.10 b7: the rocks at the background density
+      uniform float u_emOn, u_emCos; uniform vec3 u_emO, u_emX, u_emY, u_emC, u_emBand; uniform vec2 u_emCuv, u_emPx, u_emPxI;   // b9-earthedge-v1
       varying vec2 vUv; varying vec3 vWPos; varying float vH;
       void main(){
         vec3 n = normalize(cross(dFdx(vWPos), dFdy(vWPos)));
@@ -257,9 +261,25 @@ export function screenMaterial(tex: THREE.Texture, size: THREE.Vector2) {
         if (cr.a < 0.003) discard;
         col = cr.rgb / cr.a;
       #else
-        col.r = texture2D(u_map, vUv - off * (1.0 + 0.10 * disp) + ca).r;
-        col.g = texture2D(u_map, vUv - off).g;
-        col.b = texture2D(u_map, vUv - off * (1.0 - 0.10 * disp) - ca).b;
+        // b9-earthedge-v1 (Shifat: Earth's top edge "slightly jagged" on his M02s): Earth is drawn into the 352x512 inner
+        // target, which reaches the phone ~3x stretched (target -> this pass ~1.8x, this pass -> screen 1.75x), so its soft
+        // 1-texel edge was smeared over ~2 of this pass's pixels and every target row showed as a stair-step. Here the limb is
+        // found again, exactly, at THIS pass's pixel (the view ray through this uv against the sphere's angular radius), and
+        // the lookups near it are WARPED along the limb's normal: the core of the target's soft edge (+-1.1 texels) is squeezed
+        // into this pass's one pixel at the true limb, its faint tail and the clean texels beside it fill the rest of the band
+        // (+-2.2 texels), and the warp is 0 outside the band. Same 3 taps (no extra lookup, no derivatives, no branch on the pixel), ~25 scalar ops.
+        vec2 ew = vec2(0.0);
+        if (u_emOn > 0.5) {
+          vec2 eu = vUv - off;
+          float et = dot(normalize(u_emO + u_emX * eu.x + u_emY * eu.y), u_emC) - u_emCos;   // target texels from the limb, + inside
+          float ea = abs(et);
+          // read depth: x a1 inside half a pixel (ed), then the line (ed, 1.1) -> (2.2, 2.2), then the plain lookup
+          float es = max(min(ea * u_emBand.x, u_emBand.y + ea * u_emBand.z), ea);
+          ew = normalize((eu - u_emCuv) * u_emPx) * u_emPxI * (sign(et) * (ea - es));   // outward texel x (true - read) depth
+        }
+        col.r = texture2D(u_map, vUv - off * (1.0 + 0.10 * disp) + ca + ew).r;
+        col.g = texture2D(u_map, vUv - off + ew).g;
+        col.b = texture2D(u_map, vUv - off * (1.0 - 0.10 * disp) - ca + ew).b;
         // R7.10 b7 (Shifat 5:52 AM, real M02s: the asteroids "Pixelated, looks cheap"): on the low tiers the rocks are not in the
         // 352x512 inner picture; they are drawn at the background's density into their own layer (premultiplied) and laid over
         // it here, through the same bent-glass lookup: no extra pass, no composite
