@@ -143,6 +143,7 @@ export class ScreenPaintDistortionEffect extends Effect {
 /** the grade's lens mainUv (the waterline meniscus, ripple, droplets, crossing wobble); a no-op while u_waterline < -0.5 */
 const WL_HARD = /[?&]wlhard\b/.test(location.search)   // R7.10 b6: the old sub-pixel waterline edge
 const WL_OLD = /[?&]wlold\b/.test(location.search)   // R7.11 b6: ?wlold = b5's two-band waterline (QA A/B)
+const WL_DROPS = /[?&]wldrops\b/.test(location.search)   // v4d (Shifat 8:59 PM: "water droplets come out on air through water surface, makes waterline pixelated"): the beads above the meniscus are off; ?wldrops = back
 const GRADE_UV = /* glsl */ `void mainUv(inout vec2 uv){
         if (u_waterline > -0.5) {
           float L = wlLine(uv);
@@ -199,6 +200,7 @@ export class GradeEffect extends Effect {
       float wlR = 0.0;   // R7.10 b9: the last drop's radius (cells of 1/24 screen height)
       vec3 wlDrop(vec2 uv){
         wlR = 0.0;
+        ${WL_DROPS ? '' : 'return vec3(0.0);'}
         float d = uv.y - u_waterline;
         #ifdef WL_AA
         if (u_wlMo < 0.5 || d < 0.0 || d > 0.25) return vec3(0.0);   // R7.10 b9: past 0.2 every drop has shrunk to nothing (by its centre)
