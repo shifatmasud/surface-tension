@@ -60,7 +60,10 @@ declare global { interface Window { __logo3d?: Logo3DApi } }
   const dispose = () => {
     if (done) return
     done = true; cancelAnimationFrame(raf); removeEventListener('resize', onResize)
-    R && R.dispose(); cv.remove(); delete window.__logo3d
+    cv.remove(); delete window.__logo3d
+    // v5.8: the GL clean-up (a few deletes) waits for an idle slot ~3 s after the lift, off the hero's first frames
+    const r = R; R = null
+    if (r) setTimeout(() => { const go = () => r.dispose(); if (typeof requestIdleCallback === 'function') requestIdleCallback(go, { timeout: 2000 }); else go() }, 3000)
   }
 
   const tick = (now: number) => {

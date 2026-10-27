@@ -168,7 +168,10 @@ export function createLogoRenderer(canvas: HTMLCanvasElement): LogoRenderer {
     dispose() {
       canvas.removeEventListener('webglcontextlost', onLost)
       gl.deleteBuffer(bp); gl.deleteBuffer(bn); gl.deleteProgram(prog)
-      const ext = gl.getExtension('WEBGL_lose_context'); if (ext) ext.loseContext()
+      // v5.8 (Shifat 7:20 AM, first preloader→hero entry laggy): no WEBGL_lose_context here. loseContext is a synchronous
+      // round trip to the GPU process, which right after the lift is busy with the hero's and the later stages' work: it
+      // blocked the main thread 5.75 s (sim, M02s 4x). The canvas is already out of the page (boot.ts); its context is
+      // released with it when it is collected
     },
   }
 }
