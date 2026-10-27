@@ -307,9 +307,54 @@ export function TextLayer() {
       },
     } : null
     if (scrim) { scrim.mesh.renderOrder = 5; ufx.add(scrim) }
+    // v5.6c (phone only, review: the CTA stickers rise behind "Out of / the screen." at ~79–82% and read busy under the
+    // white type; ctaScene is locked and retiming/moving the title were rejected): a soft dark PLATE right behind the
+    // title block, on top of the v5.5 scrim. A rounded box hugging the text's own glyph rects with a wide quintic
+    // feather (C2, no knee) and the same 1/255 dither: no edge, no band. Its strength rides the v5.5 fade (scrimA, i.e.
+    // the title's own in/out) times a short ramp at the beat's late part (journey pin 0.645→0.675 ≈ page 77.3→78%), so
+    // 76–77% looks as v5.5. Narrow layout only (ufx.w < 700): the PC frame never draws it.
+    // The box starts 40 px below the eyebrow's top (the small grey eyebrow sits on clear black) and its feather is 70 px,
+    // so the plate fades out above the type and never shades the tablet's bottom edge; sides and bottom run off-screen.
+    const PLATE_PEAK = 0.75, PLATE_F = 70, PLATE_TOP = 40
+    let plateA = 0, plateK = '', plateBox = { l: 0, t: 0, r: 0, b: 0 }
+    const plateMat = gl ? new THREE.ShaderMaterial({
+      vertexShader: 'varying vec2 v_uv; void main(){ v_uv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: `uniform float u_a; uniform vec2 u_size; uniform vec2 u_half; uniform float u_f; varying vec2 v_uv;
+        float h(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+        void main(){ vec2 p = (v_uv - 0.5) * u_size; float r = 48.0; vec2 q = abs(p) - (u_half - r);
+          float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+          float t = clamp((d + 16.0) / (u_f + 16.0), 0.0, 1.0); float a = u_a * (1.0 - t * t * t * (t * (t * 6.0 - 15.0) + 10.0));
+          a += (h(gl_FragCoord.xy + 17.0) - 0.5) / 255.0; gl_FragColor = vec4(0.0, 0.0, 0.0, clamp(a, 0.0, 1.0)); }`,
+      uniforms: { u_a: { value: 0 }, u_size: { value: new THREE.Vector2(1, 1) }, u_half: { value: new THREE.Vector2(1, 1) }, u_f: { value: PLATE_F } },
+      transparent: true, depthTest: false, depthWrite: false,
+    }) : null
+    const plateMeasure = () => {
+      // the title block's tight glyph box (eyebrow, both title lines, body), viewport px; the slot never moves
+      const rg = document.createRange(); let l = 1e5, t = 1e5, r = -1e5, b = -1e5
+      for (const el of Array.from(beatsEl[J2].querySelectorAll<HTMLElement>('[data-role]'))) {
+        rg.selectNodeContents(el); const q = rg.getBoundingClientRect(); if (q.width < 1) continue
+        l = Math.min(l, q.left); t = Math.min(t, q.top); r = Math.max(r, q.right); b = Math.max(b, q.bottom)
+      }
+      if (r > l) plateBox = { l, t: t + PLATE_TOP, r, b }
+    }
+    const plate: UfxItem | null = plateMat ? {
+      el: host, mesh: new THREE.Mesh(new THREE.PlaneGeometry(1, 1), plateMat), layer: 'slot', fixed: true, selfPlaced: true,
+      docTop: 0, docLeft: 0, w: 0, h: 0, section: '', measure() { /* placed every frame */ },
+      visibleWhen: () => plateA > 0.003,
+      onUpdate(it) {
+        const vw = ufx.w, vh = ufx.h, k = vw + 'x' + vh
+        if (k !== plateK) { plateK = k; plateMeasure() }
+        const B = plateBox, pad = 14, w = B.r - B.l + pad * 2 + PLATE_F * 2, h = B.b - B.t + pad * 2 + PLATE_F * 2
+        it.mesh.position.set((B.l + B.r) / 2 - vw / 2, -((B.t + B.b) / 2 - vh / 2), 0); it.mesh.scale.set(w, h, 1)
+        plateMat!.uniforms.u_size.value.set(w, h); plateMat!.uniforms.u_half.value.set((B.r - B.l) / 2 + pad, (B.b - B.t) / 2 + pad)
+        plateMat!.uniforms.u_a.value = plateA
+      },
+    } : null
+    if (plate) { plate.mesh.renderOrder = 5; ufx.add(plate) }
     const scrimTick = () => {
       const on = active === J2 && document.documentElement.dataset.bg === 'dark'
       scrimA += ((on ? 0.5 : 0) - scrimA) * (1 - Math.exp(-4 * Math.min(props.dt, 0.1)))
+      if (plate) { const jp = pin('journey'), u = clamp((jp - 0.645) / 0.03), late = u * u * (3 - 2 * u); plateA = ufx.w < 700 ? PLATE_PEAK * (scrimA / 0.5) * late : 0 }
     }
     gsap.ticker.add(scrimTick)
     gsap.ticker.add(tick)
@@ -325,7 +370,7 @@ export function TextLayer() {
     const offVp = onViewport(onResize) // R7.07: real resizes only (not the address bar)
     return () => {
       gone = true; gen++
-      gsap.ticker.remove(tick); gsap.ticker.remove(scrimTick); if (scrim) { ufx.remove(scrim); scrim.mesh.geometry.dispose(); scrimMat!.dispose() }; offVp(); window.removeEventListener('st:drop', onDrop); ro?.disconnect()
+      gsap.ticker.remove(tick); gsap.ticker.remove(scrimTick); if (scrim) { ufx.remove(scrim); scrim.mesh.geometry.dispose(); scrimMat!.dispose() }; if (plate) { ufx.remove(plate); plate.mesh.geometry.dispose(); plateMat!.dispose() }; offVp(); window.removeEventListener('st:drop', onDrop); ro?.disconnect()
       st.forEach((s) => s.lines.forEach((l) => ufx.remove(l.it))); splits.forEach((s) => s.revert())
       document.documentElement.classList.remove('slot-on')
     }
