@@ -588,7 +588,7 @@ function carousel(sys: number) {
   if (k < 0) k = k * 0.35                         // drift in, a third as fast
   else if (k > n - 1) k = n - 1 + (k - (n - 1)) * 0.35
   const f = Math.floor(k), fr = k - f
-  return f + ss(0.22, 0.78, fr)                   // hold ~45 % of each slot square to the lens
+  return k                   // v5.9 (Shifat 10:50 Oct 27 'remove snapping'): the drum turns 1:1 with scroll, no dwell
 }
 
 /** PERFGOV: the cylinder's build as steps (one part per step: its labels are canvas text), spread over short tasks behind
