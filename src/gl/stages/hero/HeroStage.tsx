@@ -405,6 +405,11 @@ export function HeroStage() {
     heroPass.depthFixMesh = (cam) => {
       const wm = waterMesh.current
       if (!wm || !wm.visible) return null
+      // v5.4 (crewmate sliced at 80-84 %): the lake's depth only while the lake is really drawn. In the journey the hero
+      // group is hidden but the water keeps its own visible flag, so on moving phone frames (dpr < heroDpr) this proxy
+      // still wrote the lake plane (world y = 0) into the hero target and hid every hero part below it: the tablet
+      // crewmate vanished and the one bursting out was cut by a hard horizontal line. Still frames skip this path.
+      for (let o: THREE.Object3D | null = wm.parent; o; o = o.parent) if (!o.visible) return null
       if ((props.dpr || 1) >= (props.heroDpr || 1)) return null
       if (cam.position.y < 0.02 || dive.under || dive.split >= 0 || Math.abs(gem.pos.y) > gem.radius * 1.25) return null
       proxy.matrix.copy(wm.matrixWorld); proxy.matrixWorld.copy(wm.matrixWorld)
