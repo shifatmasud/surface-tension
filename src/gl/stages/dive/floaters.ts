@@ -4,7 +4,7 @@ import { createElement, useMemo } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { props } from '../../../state/props'
 import { settings, browser } from '../../../services/settings'
-import { DIVE_LAYER } from './diveState'
+import { DIVE_LAYER, dive } from './diveState'
 import { CLIP } from './shaders'
 
 /**
@@ -484,7 +484,9 @@ export function Floaters({ u }: { u: U }) {
 
   useFrame(() => {
     pxScale.value = props.renderH / (2 * Math.tan((camera.fov * Math.PI) / 360))
-    const want = props.lab > 0.001 && props.lab < 0.999 ? 1 : 0
+    // v4g (Shifat's v3 reel still): no jelly in the look-up beat (~13.7–16.3% scroll); they ease back in after it
+    const beat = dive.u > 0.42 && dive.u < 0.6   // v4g c: from .42 so a jelly is already gone when the beat's light comes in
+    const want = (props.lab > 0.001 && props.lab < 0.999) || beat ? 1 : 0
     const cam = camera as THREE.PerspectiveCamera
     cam.matrixWorld.extractBasis(lens.u_camR.value, lens.u_camU.value, lens.u_camF.value); lens.u_camF.value.negate()
     const ty = Math.tan((cam.fov * Math.PI) / 360); lens.u_lens.value.set(ty * cam.aspect, ty)

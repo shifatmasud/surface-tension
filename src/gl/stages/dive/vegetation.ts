@@ -43,6 +43,7 @@ void main(){
   float sway = sin(t * 0.55 + ph - h * 0.28) * 0.62 + sin(t * 1.13 + ph * 1.7 - h * 0.61) * 0.24;
   float crs = sin(t * 0.43 + ph * 2.3 - h * 0.22);
   float amp = kind > 0.5 ? 0.38 * H : 0.55 * H;
+  if (kind < -0.5) amp *= 0.1;                // v4g: the two reel-beat kelp barely sway, so they hold the frame's corners
   p.x += (0.35 + sway) * amp * bendK * 0.42;
   p.z += (0.20 + crs * 0.55) * amp * bendK * 0.32;
   // parting: blades near the camera lean away from it (only around the camera's own depth)
@@ -89,6 +90,7 @@ void main(){
 #ifdef FORE
     aa += 0.05;                                         // out of focus: soft edges
 #endif
+    if (vKind < -0.5) aa += 0.035;                      // v4g: the two reel-beat kelp sit close to the lens: slightly out of focus
     float st = 0.022 * (1.0 - y * 0.5);
     a = smoothstep(st + aa, st, abs(pw.x)) * (1.0 - smoothstep(0.93, 1.0, y));
     leaf = 0.85;                                         // the stipe is thick: no edge glow
@@ -113,6 +115,7 @@ void main(){
       if (inl > a) { a = inl; leaf = 1.0 - abs(pe) / max(hw, 1e-3) * 0.6; }
     }
   }
+  if (vKind < -0.5) a *= 1.0 - u_nearOut;             // v4g: the reel-beat kelp leave as the lens moves on (no frond across the title)
 #if defined(FORE) || defined(SOFT)
   if (a < 0.02) discard;
 #else
@@ -152,7 +155,10 @@ void main(){
   vec3 tv = exp(-KV * dist);
   float dc = max(-u_cam.y, 0.02);
   vec3 fogC = inscatter(V, mix(dc, dc + max(-V.y, 0.0) * 4.0, 0.85));
+  fogC = mix(fogC, airyGrade(V.y), 0.85 * u_airy);      // v4g b: the same water as the reel-beat backdrop
   col = col * tv + fogC * (1.0 - tv) + rayVeil(V, dc, min(dist, 18.0));
+  if (vKind < -1.5) col = mix(col, fogC * 0.5, 0.6);    // v5.2: lighter, the reel's corner plant reads soft through the water   // v4g b: the reel's lower-left plant, a darker silhouette close to the lens
+  else if (vKind < -0.5) col = mix(col, fogC * 0.8, 0.38 * u_airy);   // v4g c: the reel's right plant reads through the haze (lighter, softer, less olive)
   col *= 1.0 - u_deep * 0.85;
 #ifdef FORE
   // close to the lens: a darker, softer silhouette that only carries the backlight

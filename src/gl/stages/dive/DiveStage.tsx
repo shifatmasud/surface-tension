@@ -88,14 +88,17 @@ function* plantForestSteps(nKelp: number, nGrass: number): Generator<unknown, Pl
     fore.push(x, y, z, H, x, y, z, H)
     fShape.push(wd, ph, tw, 0, wd, ph, tw + 1.5708, 0)
   }
-  // v4e (Shifat 9:39 PM, the v3 reel: "two green vegetation… I loved these"): W19's straight-down dive put the
-  // just-under-the-waterline beat at z ≈ −3…+2, ~13 m short of every kelp (z ≥ 10) and of the fore fronds (z ≥ 10.6),
-  // so that shot lost its foreground. Two near kelp plants frame the diamond there again (right: tall; lower-left:
-  // short), lit like the rest of the forest, same draw call. Fixed shape values: the seeded layout above is unchanged.
-  for (const [x, z, top, ph, tw] of [[1.2, 0.5, -1.5, 0.9, 0.4], [-1.3, -0.4, -2.7, 3.7, 1.9]]) {
+  // v4g (Shifat 10:14 PM, his v3 reel still: "New versions still doesn't match our still shot"): the reel's frame is the
+  // look-up beat (~15% scroll, u ≈ 0.50: camera ≈ (0, −3.1, 8.3) looking ~40° up, the stone big in the lower middle). Two
+  // leafy kelp, softened, frame it at the screen edges there: one in the lower-left corner, one on the right edge. Same kelp
+  // material and draw call; kind −1 = soft edge + leaves after the beat (vegetation.ts). x is pre-divided by the portrait
+  // pull (u_xk 0.88); their sway is damped (×0.1), so they hold the corners (lower-left ~0–30% of the width, right ~65–100%). This replaces v4e's two kelp at z ≈ 0 (wrong beat).
+  // Fixed values: the seeded layout is unchanged.
+  // kind −2 (lower-left) also reads as the reel's darker, closer silhouette
+  for (const [x, z, top, ph, tw, kd] of [[0.64, 11.5, -1.6, 3.57, 0.6, -2], [-0.88, 11.1, -1.7, 3.94, 2.2, -1]]) {
     const y = floorH(x, z) - 0.05, H = top - y
     kelp.push(x, y, z, H, x, y, z, H)
-    kShape.push(1.0, ph, tw, 0, 1.0, ph, tw + 1.5708, 0)
+    kShape.push(1.1, ph, tw, kd, 1.1, ph, tw + 1.5708, kd)
   }
   return { kelp, kShape, grass, gShape, fore, fShape }
 }
@@ -152,6 +155,9 @@ function makeDiveUniforms() {
     u_bn: shared.u_blueNoise,
     u_caus: { value: QA.noCaus ? 0 : 1 },
     u_xk: { value: 1 },
+    u_airy: { value: 0 },    // v4g: the reel's look-up beat (shaders.ts)
+    u_nearOut: { value: 0 },
+    u_winSoft: { value: 0 },
   }
 }
 export const diveUniforms = () => (diveU ??= makeDiveUniforms())
@@ -330,7 +336,7 @@ void main(){
     // screen-space god rays: on once fully under, fading out into the deep
     diveRays.scene = maskScene
     diveRays.toSun.copy(u.u_sun.value).negate()
-    diveRays.intensity = QA.noRays ? 0 : ss(-0.3, -1.2, camY) * (1 - ss(-9, -20, camY)) * 0.9
+    diveRays.intensity = QA.noRays ? 0 : Math.min(1, ss(-0.3, -1.2, camY) * (1 - ss(-9, -20, camY)) * 0.9 * (1 + 0.5 * u.u_airy.value)) // v4g: + the reel beat's rays
     diveRays.on = diveRays.intensity > 0.002
 
     u.u_cam.value.copy(camera.position)
@@ -344,6 +350,12 @@ void main(){
     u.u_amb.value = ss(-9, -22, camY)
     u.u_abyss.value = dive.abyss
     u.u_sinkK.value = Math.min(1, dive.camSink / SINK_M) // R6.88 SINK: the water darkens as the tablet takes us down
+    // v4g: the reel's look-up beat (~15% scroll): airy turquoise water and a soft window edge, in over u .41–.49, out .55–.61;
+    // the two beat fronds leave as the lens moves on (.52–.56)
+    u.u_airy.value = ss(0.41, 0.49, dive.u) * (1 - ss(0.55, 0.61, dive.u))   // v4g c: in from .41 so the window's edge has no band at 14%
+    u.u_nearOut.value = ss(0.52, 0.56, dive.u)
+    // Shifat 11:28 PM "No seam visible ok?": the window's hard edge melts already on the way in (u .40–.44) and stays soft until the water is back
+    u.u_winSoft.value = ss(0.40, 0.44, dive.u) * (1 - ss(0.58, 0.64, dive.u))
     const rs = nb.active ? nb.scale : 1 // NEIGHBOUR HOOK: point sizes follow the neighbour's smaller target
     mats.silt.uniforms.u_pxScale.value = props.renderH * rs / (2 * Math.tan((camera.fov * Math.PI) / 360))
     mats.stars.uniforms.u_dpr.value = props.dpr * rs

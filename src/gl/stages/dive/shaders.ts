@@ -18,6 +18,9 @@ uniform float u_amb;       // v3: 0..1 the deep water's own glow takes over from
 uniform float u_abyss;     // v3: 0..1 the systems deep: exponential fog density, marine snow, the last shafts
 uniform float u_sinkK;     // R6.88 SINK: 0..1 how far the tablet has taken us down below the Shade DS scene (the water darkens)
 uniform float u_caus;      // caustic strength 0..1 (QA: ?nocaus)
+uniform float u_airy;      // v4g (Shifat's v3 reel still, ~15% scroll): 0..1 the look-up beat's light, airy water (ramped by u)
+uniform float u_nearOut;   // v4g: 0..1 the reel-beat fronds leaving after the beat
+uniform float u_winSoft;   // v4g b: 0..1 the window's edge melts (no hard line) on the way into and through the reel beat
 uniform vec2 u_res;
 uniform sampler2D u_bn;
 const vec3 K  = vec3(0.34, 0.092, 0.072);           // absorption of light from the surface, per unit depth
@@ -55,8 +58,17 @@ float deepFog(float dist){
 vec3 inscatter(vec3 dir, float depth){
   float up = dir.y * 0.5 + 0.5;
   float fwd = max(dot(dir, -u_sun), 0.0);
-  float ph = 0.34 + 1.05 * up * up * up + 1.1 * pow(fwd, 5.0) + 1.7 * pow(fwd, 40.0);
-  return SCAT * exp(-K * max(depth, 0.0)) * ph * (1.0 - u_deep);
+  float ph = 0.34 + 1.05 * up * up * up + 1.1 * pow(fwd, 5.0) + 1.7 * pow(fwd, 40.0) + 0.7 * u_airy * up * up;   // v4g: + the reel beat's airy, lit water
+  // v4g: in the reel's look-up beat the open water reads light turquoise (bluer, brighter, less red), ramped by u_airy
+  return SCAT * exp(-K * max(depth, 0.0)) * ph * (1.0 - u_deep) * mix(vec3(1.0), vec3(0.75, 1.22, 1.32), u_airy);
+}
+/** v4g b (Shifat's v3 reel still, the look-up beat): the reel's water by view elevation, as he sees it: a tall milky-white
+    haze from the window down to the middle of the frame, then bright, light turquoise, deepening only near the bottom edge */
+vec3 airyGrade(float y){
+  vec3 g = mix(vec3(0.004, 0.10, 0.15), vec3(0.03, 0.34, 0.52), smoothstep(0.08, 0.30, y));
+  g = mix(g, vec3(0.07, 0.53, 0.74), smoothstep(0.28, 0.50, y));
+  g = mix(g, vec3(0.18, 0.83, 0.93), smoothstep(0.48, 0.63, y));
+  return mix(g, vec3(0.86, 1.0, 1.0), smoothstep(0.60, 0.80, y));
 }
 /** sunlight that reaches a point at depth d, entering through surface point q */
 float shaft(vec2 q){
@@ -64,7 +76,8 @@ float shaft(vec2 q){
   float a = vnoise(q * vec2(0.42, 0.30) + vec2(t * 0.05, -t * 0.035));
   float b = vnoise(q * vec2(0.95, 0.70) - vec2(t * 0.04, t * 0.06) + 7.3);
   float s = a * 0.65 + b * 0.35;
-  return pow(smoothstep(0.32, 0.92, s), 2.2) * 2.6;
+  // v5.2: in the reel beat the shafts read as separate beams (a harder cut, same mean glow)
+  return pow(smoothstep(0.32 + 0.14 * u_airy, 0.92, s), 2.2 + 2.4 * u_airy) * 2.6 * (1.0 + 2.2 * u_airy);
 }
 /** the shafts' average glow along a view segment of length T (closed form of the march with a mean pattern) */
 vec3 rayVeil(vec3 dir, float dc, float T){
@@ -209,6 +222,7 @@ void main(){
   float deepView = dc + max(-dir.y, 0.0) * 4.0;
   vec3 col = inscatter(dir, mix(dc, deepView, 0.85));
   float tEnd = 18.0;
+  float rip = 0.0;   // v5.2: the surface's ripple structure seen from below (the reel beat's haze carries it)
 
   if (dir.y > 0.0){
     float t = dc / dir.y;
@@ -223,7 +237,7 @@ void main(){
       float s2 = max(0.0, 1.0 - c * c);
       vec3 eta = vec3(1.329, 1.333, 1.341);
       vec3 k = 1.0 - eta * eta * s2;
-      vec3 win = smoothstep(vec3(0.0), vec3(0.055), k);
+      vec3 win = smoothstep(vec3(0.0), vec3(0.055 + 0.95 * u_winSoft), k);   // v4g b: the window's edge melts into and through the reel beat (0.055 elsewhere: as before)
       vec3 a = refract(dir, -n, 1.333);
       vec3 sky = skyAir(length(a) > 0.0 ? a : vec3(0.0, 1.0, 0.0));
       float tr = 1.0 - pow(1.0 - sqrt(max(k.g, 0.0)), 5.0);
@@ -235,7 +249,10 @@ void main(){
       // window). Just under the surface the mirror sees the lit shallows, so the deep look comes in with depth.
       float gz = smoothstep(0.0, 0.45, dir.y) * smoothstep(0.5, 3.0, dc);
       vec3 mirror = inscatter(r, dc + 12.0 * gz) * mix(0.95, 0.55, gz) + vec3(0.05, 0.11, 0.12) * (1.0 - gz) * exp(-K * dc);
-      float dance = 0.78 + 0.42 * caustic(hp * 1.15);              // the window shimmers as the swell focuses light
+      float cs = caustic(hp * 1.15);
+      float dance = 0.78 + 0.42 * cs;              // the window shimmers as the swell focuses light
+      // v5.2: the same focus network plus the swell's slope: soft wave lines for the reel beat's haze (no extra lookups)
+      rip = (0.32 * (min(cs, 2.2) - 1.0) + 6.5 * (n.x + 0.6 * n.z)) * clamp(4.0 / (t + 2.0), 0.0, 1.0);
       vec3 surf = sky * win * tr * mix(1.0, dance, clamp(4.0 / (t + 2.0), 0.0, 1.0)) + mirror * (1.0 - win * tr);
       // R7.10 b8 (Shifat's real M02s, the dive start: "hard line at the stone's top"): just under the surface (dc → 0.02) the
       // underside faded in over a sliver of view angle (t = dc / dir.y), a hard horizontal line with a dark slab below it.
@@ -245,6 +262,14 @@ void main(){
       col = surf * tv + col * (1.0 - tv);
     }
   }
+
+  // v4g b (the reel beat only, u_airy = 0 elsewhere): the frame takes the reel's milky-white over light-turquoise water; a
+  // quarter of the scene's own light stays on top, so the window's shimmer reads through it; the shafts are added after, in full
+  col = mix(col, airyGrade(dir.y) + 0.25 * col, 0.85 * u_airy);
+  // v5.2 (the reel's top 40%: the surface from below, soft bright wave lines in the milky haze): the haze takes the ripple
+  // structure, a touch below white between the lines so the lines read; ramps in over a tall band (no seam)
+  float hzR = smoothstep(0.42, 0.80, dir.y) * u_airy;
+  col *= (1.0 - 0.14 * hzR) * (1.0 + hzR * clamp(rip, -0.45, 1.2) * vec3(0.46, 0.33, 0.29));
 
   // god rays: march toward the surface / into the blue
   float N = u_raySteps;
@@ -261,7 +286,7 @@ void main(){
     acc += shaft(surfaceEntry(p)) * exp(-K * d - KV * ti) * (2.0 * fi);   // × dt/dfi of the quadratic spacing
   }
   float fwd = max(dot(dir, -u_sun), 0.0);
-  col += acc * dt * u_rayGain * vec3(0.30, 0.78, 0.86) * (0.07 + 0.52 * pow(fwd, 2.5)) * (1.0 - u_deep); // shafts read as the star of the open-water frames
+  col += acc * dt * u_rayGain * vec3(0.30, 0.78, 0.86) * (0.07 + 0.52 * pow(fwd, 2.5)) * (1.0 - u_deep) * (1.0 + 1.8 * u_airy); // v4g: stronger shafts in the reel beat; shafts read as the star of the open-water frames
 
   col *= 1.0 - u_deep * 0.9;
   // v3: the deep's own glow, and the last light shafts slanting down into it (fading with depth)
