@@ -219,14 +219,10 @@ export function shatterMaterial(tex: THREE.Texture) {
         float flyK = max(smoothstep(0.0, 0.25, move), step(3.5, aKind));
         float pOut = mix(u_out, u_outFly, flyK);
         vOut = pOut; vRestOut = u_out * (1.0 - flyK);
-        p *= 1.0 - u_outFly * flyK;
-        // v5o (Shifat "No fade solo. Fade blur scale transform"): the pieces still at rest leave with a combined exit —
-        // each one shrinks about its own centre (to 0.84) and drifts a touch toward the camera while it fades and
-        // softens (fragment: alpha + blur). Pure function of u_out, so it scrubs both ways.
-        float restK = 1.0 - smoothstep(0.0, 0.25, move);
-        float sx = u_out * restK;
-        p.xy *= 1.0 - 0.16 * sx;
-        p.z += 0.05 * sx * u_k;
+        // v5s (Shifat 7:43 PM "Glass shards too" / "I meant shattered glass"): every piece, at rest or in flight, leaves
+        // as a particle dissolve (fragment: specks + fade + blur) instead of shrinking; it only drifts a touch toward the
+        // camera as it breaks up. Pure function of vOut, so it scrubs both ways.
+        p.z += 0.05 * pOut * u_k;
         p = R * p; n = R * n;
         vec3 lp = vec3(c, 0.0) + p + off;
         vec4 mv = modelViewMatrix * vec4(lp, 1.0);
@@ -307,7 +303,25 @@ export function shatterMaterial(tex: THREE.Texture) {
         col += (vec3(1.0) * s1 * 3.0 + vec3(1.0, 0.75, 0.45) * s2 * 2.2) * catchK;
         // v5o exit: fade, with the piece's outline feathering in as it goes (a soft, blurred silhouette, not a cut-out)
         float soft = smoothstep(0.0, 0.02 + 0.5 * vOut, vEdge);
-        float alpha = (1.0 - vOut) * mix(1.0, soft, min(1.0, vOut * 3.0));
+        float alpha = mix(1.0, soft, min(1.0, vOut * 3.0));
+        // v5s particle dissolve: the glass breaks into fine glinting dust — cells on a skewed grid in the picture's space,
+        // each breaking at its own moment (a soft noise front + per-cell jitter), shrinking to a blurred speck that drifts
+        // and flares as it goes; the last of it fades out by vOut = 1 (no pop). Off the exit it is one branch.
+        if (vOut > 0.0) {
+          vec2 q = mat2(0.83, 0.56, -0.56, 0.83) * vUv * 46.0;
+          vec2 ce = floor(q), f = fract(q) - 0.5;
+          float h1 = fract(sin(dot(ce, vec2(12.9898, 78.233))) * 43758.5453), h2 = fract(h1 * 17.31 + 0.27);
+          float front = 0.5 + 0.5 * sin(dot(vUv, vec2(9.0, 13.0)) + 2.0 * sin(vUv.y * 7.0 - vUv.x * 5.0));
+          float r = 0.55 * front + 0.45 * h1;
+          float s = clamp((vOut - 0.04 - 0.45 * r) / 0.5, 0.0, 1.0);
+          f -= (vec2(h2, h1) - 0.5) * 0.25 + normalize(vec2(h1 - 0.5, h2 - 0.5) + 1e-3) * 0.22 * s;   // the speck drifts off
+          float rad = mix(0.75, 0.14 + 0.12 * h2, smoothstep(0.0, 0.45, s));
+          float d = length(f), sw = 0.08 + 0.3 * s;                                                  // its edge blurs as it goes
+          float m = (1.0 - smoothstep(rad - sw, rad, d)) * (1.0 - smoothstep(0.72, 1.0, s));
+          m = mix(1.0, m, smoothstep(0.0, 0.08, s));                                                 // unbroken glass stays whole
+          col += (vec3(0.85, 0.92, 1.0) + thinFilm(cosT, h1 * 2.0) * 0.4) * 0.55 * smoothstep(0.0, 0.3, s) * max(0.0, 1.0 - d / max(rad, 0.05));
+          alpha *= m * (1.0 - smoothstep(0.85, 1.0, vOut));
+        }
         if (alpha < 0.002) discard; // v5p: a piece that has fully left costs no blend
         gl_FragColor = vec4(col, alpha);
         #include <tonemapping_fragment>

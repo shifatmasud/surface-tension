@@ -84,6 +84,7 @@ attribute vec3 aF;      // x: 0 bell / 1 filament / 2 oral arm, y: 0 apex … 1 
 attribute vec4 aSeed;   // xyz cell (0..1), w random
 attribute vec4 aSeed2;  // x size, y/z tilt, w film hue
 varying float vA, vKind, vT, vHue, vCoc, vPulse, vSide, vCov;
+varying vec3 vDP; varying float vDis;   // v5s particle dissolve: the surface point it breaks at, and how far it has broken
 uniform float u_keep;   // 1 while the work cards hold the frame (no jelly over a card)
 uniform vec3 u_camR, u_camU, u_camF; uniform vec2 u_lens;   // the main camera's basis and tan(half fov) x/y
 varying vec3 vN, vV;
@@ -109,7 +110,12 @@ void main(){
   // light (a little larger, dimmer, softer margin) — the near one blurs hardest
   float F = 6.0;
   float coc = clamp(abs(1.0 / dd - 1.0 / F) * F * 1.2, 0.0, 1.0);
-  vCoc = coc;
+  // v5s (Shifat 7:41 PM "Particle fade blur instead"): the exit/return as the work cards come and go (u_keep) is a
+  // particle dissolve: the bell defocuses (the same depth-of-field softening, pushed open), its surface breaks into
+  // glowing specks that drift apart and fade; on return they gather, sharpen and light back up. u_keep = 0 is v5.14.
+  float dis = u_keep;
+  vDis = dis;
+  vCoc = mix(coc, 1.0, 0.85 * dis);   // the defocus margin opens (blur); size and light keep the bell's own depth
   vec3 p = position, n;
   if (aF.x < 0.5 || aF.x > 2.5){   // the bell, and (W25 R6.50) the inner bell, pulse together
     float r = aF.y;
@@ -124,6 +130,10 @@ void main(){
     p.z += 0.24 * v * cos(v * 2.9 - t * 0.9 + ph + position.x * 4.0);
     n = vec3(0.0, 0.0, 1.0);
   }
+  vDP = p;
+  // the breaking surface drifts apart: a smooth swirl outward and a slow lift (nothing at u_keep = 0)
+  vec3 sw = vec3(sin(p.y * 4.1 + ph + t * 0.9), sin(p.z * 3.7 + ph * 1.3 - t * 0.7), sin(p.x * 4.4 + ph * 0.7 + t * 0.8));
+  p += (sw * 0.36 + normalize(p + vec3(1e-3)) * 0.42 + vec3(0.0, 0.5, 0.0)) * dis * sqrt(dis) ;
   mat3 R = rotAxis(vec3(aSeed2.y, 0.0, aSeed2.z) + vec3(1e-4), length(aSeed2.yz));
   p = R * p; n = R * n;
   float sz = aSeed.w * dd * tY * (1.0 + 0.25 * coc);
@@ -142,7 +152,7 @@ void main(){
     mv.x += aF.z * max(hw, hwMin);
   }
   gl_Position = projectionMatrix * mv;
-  vA = floatFade(c, edge, gl_Position, 1.2, 3.0) * depthLight() * mix(1.0, 0.42, coc) * (1.0 - u_keep);
+  vA = floatFade(c, edge, gl_Position, 1.2, 3.0) * depthLight() * mix(1.0, 0.42, coc) * (1.0 - smoothstep(0.55, 1.0, u_keep));   // v5s: the last of the fade rides the dissolve
   // safety net: a bell whose centre would ever reach the subject's zone in the middle of the frame fades out
   vec2 cn = vec2(nx, ny);
   vA *= smoothstep(0.0, 0.12, max(abs(cn.x) - 0.36, abs(cn.y) - 0.5));
@@ -154,6 +164,8 @@ uniform float u_time, u_split; uniform vec2 u_res;
 ${CLIP}
 varying float vA, vKind, vT, vHue, vCoc, vPulse, vSide, vCov;
 varying vec3 vN, vV;
+varying vec3 vDP; varying float vDis;
+float h31(vec3 q){ q = fract(q * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
 void main(){
   splitClip();
   vec3 col;
@@ -203,6 +215,26 @@ void main(){
     col += lum * glow * (1.0 - vT) * (1.0 - vT) * (vKind < 1.5 ? 1.1 : 0.7) * (0.6 + 0.4 * run);
     col *= 1.0 - smoothstep(0.25, 1.0, abs(vSide));   // W25 R6.54: a soft ribbon cross-section, no hard 1 px line
     col *= vCov;   // R7.08c: a widened sub-pixel ribbon keeps its old total light
+  }
+  // v5s particle dissolve: the surface is a grid of cells; each cell breaks at its own moment (a smooth noise front
+  // plus a per-cell jitter), shrinking to a soft speck that flares as it goes, then is gone. Off the exit it costs one branch.
+  if (vDis > 0.002){
+    // cells on a skewed grid (no axis-aligned net), each a speck of its own size, jittered inside its cell
+    vec3 q = mat3(0.80, 0.36, -0.48, -0.47, 0.86, -0.18, 0.37, 0.36, 0.86) * vDP * 6.5;
+    vec3 ce = floor(q), f = fract(q) - 0.5;
+    float h1 = h31(ce + 17.0), h2 = h31(ce + 41.0);
+    f -= (vec3(h2, h1, fract(h1 * 7.3)) - 0.5) * 0.28;
+    // a soft noise front (patches go first, with a glowing edge) plus per-cell jitter orders the break
+    float front = 0.5 + 0.5 * sin(dot(vDP, vec3(2.1, 2.9, 1.7)) + 1.9 * sin(vDP.y * 1.6 + vDP.x * 1.3));
+    float r = 0.55 * front + 0.45 * h1;
+    float s = clamp((vDis - 0.02 - 0.42 * r) / 0.5, 0.0, 1.0);
+    float rad = mix(1.0, 0.16 + 0.14 * h2, smoothstep(0.0, 0.45, s));
+    float d = length(f);
+    float soft = 0.1 + 0.32 * s;                                       // the speck's edge blurs as it goes
+    float m = (1.0 - smoothstep(rad - soft, rad, d)) * (1.0 - smoothstep(0.72, 1.0, s));
+    float flare = 1.0 + 2.6 * smoothstep(0.0, 0.3, s) * (1.0 - d / max(rad, 0.05));
+    col *= m * flare;
+    col += vec3(0.9, 0.66, 1.0) * 0.05 * m * smoothstep(0.0, 0.25, s);   // the speck's own glow
   }
   gl_FragColor = vec4(col * vA * 0.85, 1.0);
 }`
@@ -490,7 +522,7 @@ export function Floaters({ u }: { u: U }) {
     const cam = camera as THREE.PerspectiveCamera
     cam.matrixWorld.extractBasis(lens.u_camR.value, lens.u_camU.value, lens.u_camF.value); lens.u_camF.value.negate()
     const ty = Math.tan((cam.fov * Math.PI) / 360); lens.u_lens.value.set(ty * cam.aspect, ty)
-    keep.value += (want - keep.value) * (1 - Math.exp(-4 * Math.min(props.dt, 0.1)))
+    keep.value += (want - keep.value) * (1 - Math.exp(-3 * Math.min(props.dt, 0.1)))   // v5s: 4 → 3 so the particle dissolve reads (~0.8 s)
   })
 
   const layer = (o: THREE.Object3D) => o.layers.set(DIVE_LAYER)
