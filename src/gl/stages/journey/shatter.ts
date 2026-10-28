@@ -166,7 +166,7 @@ export function buildShatterGeometry(o: ShatterOpts) {
 }
 
 const COMMON = /* glsl */ `
-  uniform float u_t, u_crackR, u_ringR, u_tilt, u_hole, u_k, u_time, u_out;
+  uniform float u_t, u_crackR, u_ringR, u_tilt, u_hole, u_k, u_time, u_out, u_outFly;
   uniform vec2 u_impact;
   mat3 rotAxis(vec3 a, float ang){ float s = sin(ang), c = cos(ang), oc = 1.0 - c;
     return mat3(oc*a.x*a.x + c, oc*a.x*a.y + a.z*s, oc*a.z*a.x - a.y*s,
@@ -180,13 +180,13 @@ export function shatterMaterial(tex: THREE.Texture) {
     uniforms: {
       u_map: { value: tex }, u_t: { value: -1 }, u_crackR: { value: 0 }, u_ringR: { value: 0 }, u_tilt: { value: 0 },
       u_hole: { value: 4 }, u_k: { value: 1 }, u_time: { value: 0 }, u_impact: { value: new THREE.Vector2() },
-      u_bright: { value: 1 }, u_gloss: { value: 0 }, u_frost: { value: 0 }, u_out: { value: 0 },
+      u_bright: { value: 1 }, u_gloss: { value: 0 }, u_frost: { value: 0 }, u_out: { value: 0 }, u_outFly: { value: 0 }, u_brightTo: { value: 1 },
       u_crackW: { value: 1.05 },
     },
     vertexShader: /* glsl */ `
       ${COMMON}
       attribute vec3 aCenter; attribute vec2 aUv; attribute float aEdge; attribute float aKind; attribute vec4 aRand; attribute vec2 aRest;
-      varying vec2 vUv; varying float vEdge; varying float vKind; varying vec3 vN; varying vec3 vV; varying vec2 vRest; varying float vMove; varying vec4 vRand;
+      varying vec2 vUv; varying float vEdge; varying float vKind; varying vec3 vN; varying vec3 vV; varying vec2 vRest; varying float vMove; varying vec4 vRand; varying float vOut; varying float vRestOut;
       void main(){
         vec2 c = aCenter.xy; float size = aCenter.z; float dist = aRand.w;
         vec2 dir = dist > 1e-3 ? (c - u_impact) / dist : vec2(0.0, 1.0);
@@ -214,7 +214,12 @@ export function shatterMaterial(tex: THREE.Texture) {
         // R6.98: as the camera glides to the CTA the pieces shrink to glass dust instead of all vanishing in one frame
         // (pieces still at rest in the frame mirror the screen exactly, so they are not shrunk: their crack lines and frost
         // fade instead, and they leave without a visible change; their thin edge walls tuck in behind the face)
-        p *= 1.0 - u_out * max(smoothstep(0.0, 0.25, move), step(3.5, aKind));
+        // v5p: pieces in flight keep v5.12's timing (u_outFly, the late window) so they are not cut short; the rest
+        // pieces use u_out (their own earlier window). vOut carries each piece's own value to the fragment.
+        float flyK = max(smoothstep(0.0, 0.25, move), step(3.5, aKind));
+        float pOut = mix(u_out, u_outFly, flyK);
+        vOut = pOut; vRestOut = u_out * (1.0 - flyK);
+        p *= 1.0 - u_outFly * flyK;
         // v5o (Shifat "No fade solo. Fade blur scale transform"): the pieces still at rest leave with a combined exit —
         // each one shrinks about its own centre (to 0.84) and drifts a touch toward the camera while it fades and
         // softens (fragment: alpha + blur). Pure function of u_out, so it scrubs both ways.
@@ -232,8 +237,8 @@ export function shatterMaterial(tex: THREE.Texture) {
       }`,
     fragmentShader: /* glsl */ `
       ${COMMON}
-      uniform sampler2D u_map; uniform float u_bright, u_gloss, u_frost, u_crackW;
-      varying vec2 vUv; varying float vEdge; varying float vKind; varying vec3 vN; varying vec3 vV; varying vec2 vRest; varying float vMove; varying vec4 vRand;
+      uniform sampler2D u_map; uniform float u_bright, u_brightTo, u_gloss, u_frost, u_crackW;
+      varying vec2 vUv; varying float vEdge; varying float vKind; varying vec3 vN; varying vec3 vV; varying vec2 vRest; varying float vMove; varying vec4 vRand; varying float vOut; varying float vRestOut;
       vec3 thinFilm(float cosT, float d){ return 0.5 + 0.5 * cos(6.2831853 * (vec3(0.0, 0.33, 0.67) + d * (1.0 + 1.6 * (1.0 - cosT)))); }
       // a studio in view space: a big softbox up-left, a warm rim behind-right, a dim graphite room
       vec3 studio(vec3 r){
@@ -259,10 +264,10 @@ export function shatterMaterial(tex: THREE.Texture) {
           // refraction: a tumbling piece bends its picture; at rest it lines up with the screen exactly
           vec2 bend = N.xy * 0.035 * vMove;
           vec3 img;
-          if (u_out > 0.0) {
+          if (max(u_out, u_outFly) > 0.0) {
             // v5o exit blur: a cheap 5-tap soften of the piece's picture that widens as it leaves (only during the
             // exit window, so the normal cost is unchanged)
-            float br = u_out * 0.014;
+            float br = vOut * 0.014;
             vec2 uv0 = vUv - bend;
             img = texture2D(u_map, uv0).rgb * 0.2
                 + (texture2D(u_map, uv0 + vec2( br,  br)).rgb + texture2D(u_map, uv0 + vec2(-br,  br)).rgb
@@ -272,21 +277,21 @@ export function shatterMaterial(tex: THREE.Texture) {
             img.g = texture2D(u_map, vUv - bend).g;
             img.b = texture2D(u_map, vUv - bend * 0.88).b;
           }
-          img *= u_bright;
+          img *= mix(u_bright, u_brightTo, vRestOut); // v5p: only the rest pieces settle to the screen's brightness
           if (vKind > 2.5) img *= 0.32; // seen through the back of the piece
           float sheen = smoothstep(0.55, 1.25, vUv.y * 0.8 + (1.0 - vUv.x) * 0.6);
           col = img * (1.0 - 0.12 * sheen * u_gloss) + vec3(0.75, 0.8, 0.9) * sheen * 0.05 * u_gloss;
           // the crushed spot at the impact: a white frosted star
-          float fr = u_frost * (1.0 - u_out) * smoothstep(0.42 * u_k, 0.0, dist) * (0.55 + 0.45 * vRand.x);
+          float fr = u_frost * (1.0 - vOut) * smoothstep(0.42 * u_k, 0.0, dist) * (0.55 + 0.45 * vRand.x);
           col = mix(col, vec3(0.92, 0.95, 1.0), fr * 0.85);
           // cracks: drawn along the piece's own outline (constant pixel width), once the fracture front has passed
           float w = fwidth(vEdge);
           float line = (1.0 - smoothstep(0.0, w * u_crackW, vEdge)) * (0.55 + 0.45 * fract(sin(dot(floor(vRest * 9.0), vec2(12.9898, 78.233))) * 43758.5453));
           float halo = 1.0 - smoothstep(0.0, w * 5.0, vEdge);
           float reach = vKind < 0.5 ? step(dist, u_crackR) : vKind < 1.5 ? step(dist, u_ringR) : 0.0;
-          float lineA = line * reach * (1.0 - vMove) * (1.0 - u_out);
+          float lineA = line * reach * (1.0 - vMove) * (1.0 - vOut);
           vec3 tf = thinFilm(cosT, 0.4 + dist * 0.35);
-          col = mix(col, col * 0.7, halo * reach * 0.3 * (1.0 - vMove) * (1.0 - u_out));
+          col = mix(col, col * 0.7, halo * reach * 0.3 * (1.0 - vMove) * (1.0 - vOut));
           col += (vec3(0.85, 0.9, 1.0) * 0.5 + tf * 0.28) * lineA;
           // in flight: the face trades its picture for the studio as it turns away, with a thin-film fringe on the grazing angle
           float flight = vMove;
@@ -301,8 +306,9 @@ export function shatterMaterial(tex: THREE.Texture) {
         float catchK = vKind > 3.5 ? 1.0 : vMove;
         col += (vec3(1.0) * s1 * 3.0 + vec3(1.0, 0.75, 0.45) * s2 * 2.2) * catchK;
         // v5o exit: fade, with the piece's outline feathering in as it goes (a soft, blurred silhouette, not a cut-out)
-        float soft = smoothstep(0.0, 0.02 + 0.5 * u_out, vEdge);
-        float alpha = (1.0 - u_out) * mix(1.0, soft, min(1.0, u_out * 3.0));
+        float soft = smoothstep(0.0, 0.02 + 0.5 * vOut, vEdge);
+        float alpha = (1.0 - vOut) * mix(1.0, soft, min(1.0, vOut * 3.0));
+        if (alpha < 0.002) discard; // v5p: a piece that has fully left costs no blend
         gl_FragColor = vec4(col, alpha);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>

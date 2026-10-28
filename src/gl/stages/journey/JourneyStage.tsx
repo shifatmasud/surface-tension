@@ -93,8 +93,10 @@ function bezelGeometry(w: number, h: number, r: number, sw: number, sh: number) 
 const RIM_PX = +(new URLSearchParams(location.search).get('rimpx') ?? 3) || 0   // R6.96: min rim width, background px (v5.11: 2 → 3; at 2 the top rim still broke into dashes on lowend phone / weak PC)
 // v5m: crack line width in pixels (x fwidth). At 1.05 a near-vertical crack broke into dashes in the low-density
 // background pass (lowend phone / weak PC); 1.6 keeps it one continuous thin line there. Sharp tiers keep 1.05. ?crackw=N overrides.
-// v5o: where in the CTA glide (g) the rest pieces start their exit (v5n: 0.16, over ~1 % of scroll); ?shardg0=N to test
-const SHARD_OUT_G0 = Math.min(0.27, Math.max(0, +(new URLSearchParams(location.search).get('shardg0') ?? 0.08) || 0.08))
+// v5p: the rest pieces' exit runs over the last part of the journey's glide (t = (p - 0.88) / 0.12 from SHARD_OUT_T0 to 1),
+// so it is complete when the glide rests at p = 1; v5o's g window (0.08-0.29) straddled that rest and parked the pieces
+// at ~30 % gone (half-faded, blurred) on a held stretch of scroll. ?shardt0=N to test
+const SHARD_OUT_T0 = Math.min(0.9, Math.max(0, +(new URLSearchParams(location.search).get('shardt0') ?? 0.4) || 0.4))
 const CRACK_W = +(new URLSearchParams(location.search).get('crackw') ?? ((DENS_ONE || LOW_END_GPU) ? 1.6 : 1.05)) || 1.05
 const CTA_GLIDE = new URLSearchParams(location.search).has('ctaglide')   // R6.92b: off = the CTA rides up as a sheet
 // b9-earthedge-v1: Earth's limb rebuilt in the screen pass at its own pixel (shaders.ts screenMaterial); ?eedge=0 = live
@@ -466,7 +468,7 @@ export function JourneyStage(): JSX.Element {
     // where the inner crewmate sits on the glass at the moment of the break (same pose, so the hand-off is seamless)
     const start = breakStart(S, portrait, fovIn)
     const O = outer(p, S.O, fit, start, SCREEN_Z, farCorner(S.sw, S.sh, start.x, start.y))
-    let shardOut = 0
+    let shardOut = 0, shardOutFly = 0
     // ---- W18 THE ENDING (STRUCTURE v3 13:27Z–13:33Z): glide down past the tablet with the crewmate alongside into the
     // aligned CTA on the black wall (ctaScene.ts). g: a first touch of the glide as the crewmate floats free, the rest
     // over the CTA section's arrival (journey.cta 0 → 1). Pure functions of scroll: reversible, never frozen.
@@ -497,7 +499,9 @@ export function JourneyStage(): JSX.Element {
         O.pitch = mix(O.pitch, 0.05, gc)
         O.roll = mix(O.roll, Math.sin(journey.ctaTime * 0.27) * 0.06 + 0.22 * Math.sin(Math.PI * gc), gc)
         O.float = 1
-        shardOut = Math.min(1, Math.max(0, (g - SHARD_OUT_G0) / (0.29 - SHARD_OUT_G0))); shardOut = shardOut * shardOut * (3 - 2 * shardOut) // v5o: a longer exit window
+        const tj = Math.min(1, Math.max(0, (p - 0.88) / 0.12))
+        shardOut = Math.min(1, Math.max(0, (tj - SHARD_OUT_T0) / (1 - SHARD_OUT_T0))); shardOut = shardOut * shardOut * (3 - 2 * shardOut) // v5p: rest pieces
+        shardOutFly = Math.min(1, Math.max(0, (g - 0.16) / 0.14)); shardOutFly = shardOutFly * shardOutFly * (3 - 2 * shardOutFly) // v5p: pieces in flight, v5.12's window
         if (g > 0.3) O.shardsVisible = false
         journey.crew.set(O.crew.x + JOURNEY_ORIGIN.x, O.crew.y, O.crew.z)
         journey.crewScale = O.crewScale
@@ -603,10 +607,10 @@ export function JourneyStage(): JSX.Element {
       // v5n: the rest pieces at the rim drew the picture at O.bright while the screen behind them sits at O.screenBright
       // (x0.4 after the break), and sat a hair askew (u_tilt); at g > 0.3 they were hidden in one frame, so the rim
       // dropped to the darker screen with a visible pop. As the pieces leave they now settle onto the screen exactly.
-      u.u_bright.value = mix(O.bright, O.screenBright, shardOut); u.u_gloss.value = O.gloss; u.u_out.value = shardOut
+      u.u_bright.value = O.bright; u.u_brightTo.value = O.screenBright; u.u_gloss.value = O.gloss; u.u_out.value = shardOut; u.u_outFly.value = shardOutFly
       u.u_crackW.value = CRACK_W
       // v5o: blend only while the pieces are leaving (alpha fade); before that the material stays opaque as in v5.12
-      S.shardMat.transparent = shardOut > 0
+      S.shardMat.transparent = shardOut > 0 || shardOutFly > 0
     }
     S.glints.points.visible = O.shatterT > 0 && O.shatterT < 4
     if (S.glints.points.visible) {
