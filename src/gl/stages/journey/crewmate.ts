@@ -24,7 +24,8 @@ export function* crewGeometrySteps(lowPoly = false) {
   const pack = new RoundedBoxGeometry(0.58, 0.68, 0.34, lowPoly ? 2 : 4, 0.12)
   pack.translate(0, 0.9, -0.38)
   yield // PERFGOV
-  const bodyGeo = mergeGeometries([body.toNonIndexed(), pack.toNonIndexed()])!
+  // RoundedBoxGeometry is already non-indexed: toNonIndexed() on it only logged a warning and returned it unchanged
+  const bodyGeo = mergeGeometries([body.toNonIndexed(), pack.index ? pack.toNonIndexed() : pack])!
   bodyGeo.computeBoundingSphere()
   yield // PERFGOV
   // leg pivots at the hip (y = 0.42): geometry hangs below its origin

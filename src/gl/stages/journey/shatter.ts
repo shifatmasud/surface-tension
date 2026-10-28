@@ -215,6 +215,13 @@ export function shatterMaterial(tex: THREE.Texture) {
         // (pieces still at rest in the frame mirror the screen exactly, so they are not shrunk: their crack lines and frost
         // fade instead, and they leave without a visible change; their thin edge walls tuck in behind the face)
         p *= 1.0 - u_out * max(smoothstep(0.0, 0.25, move), step(3.5, aKind));
+        // v5o (Shifat "No fade solo. Fade blur scale transform"): the pieces still at rest leave with a combined exit —
+        // each one shrinks about its own centre (to 0.84) and drifts a touch toward the camera while it fades and
+        // softens (fragment: alpha + blur). Pure function of u_out, so it scrubs both ways.
+        float restK = 1.0 - smoothstep(0.0, 0.25, move);
+        float sx = u_out * restK;
+        p.xy *= 1.0 - 0.16 * sx;
+        p.z += 0.05 * sx * u_k;
         p = R * p; n = R * n;
         vec3 lp = vec3(c, 0.0) + p + off;
         vec4 mv = modelViewMatrix * vec4(lp, 1.0);
@@ -252,9 +259,19 @@ export function shatterMaterial(tex: THREE.Texture) {
           // refraction: a tumbling piece bends its picture; at rest it lines up with the screen exactly
           vec2 bend = N.xy * 0.035 * vMove;
           vec3 img;
-          img.r = texture2D(u_map, vUv - bend * 1.12).r;
-          img.g = texture2D(u_map, vUv - bend).g;
-          img.b = texture2D(u_map, vUv - bend * 0.88).b;
+          if (u_out > 0.0) {
+            // v5o exit blur: a cheap 5-tap soften of the piece's picture that widens as it leaves (only during the
+            // exit window, so the normal cost is unchanged)
+            float br = u_out * 0.014;
+            vec2 uv0 = vUv - bend;
+            img = texture2D(u_map, uv0).rgb * 0.2
+                + (texture2D(u_map, uv0 + vec2( br,  br)).rgb + texture2D(u_map, uv0 + vec2(-br,  br)).rgb
+                 + texture2D(u_map, uv0 + vec2( br, -br)).rgb + texture2D(u_map, uv0 + vec2(-br, -br)).rgb) * 0.2;
+          } else {
+            img.r = texture2D(u_map, vUv - bend * 1.12).r;
+            img.g = texture2D(u_map, vUv - bend).g;
+            img.b = texture2D(u_map, vUv - bend * 0.88).b;
+          }
           img *= u_bright;
           if (vKind > 2.5) img *= 0.32; // seen through the back of the piece
           float sheen = smoothstep(0.55, 1.25, vUv.y * 0.8 + (1.0 - vUv.x) * 0.6);
@@ -283,7 +300,10 @@ export function shatterMaterial(tex: THREE.Texture) {
         float s1 = pow(max(dot(Rr, L1), 0.0), 120.0), s2 = pow(max(dot(Rr, L2), 0.0), 60.0);
         float catchK = vKind > 3.5 ? 1.0 : vMove;
         col += (vec3(1.0) * s1 * 3.0 + vec3(1.0, 0.75, 0.45) * s2 * 2.2) * catchK;
-        gl_FragColor = vec4(col, 1.0);
+        // v5o exit: fade, with the piece's outline feathering in as it goes (a soft, blurred silhouette, not a cut-out)
+        float soft = smoothstep(0.0, 0.02 + 0.5 * u_out, vEdge);
+        float alpha = (1.0 - u_out) * mix(1.0, soft, min(1.0, u_out * 3.0));
+        gl_FragColor = vec4(col, alpha);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }`,

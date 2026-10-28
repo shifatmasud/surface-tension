@@ -93,6 +93,8 @@ function bezelGeometry(w: number, h: number, r: number, sw: number, sh: number) 
 const RIM_PX = +(new URLSearchParams(location.search).get('rimpx') ?? 3) || 0   // R6.96: min rim width, background px (v5.11: 2 → 3; at 2 the top rim still broke into dashes on lowend phone / weak PC)
 // v5m: crack line width in pixels (x fwidth). At 1.05 a near-vertical crack broke into dashes in the low-density
 // background pass (lowend phone / weak PC); 1.6 keeps it one continuous thin line there. Sharp tiers keep 1.05. ?crackw=N overrides.
+// v5o: where in the CTA glide (g) the rest pieces start their exit (v5n: 0.16, over ~1 % of scroll); ?shardg0=N to test
+const SHARD_OUT_G0 = Math.min(0.27, Math.max(0, +(new URLSearchParams(location.search).get('shardg0') ?? 0.08) || 0.08))
 const CRACK_W = +(new URLSearchParams(location.search).get('crackw') ?? ((DENS_ONE || LOW_END_GPU) ? 1.6 : 1.05)) || 1.05
 const CTA_GLIDE = new URLSearchParams(location.search).has('ctaglide')   // R6.92b: off = the CTA rides up as a sheet
 // b9-earthedge-v1: Earth's limb rebuilt in the screen pass at its own pixel (shaders.ts screenMaterial); ?eedge=0 = live
@@ -495,7 +497,7 @@ export function JourneyStage(): JSX.Element {
         O.pitch = mix(O.pitch, 0.05, gc)
         O.roll = mix(O.roll, Math.sin(journey.ctaTime * 0.27) * 0.06 + 0.22 * Math.sin(Math.PI * gc), gc)
         O.float = 1
-        shardOut = Math.min(1, Math.max(0, (g - 0.16) / 0.14)); shardOut = shardOut * shardOut * (3 - 2 * shardOut)
+        shardOut = Math.min(1, Math.max(0, (g - SHARD_OUT_G0) / (0.29 - SHARD_OUT_G0))); shardOut = shardOut * shardOut * (3 - 2 * shardOut) // v5o: a longer exit window
         if (g > 0.3) O.shardsVisible = false
         journey.crew.set(O.crew.x + JOURNEY_ORIGIN.x, O.crew.y, O.crew.z)
         journey.crewScale = O.crewScale
@@ -596,10 +598,15 @@ export function JourneyStage(): JSX.Element {
     }
     if (O.shardsVisible) {
       const u = S.shardMat.uniforms
-      u.u_t.value = O.shatterT; u.u_crackR.value = O.crackR; u.u_ringR.value = O.ringR; u.u_frost.value = O.frost; u.u_tilt.value = O.tilt
+      u.u_t.value = O.shatterT; u.u_crackR.value = O.crackR; u.u_ringR.value = O.ringR; u.u_frost.value = O.frost; u.u_tilt.value = O.tilt * (1 - shardOut)
       u.u_hole.value = O.hole; u.u_k.value = start.k; u.u_impact.value.set(start.x, start.y); u.u_time.value = time
-      u.u_bright.value = O.bright; u.u_gloss.value = O.gloss; u.u_out.value = shardOut
+      // v5n: the rest pieces at the rim drew the picture at O.bright while the screen behind them sits at O.screenBright
+      // (x0.4 after the break), and sat a hair askew (u_tilt); at g > 0.3 they were hidden in one frame, so the rim
+      // dropped to the darker screen with a visible pop. As the pieces leave they now settle onto the screen exactly.
+      u.u_bright.value = mix(O.bright, O.screenBright, shardOut); u.u_gloss.value = O.gloss; u.u_out.value = shardOut
       u.u_crackW.value = CRACK_W
+      // v5o: blend only while the pieces are leaving (alpha fade); before that the material stays opaque as in v5.12
+      S.shardMat.transparent = shardOut > 0
     }
     S.glints.points.visible = O.shatterT > 0 && O.shatterT < 4
     if (S.glints.points.visible) {
