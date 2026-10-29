@@ -1,5 +1,6 @@
 import { Component, lazy, Suspense, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { Analytics } from '@vercel/analytics/react'
 import { Header } from './dom/ui/Header'
 import { Cursor } from './dom/ui/Cursor'
 import { Intro } from './dom/ui/Intro'
@@ -57,6 +58,7 @@ export function App({ lite = false }: { lite?: boolean }) {
       {!lite && <Footer />}
       {!lite && <ProjectOverlay />}
       {!lite && settings.GRID && <div className="grid-debug" aria-hidden>{Array.from({ length: 12 }, (_, i) => <i key={i} />)}</div>}
+      <Analytics />
     </>
   )
 }
