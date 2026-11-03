@@ -20,9 +20,16 @@ function inv(c: string) {
  * toggle is ONE thin stroke. On, a gentle sine drifts; off, it eases to flat (reversible, no jump). Under reduced motion
  * it is static (a still wave when on, flat when off).
  */
+// Shifat Nov 2 9:25 PM ("Same must happen on my portfolio", after "volume line must morph into new on off state instead of
+// slide"): the toggle MORPHS the stroke in place: the sine's height tweens to the new state over MORPH_MS with an ease-in-out
+// (from wherever it is, so a fast double tap reverses smoothly), folding flat into the line / swelling back out of it. The
+// drawing loop now lives for the canvas's life (it used to restart on every toggle, jumping straight to the new state), and
+// the press no longer rolls the sound pill (services/inkButton.ts).
+const MORPH_MS = 280
+const easeInOut = (k: number) => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2)
 function Wave({ on, invert = false }: { on: boolean; invert?: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null)
-  const onRef = useRef(on)
+  const onRef = useRef(on), wake = useRef<() => void>(() => {})
   onRef.current = on
   useEffect(() => {
     const c = ref.current!; const ctx = c.getContext('2d')!
@@ -30,10 +37,13 @@ function Wave({ on, invert = false }: { on: boolean; invert?: boolean }) {
     const dpr = Math.min(devicePixelRatio, 2); c.width = W * dpr; c.height = H * dpr; ctx.scale(dpr, dpr)
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
     let raf = 0, amp = onRef.current ? 1 : 0, phase = 0, n = 0, last = performance.now(), color = getComputedStyle(c).color, toneUntil = 0
+    let from = amp, to = amp, t0 = 0                                   // the morph: amp tweens from -> to from t0
     const draw = (now: number) => {
-      const dt = Math.min(0.05, (now - last) / 1000); last = now
+      const dt = Math.min(0.05, Math.max(0, now - last) / 1000); last = now
       const target = onRef.current ? 1 : 0
-      amp = reduced ? target : amp + (target - amp) * (1 - Math.exp(-6 * dt))
+      if (target !== to) { from = amp; to = target; t0 = now }
+      const k = reduced ? 1 : Math.min(1, Math.max(0, now - t0) / MORPH_MS)
+      amp = from + (to - from) * easeInOut(k)
       if (!reduced) phase += dt * 3.2
       if ((++n & 7) === 0 || now < toneUntil) color = getComputedStyle(c).color
       ctx.clearRect(0, 0, W, H)
@@ -46,7 +56,7 @@ function Wave({ on, invert = false }: { on: boolean; invert?: boolean }) {
       }
       ctx.stroke()
       // settled and still: stop drawing until the state changes
-      if ((reduced || (target === 0 && amp < 0.002)) && now >= toneUntil) { raf = 0; return }
+      if ((reduced || (target === 0 && k >= 1)) && now >= toneUntil) { raf = 0; return }
       raf = requestAnimationFrame(draw)
     }
     raf = requestAnimationFrame(draw)
@@ -58,8 +68,10 @@ function Wave({ on, invert = false }: { on: boolean; invert?: boolean }) {
     let tt = 0
     const mo = new MutationObserver(() => { kick(700); clearTimeout(tt); tt = window.setTimeout(() => kick(120), 620) }) // follows the .5 s colour transition
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-bg', 'data-hdr'] })   // W24: the header's own measured tone too
-    return () => { if (raf) cancelAnimationFrame(raf); clearTimeout(tt); mo.disconnect() }
-  }, [on])
+    wake.current = () => kick(0)                                       // a toggle wakes a settled loop; draw() starts the morph
+    return () => { if (raf) cancelAnimationFrame(raf); clearTimeout(tt); mo.disconnect(); wake.current = () => {} }
+  }, [invert])
+  useEffect(() => { wake.current() }, [on])
   return <canvas ref={ref} className="wave" aria-hidden />
 }
 

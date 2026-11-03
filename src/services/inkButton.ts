@@ -142,6 +142,9 @@ function roll(b: Btn) {
   if (b.roll < b.rollB1 - 0.02) return               // mid-roll: let it land
   b.rollA0 = b.roll; b.rollB1 = Math.floor(b.roll + 0.02) + 1; b.rollT0 = now(); kick()
 }
+/** Shifat Nov 2 9:25 PM (the sound line must morph into its new on/off state instead of sliding): a press toggles the sound
+ *  pill and its wave morphs in place (Header.tsx Wave), so the sound pill does not roll on press; the CTA still does */
+function pressRoll(b: Btn) { if (b.kind !== 'sound') roll(b) }
 function press(b: Btn, p: V2) {
   if (browser.reducedMotion) return
   b.sx.f = b.sy.f = INK.SQ_F; b.sx.z = b.sy.z = INK.SQ_Z; b.sx.t = INK.SQ_X; b.sy.t = INK.SQ_Y
@@ -254,7 +257,7 @@ export function bindInk(el: HTMLElement | null, kind: Kind) {
   const up = (e: PointerEvent) => {
     if (!b.downPt) return
     b.downPt = null; release(b)
-    roll(b)                                            // the label rolls as the button lets go (the ripple owns the press)
+    pressRoll(b)                                       // the label rolls as the button lets go (the ripple owns the press)
     if (e.pointerType !== 'mouse') {
       const p = P(e), at = b.pressT0 + INK.TAP_HOLD
       if (e.type === 'pointercancel' || now() >= at) drain(b, p); else { b.drainAt = at; b.drainPt = p; kick() }
@@ -263,7 +266,7 @@ export function bindInk(el: HTMLElement | null, kind: Kind) {
   const focus = () => { armMaps(); if (el.matches(':focus-visible')) { measure(b); flood(b, { x: b.w / 2, y: b.h / 2 }) } }
   const blur = () => { if (b.on) { measure(b); drain(b, { x: b.w / 2, y: b.h / 2 }) } }
   const kd = (e: KeyboardEvent) => { if (!e.repeat && (e.key === 'Enter' || e.key === ' ')) { measure(b); b.downPt = { x: b.w / 2, y: b.h / 2 }; press(b, b.downPt) } }
-  const ku = (e: KeyboardEvent) => { if ((e.key === 'Enter' || e.key === ' ') && b.downPt) { b.downPt = null; release(b); roll(b) } }
+  const ku = (e: KeyboardEvent) => { if ((e.key === 'Enter' || e.key === ' ') && b.downPt) { b.downPt = null; release(b); pressRoll(b) } }
   el.addEventListener('pointerenter', enter); el.addEventListener('pointerleave', leave)
   el.addEventListener('pointerdown', down); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up)
   el.addEventListener('focus', focus); el.addEventListener('blur', blur); el.addEventListener('keydown', kd); el.addEventListener('keyup', ku)
