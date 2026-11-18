@@ -245,13 +245,40 @@ export function bindInk(el: HTMLElement | null, kind: Kind) {
   }
   btns.push(b); measure(b); kick()
   const P = (e: PointerEvent) => local(b, e.clientX, e.clientY)
+  // touch / pen: follow the finger after pointerdown. A pointercancel (the browser takes the touch to scroll)
+  // reports clientX/Y as 0,0, so the drain uses the last real touch point, or the exact edge point where the finger left
+  let pid = -1, tp: { x: number; y: number } | null = null, finger = false, waitLift = false
+  const inBox = (r: DOMRect, x: number, y: number) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom
+  const exitDrain = (x: number, y: number) => {
+    const r = el.getBoundingClientRect(), q = tp
+    let ex = x, ey = y
+    if (q && inBox(r, q.x, q.y)) {
+      let lo = 0, hi = 1
+      for (let i = 0; i < 14; i++) { const t = (lo + hi) / 2; if (inBox(r, q.x + (x - q.x) * t, q.y + (y - q.y) * t)) lo = t; else hi = t }
+      ex = q.x + (x - q.x) * hi; ey = q.y + (y - q.y) * hi
+    }
+    b.drainAt = 0; b.drainPt = null; waitLift = false
+    drain(b, local(b, ex, ey))
+  }
+  const trackPt = (x: number, y: number) => {
+    if (pid < 0) return
+    if (b.on && !inBox(el.getBoundingClientRect(), x, y)) exitDrain(x, y)
+    tp = { x, y }
+  }
+  const tmove = (e: PointerEvent) => { if (e.pointerId === pid && e.pointerType !== 'mouse') trackPt(e.clientX, e.clientY) }
+  const touchMove = (e: TouchEvent) => { if (finger && e.touches.length) trackPt(e.touches[0].clientX, e.touches[0].clientY) }
+  const touchEnd = (e: TouchEvent) => {
+    if (!finger || e.touches.length) return
+    finger = false
+    if (waitLift) { waitLift = false; pid = -1; if (b.on && tp) drain(b, local(b, tp.x, tp.y)) }
+  }
   const enter = (e: PointerEvent) => { armMaps(); if (e.pointerType === 'mouse') { flood(b, P(e)); roll(b) } }
   const leave = (e: PointerEvent) => { if (e.pointerType === 'mouse') { drain(b, P(e)); release(b) } }
   const down = (e: PointerEvent) => {
     if (e.button !== 0) return
     armMaps()
     const p = P(e); b.pressT0 = now(); b.downPt = p
-    if (e.pointerType !== 'mouse') flood(b, p)        // the finger: the flood starts where it lands
+    if (e.pointerType !== 'mouse') { pid = e.pointerId; tp = { x: e.clientX, y: e.clientY }; finger = e.pointerType === 'touch'; waitLift = false; flood(b, p) }        // the finger: the flood starts where it lands
     press(b, p)
   }
   const up = (e: PointerEvent) => {
@@ -259,8 +286,12 @@ export function bindInk(el: HTMLElement | null, kind: Kind) {
     b.downPt = null; release(b)
     pressRoll(b)                                       // the label rolls as the button lets go (the ripple owns the press)
     if (e.pointerType !== 'mouse') {
-      const p = P(e), at = b.pressT0 + INK.TAP_HOLD
-      if (e.type === 'pointercancel' || now() >= at) drain(b, p); else { b.drainAt = at; b.drainPt = p; kick() }
+      const cancel = e.type === 'pointercancel'
+      if (cancel && finger && 'ontouchstart' in window) { waitLift = true; return }   // keep following the finger; drain where it leaves or lifts
+      pid = -1
+      if (!b.on) return                                // already drained where the finger left the button
+      const p = cancel ? (tp ? local(b, tp.x, tp.y) : { x: b.w / 2, y: b.h / 2 }) : P(e), at = b.pressT0 + INK.TAP_HOLD
+      if (cancel || now() >= at) drain(b, p); else { b.drainAt = at; b.drainPt = p; kick() }
     }
   }
   const focus = () => { armMaps(); if (el.matches(':focus-visible')) { measure(b); flood(b, { x: b.w / 2, y: b.h / 2 }) } }
@@ -269,11 +300,13 @@ export function bindInk(el: HTMLElement | null, kind: Kind) {
   const ku = (e: KeyboardEvent) => { if ((e.key === 'Enter' || e.key === ' ') && b.downPt) { b.downPt = null; release(b); pressRoll(b) } }
   el.addEventListener('pointerenter', enter); el.addEventListener('pointerleave', leave)
   el.addEventListener('pointerdown', down); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up)
+  window.addEventListener('pointermove', tmove, { passive: true }); window.addEventListener('touchmove', touchMove, { passive: true }); window.addEventListener('touchend', touchEnd, { passive: true }); window.addEventListener('touchcancel', touchEnd, { passive: true })
   el.addEventListener('focus', focus); el.addEventListener('blur', blur); el.addEventListener('keydown', kd); el.addEventListener('keyup', ku)
   if (!magnetOn && !browser.reducedMotion && matchMedia('(hover: hover) and (pointer: fine)').matches) { magnetOn = true; window.addEventListener('pointermove', onMove, { passive: true }) }
   return () => {
     el.removeEventListener('pointerenter', enter); el.removeEventListener('pointerleave', leave)
     el.removeEventListener('pointerdown', down); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up)
+    window.removeEventListener('pointermove', tmove); window.removeEventListener('touchmove', touchMove); window.removeEventListener('touchend', touchEnd); window.removeEventListener('touchcancel', touchEnd)
     el.removeEventListener('focus', focus); el.removeEventListener('blur', blur); el.removeEventListener('keydown', kd); el.removeEventListener('keyup', ku)
     const i = btns.indexOf(b); if (i >= 0) btns.splice(i, 1); f.remove()
   }
